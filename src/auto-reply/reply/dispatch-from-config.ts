@@ -68,6 +68,7 @@ import type {
   DispatchFromConfigResult,
 } from "./dispatch-from-config.types.js";
 import { claimInboundDedupe, commitInboundDedupe, releaseInboundDedupe } from "./inbound-dedupe.js";
+import { isPowernapDraining } from "./powernap-drain.js";
 import { resolveReplyRoutingDecision } from "./routing-policy.js";
 import { resolveRunTypingPolicy } from "./typing-policy.js";
 
@@ -272,7 +273,13 @@ export async function dispatchReplyFromConfig(
     return { queuedFinal: false, counts: dispatcher.getQueuedCounts() };
   }
 
-  const sessionStoreEntry = resolveSessionStoreLookup(ctx, cfg);
+  if (isPowernapDraining()) {
+    logVerbose("Skipping inbound message: powernap in progress");
+    recordProcessed("skipped", { reason: "powernap_drain" });
+    return { queuedFinal: false, counts: dispatcher.getQueuedCounts() };
+  }
+
+  const sessionStoreEntry = resolveSessionStoreEntry(ctx, cfg);
   const acpDispatchSessionKey = sessionStoreEntry.sessionKey ?? sessionKey;
   const sessionAgentId = resolveSessionAgentId({ sessionKey: acpDispatchSessionKey, config: cfg });
   const sessionAgentCfg = resolveAgentConfig(cfg, sessionAgentId);
