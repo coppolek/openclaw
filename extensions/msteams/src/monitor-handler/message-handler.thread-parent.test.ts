@@ -246,11 +246,12 @@ describe("msteams thread parent context injection", () => {
         id: "thread-reply-1",
         from: { user: { displayName: "Bob", id: "bob-id" } },
         body: { content: "The p95 is spiking again.", contentType: "text" },
-      },
+      } as never,
     ]);
     runtimeApiMockState.dispatchReplyFromConfigWithSettledDispatcher.mockResolvedValueOnce({
       queuedFinal: false,
       counts: {},
+      capturedCtxPayload: undefined,
     });
     const { deps } = createMessageHandlerDeps(cfg);
     const handler = createMSTeamsMessageHandler(deps);
@@ -303,6 +304,7 @@ describe("msteams thread parent context injection", () => {
     runtimeApiMockState.dispatchReplyFromConfigWithSettledDispatcher.mockResolvedValueOnce({
       queuedFinal: false,
       counts: {},
+      capturedCtxPayload: undefined,
     });
     const { deps } = createMessageHandlerDeps(cfg);
     const handler = createMSTeamsMessageHandler(deps);
