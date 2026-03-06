@@ -9,7 +9,8 @@ export type OutboundReplyPayload = {
   text?: string;
   mediaUrls?: string[];
   mediaUrl?: string;
-  replyToId?: string;
+  // null explicitly suppresses inherited reply metadata (distinct from undefined = "not set")
+  replyToId?: string | null;
 };
 
 export type SendableOutboundReplyParts = {
@@ -40,7 +41,12 @@ export function normalizeOutboundReplyPayload(
       )
     : undefined;
   const mediaUrl = readStringValue(payload.mediaUrl);
-  const replyToId = readStringValue(payload.replyToId);
+  const replyToId =
+    typeof payload.replyToId === "string"
+      ? payload.replyToId
+      : payload.replyToId === null
+        ? null
+        : undefined;
   return {
     text,
     mediaUrls,
