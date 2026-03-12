@@ -100,6 +100,7 @@ export async function deliverWebReply(params: {
   }
 
   const remainingText = [...textChunks];
+  const deferredAudioText: string[] = [];
 
   // Media (with optional caption on first item)
   const leadingCaption = remainingText.shift() || "";
@@ -129,7 +130,7 @@ export async function deliverWebReply(params: {
         );
       } else if (media.kind === "audio") {
         if (caption) {
-          remainingText.unshift(caption);
+          deferredAudioText.push(caption);
         }
         await sendWithRetry(
           () =>
@@ -205,7 +206,7 @@ export async function deliverWebReply(params: {
   });
 
   // Remaining text chunks after media
-  for (const chunk of remainingText) {
+  for (const chunk of [...deferredAudioText, ...remainingText]) {
     await msg.reply(chunk);
   }
 }
