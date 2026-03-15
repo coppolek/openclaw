@@ -679,7 +679,9 @@ describe("Feishu inbound debounce regressions", () => {
           },
           flushKey: async () => false,
           flushAll: async () => 0,
+          unregister: () => {},
         }),
+      }),
       }),
     );
     const onMessage = await setupDebounceMonitor();
