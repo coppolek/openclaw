@@ -311,6 +311,9 @@ export function createFollowupRunner(params: {
         }) ?? DEFAULT_CONTEXT_TOKENS;
 
       if (storePath && sessionKey) {
+        // Model is from fallback if the successfully-used provider/model differs from the primary.
+        const isFromFallback =
+          fallbackProvider !== queued.run.provider || fallbackModel !== queued.run.model;
         await persistRunSessionUsage({
           storePath,
           sessionKey,
@@ -320,6 +323,7 @@ export function createFollowupRunner(params: {
           promptTokens,
           modelUsed,
           providerUsed,
+          isFromFallback,
           contextTokensUsed,
           systemPromptReport: runResult.meta?.systemPromptReport,
           cliSessionBinding: runResult.meta?.agentMeta?.cliSessionBinding,
