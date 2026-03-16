@@ -91,6 +91,11 @@ export function buildWhatsAppInboundContext(params: {
   route: ReturnType<typeof resolveAgentRoute>;
   sender: SenderContext;
   visibleReplyTo?: VisibleReplyTarget;
+  // shoar local: mention enrichment so the model knows exactly who was @mentioned in groups
+  mentionedJids?: string[];
+  selfJid?: string;
+  selfE164?: string;
+  mentionedContacts?: string;
 }) {
   const inboundHistory =
     params.msg.chatType === "group"
@@ -132,6 +137,11 @@ export function buildWhatsAppInboundContext(params: {
     SenderE164: params.sender.e164,
     CommandAuthorized: params.commandAuthorized,
     WasMentioned: params.msg.wasMentioned,
+    // shoar local: mention enrichment passthrough
+    MentionedJids: params.mentionedJids,
+    SelfJid: params.selfJid,
+    SelfE164: params.selfE164,
+    MentionedContacts: params.mentionedContacts,
     ...(params.msg.location ? toLocationContext(params.msg.location) : {}),
     Provider: "whatsapp",
     Surface: "whatsapp",
