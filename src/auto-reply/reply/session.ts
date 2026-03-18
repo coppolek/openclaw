@@ -408,7 +408,12 @@ export async function initSessionState(params: {
   const entryFreshness = entry
     ? isSystemEvent
       ? ({ fresh: true } satisfies SessionFreshness)
-      : evaluateSessionFreshness({ updatedAt: entry.updatedAt, now, policy: resetPolicy })
+      : evaluateSessionFreshness({
+          updatedAt: entry.updatedAt,
+          now,
+          policy: resetPolicy,
+          cfg,
+        })
     : undefined;
   const freshEntry = entryFreshness?.fresh ?? false;
   // Capture the current session entry before any reset so its transcript can be
