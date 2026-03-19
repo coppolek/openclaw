@@ -2191,7 +2191,7 @@ private extension NodeAppModel {
                         liveActivity.handleConnecting()
                     } else {
                         liveActivity.startActivity(
-                            agentName: self.selectedAgentId ?? "main",
+                            agentName: self.activeAgentName,
                             sessionKey: self.mainSessionKey)
                     }
                 }
