@@ -6,7 +6,7 @@ import { DEFAULT_PI_COMPACTION_RESERVE_TOKENS_FLOOR } from "../../agents/pi-sett
 import { parseNonNegativeByteSize } from "../../config/byte-size.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { resolveFreshSessionTotalTokens, type SessionEntry } from "../../config/sessions.js";
-import { formatHumanDayKey } from "../../infra/format-time/human-day.js";
+import { formatHumanDayKey, resolveHumanResetCycleKey } from "../../infra/format-time/human-day.js";
 import { SILENT_REPLY_TOKEN } from "../tokens.js";
 
 export const DEFAULT_MEMORY_FLUSH_SOFT_TOKENS = 4000;
@@ -45,9 +45,14 @@ export const DEFAULT_MEMORY_FLUSH_SYSTEM_PROMPT = [
 export function resolveMemoryFlushRelativePathForRun(params: {
   cfg?: OpenClawConfig;
   nowMs?: number;
+  resetAtHour?: number;
 }): string {
   const nowMs = Number.isFinite(params.nowMs) ? (params.nowMs as number) : Date.now();
-  const dateStamp = formatHumanDayKey(nowMs, params.cfg);
+  const dateStamp = resolveMemoryFlushDayKeyForRun({
+    cfg: params.cfg,
+    nowMs,
+    resetAtHour: params.resetAtHour,
+  });
   return `memory/${dateStamp}.md`;
 }
 
@@ -55,12 +60,14 @@ export function resolveMemoryFlushPromptForRun(params: {
   prompt: string;
   cfg?: OpenClawConfig;
   nowMs?: number;
+  resetAtHour?: number;
 }): string {
   const nowMs = Number.isFinite(params.nowMs) ? (params.nowMs as number) : Date.now();
   const { timeLine } = resolveCronStyleNow(params.cfg ?? {}, nowMs);
   const dateStamp = resolveMemoryFlushRelativePathForRun({
     cfg: params.cfg,
     nowMs,
+    resetAtHour: params.resetAtHour,
   })
     .replace(/^memory\//, "")
     .replace(/\.md$/, "");
@@ -72,6 +79,17 @@ export function resolveMemoryFlushPromptForRun(params: {
     return withDate;
   }
   return `${withDate}\n${timeLine}`;
+}
+
+function resolveMemoryFlushDayKeyForRun(params: {
+  cfg?: OpenClawConfig;
+  nowMs: number;
+  resetAtHour?: number;
+}): string {
+  if (typeof params.resetAtHour === "number" && Number.isFinite(params.resetAtHour)) {
+    return resolveHumanResetCycleKey(params.nowMs, Math.floor(params.resetAtHour), params.cfg);
+  }
+  return formatHumanDayKey(params.nowMs, params.cfg);
 }
 
 export type MemoryFlushSettings = {
