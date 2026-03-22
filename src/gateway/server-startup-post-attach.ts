@@ -242,7 +242,11 @@ export async function startGatewaySidecars(params: {
         import("../auto-reply/reply/inbound-text.js"),
       ]);
       const stateDir = resolveStateDir(process.env);
-      const pending = await pendingStore.readPendingInbound(stateDir);
+      const rawPending = await pendingStore.readPendingInbound(stateDir);
+      // Sort by capturedAt ascending so replay order is deterministic regardless
+      // of JSON key insertion order. Older messages are replayed before newer ones,
+      // and per-session overflow truncation correctly discards the oldest entries.
+      const pending = rawPending.slice().toSorted((a, b) => a.capturedAt - b.capturedAt);
       if (pending.length === 0) {
         return;
       }
@@ -257,6 +261,8 @@ export async function startGatewaySidecars(params: {
       const REPLAY_CAP_PER_SESSION = MAX_EVENTS;
 
       // Phase 1: resolve sessionKey and eventText for every entry, collecting by session.
+      // Entries are already sorted by capturedAt (ascending) so per-session lists
+      // are in chronological order -- the replay cap slice correctly takes the most recent.
       type ResolvedEntry = {
         entry: (typeof pending)[number];
         sessionKey: string;
@@ -467,13 +473,10 @@ export async function startGatewaySidecars(params: {
           // multiple concurrent stale turns share the same sessionKey (e.g. multi-
           // threaded Discord session). enqueueSystemEvent deduplicates on lastText,
           // so a fixed string would silently drop all but the first recovery notice.
-          enqueueSystemEvent(
-            `[active-turn-recovery:${turn.sessionId}] ${recoveryMessage}`,
-            {
-              sessionKey: turn.sessionKey,
-              contextKey: `active-turn-recovery:${turn.sessionId}`,
-            },
-          );
+          enqueueSystemEvent(`[active-turn-recovery:${turn.sessionId}] ${recoveryMessage}`, {
+            sessionKey: turn.sessionKey,
+            contextKey: `active-turn-recovery:${turn.sessionId}`,
+          });
           params.log.warn(
             `active-turn recovery: notified session ${turn.sessionKey} (sessionId=${turn.sessionId}, channel=${turn.channel})`,
           );
