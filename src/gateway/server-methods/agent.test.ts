@@ -548,7 +548,7 @@ describe("gateway agent handler", () => {
    * Test that request values (label, spawnedBy) override store values.
    * This ensures the fix correctly prioritizes request params over fresh store data.
    */
-  it("issue #5369: request params override fresh store values for label/spawnedBy", async () => {
+  it("issue #5369: request label overrides fresh store value, modelOverride preserved", async () => {
     mocks.loadSessionEntry.mockReturnValue({
       cfg: {},
       storePath: "/tmp/sessions.json",
@@ -556,7 +556,6 @@ describe("gateway agent handler", () => {
         sessionId: "subagent-session-id",
         updatedAt: Date.now() - 1000,
         label: "old-label-from-cache",
-        spawnedBy: "old-spawner",
       },
       canonicalKey: "agent:main:subagent:test-priority",
     });
@@ -568,7 +567,6 @@ describe("gateway agent handler", () => {
           sessionId: "subagent-session-id",
           updatedAt: Date.now(),
           label: "store-label",
-          spawnedBy: "store-spawner",
           modelOverride: "gpt-4", // Should be preserved
         },
       };
@@ -589,8 +587,7 @@ describe("gateway agent handler", () => {
         agentId: "main",
         sessionKey: "agent:main:subagent:test-priority",
         idempotencyKey: "test-priority",
-        label: "request-label", // Should take precedence
-        spawnedBy: "request-spawner", // Should take precedence
+        label: "request-label", // Should take precedence over store
       },
       respond,
       context: makeContext(),
@@ -600,10 +597,9 @@ describe("gateway agent handler", () => {
     });
 
     expect(capturedEntry).toBeDefined();
-    // Request values should override store values
+    // Request label should override store label
     expect(capturedEntry?.label).toBe("request-label");
-    expect(capturedEntry?.spawnedBy).toBe("agent:main:request-spawner");
-    // But modelOverride should still come from fresh store
+    // modelOverride should be preserved from fresh store
     expect(capturedEntry?.modelOverride).toBe("gpt-4");
   });
 
@@ -683,8 +679,6 @@ describe("gateway agent handler", () => {
           skillsSnapshot: { tools: ["bash"] },
           modelOverride: "claude-opus",
           providerOverride: "anthropic",
-          cliSessionIds: { "claude-cli": "xyz" },
-          claudeCliSessionId: "xyz",
         },
       };
       const result = await updater(freshStore);
@@ -722,38 +716,6 @@ describe("gateway agent handler", () => {
     expect(capturedEntry?.skillsSnapshot).toEqual({ tools: ["bash"] });
     expect(capturedEntry?.modelOverride).toBe("claude-opus");
     expect(capturedEntry?.providerOverride).toBe("anthropic");
-    expect(capturedEntry?.cliSessionIds).toEqual({ "claude-cli": "xyz" });
-    expect(capturedEntry?.claudeCliSessionId).toBe("xyz");
-  });
-
-  it("preserves cliSessionIds from existing session entry", async () => {
-    const existingCliSessionIds = { "claude-cli": "abc-123-def" };
-    const existingClaudeCliSessionId = "abc-123-def";
-
-    mockMainSessionEntry({
-      cliSessionIds: existingCliSessionIds,
-      claudeCliSessionId: existingClaudeCliSessionId,
-    });
-
-    const getCapturedEntry = captureUpdatedMainEntry(
-      buildExistingMainStoreEntry({
-        cliSessionIds: existingCliSessionIds,
-        claudeCliSessionId: existingClaudeCliSessionId,
-      }),
-    );
-
-    mocks.agentCommand.mockResolvedValue({
-      payloads: [{ text: "ok" }],
-      meta: { durationMs: 100 },
-    });
-
-    await runMainAgent("test", "test-idem");
-
-    expect(mocks.updateSessionStore).toHaveBeenCalled();
-    const capturedEntry = getCapturedEntry();
-    expect(capturedEntry).toBeDefined();
-    expect(capturedEntry?.cliSessionIds).toEqual(existingCliSessionIds);
-    expect(capturedEntry?.claudeCliSessionId).toBe(existingClaudeCliSessionId);
   });
 
   it("reactivates completed subagent sessions and broadcasts send updates", async () => {

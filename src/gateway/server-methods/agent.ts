@@ -714,8 +714,6 @@ export const agentHandlers: GatewayRequestHandlers = {
             groupId: resolvedGroupId ?? freshEntry?.groupId,
             groupChannel: resolvedGroupChannel ?? freshEntry?.groupChannel,
             space: resolvedGroupSpace ?? freshEntry?.space,
-            cliSessionIds: freshEntry?.cliSessionIds,
-            claudeCliSessionId: freshEntry?.claudeCliSessionId,
           };
           // Use mergeSessionEntry to preserve extra fields (e.g. acp metadata)
           const merged = mergeSessionEntry(freshEntry, nextEntry);
@@ -782,8 +780,6 @@ export const agentHandlers: GatewayRequestHandlers = {
           groupId: resolvedGroupId ?? entry?.groupId,
           groupChannel: resolvedGroupChannel ?? entry?.groupChannel,
           space: resolvedGroupSpace ?? entry?.space,
-          cliSessionIds: entry?.cliSessionIds,
-          claudeCliSessionId: entry?.claudeCliSessionId,
         });
       }
       resolvedSessionId = sessionEntry.sessionId;
