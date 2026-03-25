@@ -142,7 +142,7 @@ export function resolveChannelResetConfig(params: {
 }
 
 export function evaluateSessionFreshness(params: {
-  updatedAt: number;
+  updatedAt?: number | null;
   now: number;
   policy: SessionResetPolicy;
   cfg?: OpenClawConfig;
@@ -151,13 +151,23 @@ export function evaluateSessionFreshness(params: {
     params.policy.mode === "daily"
       ? resolveDailyResetAtMs(params.now, params.policy.atHour, params.cfg)
       : undefined;
+  const updatedAt = resolveSessionActivityTimestamp(params.updatedAt);
+  if (updatedAt === undefined) {
+    // Session stores are persisted JSON and may contain legacy/manual entries
+    // without a usable activity timestamp. Treat those as stale instead of
+    // feeding invalid dates into the human-day helpers.
+    return {
+      fresh: false,
+      dailyResetAt,
+    };
+  }
   const idleExpiresAt =
     params.policy.idleMinutes != null && params.policy.idleMinutes > 0
-      ? params.updatedAt + params.policy.idleMinutes * 60_000
+      ? updatedAt + params.policy.idleMinutes * 60_000
       : undefined;
   const staleDaily =
     params.policy.mode === "daily"
-      ? resolveHumanResetCycleKey(params.updatedAt, params.policy.atHour, params.cfg) <
+      ? resolveHumanResetCycleKey(updatedAt, params.policy.atHour, params.cfg) <
         resolveHumanResetCycleKey(params.now, params.policy.atHour, params.cfg)
       : false;
   const staleIdle = idleExpiresAt != null && params.now > idleExpiresAt;
@@ -166,6 +176,13 @@ export function evaluateSessionFreshness(params: {
     dailyResetAt,
     idleExpiresAt,
   };
+}
+
+function resolveSessionActivityTimestamp(updatedAt?: number | null): number | undefined {
+  if (typeof updatedAt !== "number" || !Number.isFinite(updatedAt)) {
+    return undefined;
+  }
+  return updatedAt;
 }
 
 function normalizeResetAtHour(value: number | undefined): number {
