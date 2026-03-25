@@ -1,5 +1,7 @@
 import { streamSimple } from "@mariozechner/pi-ai";
-import { describe, expect, it, vi } from "vitest";
+import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { PromptOptions } from "@mariozechner/pi-coding-agent";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../../config/config.js";
 import { appendBootstrapPromptWarning } from "../../bootstrap-budget.js";
 import { SYSTEM_PROMPT_CACHE_BOUNDARY } from "../../system-prompt-cache-boundary.js";
@@ -8,6 +10,8 @@ import {
   buildAfterTurnRuntimeContext,
   composeSystemPromptWithHookContext,
   decodeHtmlEntitiesInObject,
+  runPromptWithRateLimitRetry,
+  persistSessionsYieldContextMessage,
   prependSystemPromptAddition,
   resetEmbeddedAgentBaseStreamFnCacheForTest,
   resolveEmbeddedAgentBaseStreamFn,
@@ -20,12 +24,29 @@ import {
   wrapStreamFnSanitizeMalformedToolCalls,
   wrapStreamFnTrimToolCallNames,
 } from "./attempt.js";
+import {
+  buildSessionsYieldContextMessage,
+  queueSessionsYieldInterruptMessage,
+  stripSessionsYieldArtifacts,
+} from "./attempt.sessions-yield.js";
 
 type FakeWrappedStream = {
   result: () => Promise<unknown>;
   [Symbol.asyncIterator]: () => AsyncIterator<unknown>;
 };
 
+const baseAssistantUsage = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+};
+
+beforeEach(() => {
+  vi.useRealTimers();
+});
 function createFakeStream(params: {
   events: unknown[];
   resultMessage: unknown;
@@ -125,6 +146,189 @@ describe("resolvePromptBuildHookResult", () => {
     expect(result.prependContext).toBe("prompt context\n\nlegacy context");
     expect(result.prependSystemContext).toBe("prompt prepend\n\nlegacy prepend");
     expect(result.appendSystemContext).toBe("prompt append\n\nlegacy append");
+  });
+});
+
+describe("sessions_yield helpers", () => {
+  it("builds a hidden follow-up context note", () => {
+    expect(buildSessionsYieldContextMessage("Waiting for subagent")).toContain(
+      "Waiting for subagent",
+    );
+    expect(buildSessionsYieldContextMessage("Waiting for subagent")).toContain(
+      "ended intentionally via sessions_yield",
+    );
+  });
+
+  it("queues a hidden interrupt steering message", () => {
+    const steer = vi.fn();
+    queueSessionsYieldInterruptMessage({ agent: { steer } });
+    expect(steer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: "custom",
+        customType: "openclaw.sessions_yield_interrupt",
+        display: false,
+        details: { source: "sessions_yield" },
+      }),
+    );
+  });
+
+  it("persists a hidden yield context message without triggering a turn", async () => {
+    const sendCustomMessage = vi.fn(async () => {});
+    await persistSessionsYieldContextMessage(
+      {
+        sendCustomMessage,
+      },
+      "Waiting for subagent",
+    );
+    expect(sendCustomMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customType: "openclaw.sessions_yield",
+        display: false,
+        details: { source: "sessions_yield", message: "Waiting for subagent" },
+        content: expect.stringContaining("Waiting for subagent"),
+      }),
+      { triggerTurn: false },
+    );
+  });
+
+  it("strips trailing yield interrupt artifacts from memory and transcript state", () => {
+    const replaceMessages = vi.fn();
+    const rewriteFile = vi.fn();
+    const activeSession = {
+      messages: [
+        { role: "user", content: [{ type: "text", text: "hi" }] },
+        { role: "custom", customType: "openclaw.sessions_yield_interrupt" },
+        { role: "assistant", stopReason: "aborted" },
+      ],
+      agent: { replaceMessages },
+      sessionManager: {
+        fileEntries: [
+          { type: "session", id: "session-root" },
+          {
+            type: "custom_message",
+            id: "interrupt",
+            parentId: "session-root",
+            customType: "openclaw.sessions_yield_interrupt",
+          },
+          {
+            type: "message",
+            id: "aborted",
+            parentId: "interrupt",
+            message: { role: "assistant", stopReason: "aborted" },
+          },
+        ],
+        byId: new Map([
+          ["interrupt", { id: "interrupt" }],
+          ["aborted", { id: "aborted" }],
+        ]),
+        leafId: "aborted",
+        _rewriteFile: rewriteFile,
+      },
+    };
+
+    stripSessionsYieldArtifacts(activeSession as never);
+
+    expect(replaceMessages).toHaveBeenCalledWith([
+      { role: "user", content: [{ type: "text", text: "hi" }] },
+    ]);
+    expect(activeSession.sessionManager.fileEntries).toEqual([
+      { type: "session", id: "session-root" },
+    ]);
+    expect(activeSession.sessionManager.byId.has("interrupt")).toBe(false);
+    expect(activeSession.sessionManager.byId.has("aborted")).toBe(false);
+    expect(activeSession.sessionManager.leafId).toBe("session-root");
+    expect(rewriteFile).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("runPromptWithRateLimitRetry", () => {
+  function createRetryTestSession() {
+    const initialMessages: AgentMessage[] = [
+      {
+        role: "user",
+        content: [{ type: "text", text: "hello" }],
+        timestamp: Date.now(),
+      },
+    ];
+    const session = {
+      messages: initialMessages,
+      prompt: vi.fn<(prompt: string, options?: PromptOptions) => Promise<void>>(),
+      agent: {
+        replaceMessages: vi.fn((messages: AgentMessage[]) => {
+          session.messages = messages.slice();
+        }),
+      },
+    };
+    return session;
+  }
+
+  function createRateLimitAssistant() {
+    return {
+      role: "assistant" as const,
+      content: [],
+      api: "openai-responses",
+      provider: "openai",
+      model: "mock-1",
+      usage: baseAssistantUsage,
+      stopReason: "error" as const,
+      errorMessage: "Too many requests",
+      timestamp: Date.now(),
+    };
+  }
+
+  it("rethrows exhausted thrown rate limits so callers stay on the promptError path", async () => {
+    const session = createRetryTestSession();
+    const error = Object.assign(new Error("Too Many Requests"), { status: 429 });
+    session.prompt.mockRejectedValue(error);
+
+    await expect(
+      runPromptWithRateLimitRetry({
+        activeSession: session,
+        effectivePrompt: "hello",
+        images: [],
+        abortable: async <T>(promise: Promise<T>) => await promise,
+        assistantTexts: [],
+        toolMetas: [],
+        didSendViaMessagingTool: () => false,
+        getSuccessfulCronAdds: () => 0,
+        provider: "openai",
+        modelId: "mock-1",
+      }),
+    ).rejects.toBe(error);
+
+    expect(session.prompt).toHaveBeenCalledTimes(4);
+    expect(session.agent.replaceMessages).not.toHaveBeenCalled();
+  });
+
+  it("rewinds intermediate terminal rate-limit assistants and returns the final assistant failure", async () => {
+    const session = createRetryTestSession();
+    session.prompt.mockImplementation(async () => {
+      session.messages.push(createRateLimitAssistant());
+    });
+
+    await expect(
+      runPromptWithRateLimitRetry({
+        activeSession: session,
+        effectivePrompt: "hello",
+        images: [],
+        abortable: async <T>(promise: Promise<T>) => await promise,
+        assistantTexts: [],
+        toolMetas: [],
+        didSendViaMessagingTool: () => false,
+        getSuccessfulCronAdds: () => 0,
+        provider: "openai",
+        modelId: "mock-1",
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(session.prompt).toHaveBeenCalledTimes(4);
+    expect(session.agent.replaceMessages).toHaveBeenCalledTimes(3);
+    expect(session.messages).toHaveLength(2);
+    expect(session.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      stopReason: "error",
+      errorMessage: "Too many requests",
+    });
   });
 });
 
