@@ -96,6 +96,8 @@ export function buildWhatsAppInboundContext(params: {
   selfJid?: string;
   selfE164?: string;
   mentionedContacts?: string;
+  // shoar local: per-group system prompt (used by the dump group protocol)
+  groupSystemPrompt?: string;
 }) {
   const inboundHistory =
     params.msg.chatType === "group"
@@ -142,6 +144,8 @@ export function buildWhatsAppInboundContext(params: {
     SelfJid: params.selfJid,
     SelfE164: params.selfE164,
     MentionedContacts: params.mentionedContacts,
+    // shoar local: group system prompt passthrough
+    GroupSystemPrompt: params.groupSystemPrompt,
     ...(params.msg.location ? toLocationContext(params.msg.location) : {}),
     Provider: "whatsapp",
     Surface: "whatsapp",

@@ -126,6 +126,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     pendingToolAudioAsVoice: false,
     deterministicApprovalPromptPending: false,
     deterministicApprovalPromptSent: false,
+    currentTurnHasToolCall: false,
   };
   const usageTotals = {
     input: 0,
@@ -207,6 +208,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     state.lastReasoningSent = undefined;
     state.reasoningStreamOpen = false;
     state.suppressBlockChunks = false;
+    state.currentTurnHasToolCall = false;
     state.assistantMessageIndex += 1;
     state.lastAssistantStreamItemId = undefined;
     state.lastAssistantTextMessageIndex = -1;
