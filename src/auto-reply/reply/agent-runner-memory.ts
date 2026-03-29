@@ -23,7 +23,6 @@ import {
   type SessionEntry,
   updateSessionStoreEntry,
 } from "../../config/sessions.js";
-import { readSessionMessages } from "../../gateway/session-utils.fs.js";
 import { resolveGroupSessionKey } from "../../config/sessions/group.js";
 import {
   resolveChannelResetConfig,
@@ -31,6 +30,7 @@ import {
   resolveSessionResetType,
   resolveThreadFlag,
 } from "../../config/sessions/reset.js";
+import { readSessionMessages } from "../../gateway/session-utils.fs.js";
 import { logVerbose } from "../../globals.js";
 import { registerAgentRunContext } from "../../infra/agent-events.js";
 import { resolveMemoryFlushPlan } from "../../plugins/memory-state.js";
@@ -764,11 +764,19 @@ export async function runMemoryFlushIfNeeded(params: {
       cfg: params.cfg,
       nowMs: memoryFlushNowMs,
     }) ?? memoryFlushPlan;
-  const memoryFlushWritePath = resolveMemoryFlushRelativePathForRun({
+  const defaultMemoryFlushWritePath = resolveMemoryFlushRelativePathForRun({
+    cfg: params.cfg,
+    nowMs: memoryFlushNowMs,
+  });
+  const resetCycleMemoryFlushWritePath = resolveMemoryFlushRelativePathForRun({
     cfg: params.cfg,
     nowMs: memoryFlushNowMs,
     resetAtHour: memoryFlushResetAtHour,
   });
+  const memoryFlushWritePath =
+    activeMemoryFlushPlan.relativePath === defaultMemoryFlushWritePath
+      ? resetCycleMemoryFlushWritePath
+      : activeMemoryFlushPlan.relativePath;
   const effectiveMemoryFlushPrompt = replaceMemoryFlushPlanPath(
     activeMemoryFlushPlan.prompt,
     activeMemoryFlushPlan.relativePath,
