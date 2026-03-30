@@ -411,6 +411,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     toolName: string | undefined,
     message: string,
     audioAsVoice?: boolean,
+    result?: unknown,
   ) => {
     if (!params.onToolResult) {
       return;
@@ -450,8 +451,8 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     toolName?: string,
     meta?: string,
     output?: string,
-    result?: unknown,
     audioAsVoice?: boolean,
+    result?: unknown,
   ) => {
     if (!output) {
       return;
@@ -460,7 +461,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
       markdown: useMarkdown,
     });
     const message = `${agg}\n${formatToolOutputBlock(output)}`;
-    emitToolResultMessage(toolName, message, result, audioAsVoice);
+    emitToolResultMessage(toolName, message, audioAsVoice, result);
   };
 
   const stripBlockTags = (
