@@ -1,3 +1,4 @@
+import type { StreamFn } from "@mariozechner/pi-agent-core";
 import type { AgentHarness } from "../agents/harness/types.js";
 import type { ChannelPlugin } from "../channels/plugins/types.plugin.js";
 import type { OperatorScope } from "../gateway/operator-scopes.js";
@@ -294,6 +295,8 @@ export type PluginRegistry = {
   commands: PluginCommandRegistration[];
   conversationBindingResolvedHandlers: PluginConversationBindingResolvedHandlerRegistration[];
   diagnostics: PluginDiagnostic[];
+  /** Plugin-registered streamFn wrappers applied after provider wrappers. */
+  streamFnWrappers: Array<(streamFn: StreamFn) => StreamFn>;
 };
 
 export type PluginRegistryParams = {
