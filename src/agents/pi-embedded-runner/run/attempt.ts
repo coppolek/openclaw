@@ -282,11 +282,14 @@ export async function runPromptWithRateLimitRetry(params: {
   toolMetas: Array<unknown>;
   didSendViaMessagingTool: () => boolean;
   getSuccessfulCronAdds: () => number;
+  didEmitReasoning: () => boolean;
+  getCompactionCount: () => number;
   abortSignal?: AbortSignal;
   provider: string;
   modelId: string;
 }) {
-  const preRetryMessages = params.activeSession.messages.slice();
+  let preRetryMessages = params.activeSession.messages.slice();
+  let compactionBaseline = params.getCompactionCount();
   await retryPromptOnRateLimit({
     prompt: () =>
       params.images.length > 0
@@ -296,7 +299,13 @@ export async function runPromptWithRateLimitRetry(params: {
         : params.abortable(params.activeSession.prompt(params.effectivePrompt)),
     classifyTerminalFailure: () => {
       const messages = params.activeSession.messages;
-      if (messages.length <= preRetryMessages.length) {
+      // After compaction, messages may be shorter than the pre-retry snapshot
+      // even with new messages appended.  Skip the length guard when
+      // compaction occurred during this prompt.
+      if (
+        params.getCompactionCount() <= compactionBaseline &&
+        messages.length <= preRetryMessages.length
+      ) {
         return null;
       }
       const last = messages[messages.length - 1];
@@ -316,8 +325,32 @@ export async function runPromptWithRateLimitRetry(params: {
       params.assistantTexts.length === 0 &&
       params.toolMetas.length === 0 &&
       !params.didSendViaMessagingTool() &&
-      params.getSuccessfulCronAdds() === 0,
+      params.getSuccessfulCronAdds() === 0 &&
+      !params.didEmitReasoning(),
     rewind: () => {
+      const currentCompactions = params.getCompactionCount();
+      if (currentCompactions > compactionBaseline) {
+        // Compaction completed during this prompt — the pre-retry snapshot holds
+        // pre-compaction history and is now stale.  Derive the post-compaction
+        // pre-prompt baseline from the current messages by stripping messages the
+        // prompt added.  isReplaySafe() already confirmed no assistant text, no
+        // tool activity, no outbound messages, and no cron adds, so at most two
+        // messages were appended: the user prompt and a trailing error assistant.
+        const current = params.activeSession.messages;
+        let end = current.length;
+        if (
+          end > 0 &&
+          current[end - 1]?.role === "assistant" &&
+          (current[end - 1] as { stopReason?: string }).stopReason === "error"
+        ) {
+          end--;
+        }
+        if (end > 0 && current[end - 1]?.role === "user") {
+          end--;
+        }
+        preRetryMessages = current.slice(0, end);
+        compactionBaseline = currentCompactions;
+      }
       if (params.activeSession.messages.length !== preRetryMessages.length) {
         params.activeSession.agent.replaceMessages(preRetryMessages);
       }
@@ -1512,6 +1545,7 @@ export async function runEmbeddedAttempt(
         getMessagingToolSentTargets,
         getSuccessfulCronAdds,
         didSendViaMessagingTool,
+        didEmitReasoning,
         getLastToolError,
         getUsageTotals,
         getCompactionCount,
@@ -1951,6 +1985,8 @@ export async function runEmbeddedAttempt(
               toolMetas,
               didSendViaMessagingTool,
               getSuccessfulCronAdds,
+              didEmitReasoning,
+              getCompactionCount,
               abortSignal: runAbortController.signal,
               provider: params.provider,
               modelId: params.modelId,

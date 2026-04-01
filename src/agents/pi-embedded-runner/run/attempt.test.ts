@@ -291,6 +291,8 @@ describe("runPromptWithRateLimitRetry", () => {
         toolMetas: [],
         didSendViaMessagingTool: () => false,
         getSuccessfulCronAdds: () => 0,
+        didEmitReasoning: () => false,
+        getCompactionCount: () => 0,
         provider: "openai",
         modelId: "mock-1",
       }),
@@ -316,6 +318,8 @@ describe("runPromptWithRateLimitRetry", () => {
         toolMetas: [],
         didSendViaMessagingTool: () => false,
         getSuccessfulCronAdds: () => 0,
+        didEmitReasoning: () => false,
+        getCompactionCount: () => 0,
         provider: "openai",
         modelId: "mock-1",
       }),
@@ -329,6 +333,166 @@ describe("runPromptWithRateLimitRetry", () => {
       stopReason: "error",
       errorMessage: "Too many requests",
     });
+  });
+
+  it("does not retry when reasoning has been emitted", async () => {
+    const session = createRetryTestSession();
+    session.prompt.mockImplementation(async () => {
+      session.messages.push(createRateLimitAssistant());
+    });
+
+    await expect(
+      runPromptWithRateLimitRetry({
+        activeSession: session,
+        effectivePrompt: "hello",
+        images: [],
+        abortable: async <T>(promise: Promise<T>) => await promise,
+        assistantTexts: [],
+        toolMetas: [],
+        didSendViaMessagingTool: () => false,
+        getSuccessfulCronAdds: () => 0,
+        didEmitReasoning: () => true,
+        getCompactionCount: () => 0,
+        provider: "openai",
+        modelId: "mock-1",
+      }),
+    ).resolves.toBeUndefined();
+
+    // Should not retry — reasoning was already streamed to the user.
+    expect(session.prompt).toHaveBeenCalledTimes(1);
+    expect(session.agent.replaceMessages).not.toHaveBeenCalled();
+  });
+
+  it("rewinds to post-compaction state when compaction occurs during prompt", async () => {
+    const session = createRetryTestSession();
+    let compactionCount = 0;
+    let promptCalls = 0;
+
+    session.prompt.mockImplementation(async () => {
+      promptCalls++;
+      if (promptCalls === 1) {
+        // Simulate compaction during first prompt: replace messages with compacted set
+        const compacted = [
+          {
+            role: "user" as const,
+            content: [{ type: "text" as const, text: "compacted summary" }],
+            timestamp: Date.now(),
+          },
+        ];
+        session.messages = compacted;
+        compactionCount++;
+        // Then prompt adds user message + error assistant
+        session.messages.push(
+          {
+            role: "user" as const,
+            content: [{ type: "text" as const, text: "hello" }],
+            timestamp: Date.now(),
+          },
+          createRateLimitAssistant(),
+        );
+      }
+      // Second prompt succeeds — just add a normal assistant
+    });
+
+    await runPromptWithRateLimitRetry({
+      activeSession: session,
+      effectivePrompt: "hello",
+      images: [],
+      abortable: async <T>(promise: Promise<T>) => await promise,
+      assistantTexts: [],
+      toolMetas: [],
+      didSendViaMessagingTool: () => false,
+      getSuccessfulCronAdds: () => 0,
+      didEmitReasoning: () => false,
+      getCompactionCount: () => compactionCount,
+      provider: "openai",
+      modelId: "mock-1",
+    });
+
+    expect(session.prompt).toHaveBeenCalledTimes(2);
+    // rewind should have used compacted messages (1 message), not original (1 message)
+    expect(session.agent.replaceMessages).toHaveBeenCalledTimes(1);
+    const rewindedMessages = session.agent.replaceMessages.mock.calls[0][0];
+    expect(rewindedMessages).toHaveLength(1);
+    expect(rewindedMessages[0]).toMatchObject({
+      role: "user",
+      content: [{ type: "text", text: "compacted summary" }],
+    });
+  });
+
+  it("classifyTerminalFailure detects errors after compaction shortens messages", async () => {
+    const session = createRetryTestSession();
+    // Start with a longer message history
+    session.messages = [
+      {
+        role: "user" as const,
+        content: [{ type: "text" as const, text: "msg1" }],
+        timestamp: Date.now(),
+      },
+      {
+        role: "assistant" as const,
+        content: [{ type: "text" as const, text: "reply1" }],
+        api: "openai-responses",
+        provider: "openai",
+        model: "mock-1",
+        usage: baseAssistantUsage,
+        stopReason: "end" as const,
+        timestamp: Date.now(),
+      },
+      {
+        role: "user" as const,
+        content: [{ type: "text" as const, text: "msg2" }],
+        timestamp: Date.now(),
+      },
+    ];
+    let compactionCount = 0;
+    let promptCalls = 0;
+
+    session.prompt.mockImplementation(async () => {
+      promptCalls++;
+      if (promptCalls === 1) {
+        // Compaction replaces 3 messages with 1 summary, then prompt adds user + error
+        session.messages = [
+          {
+            role: "user" as const,
+            content: [{ type: "text" as const, text: "summary" }],
+            timestamp: Date.now(),
+          },
+        ];
+        compactionCount++;
+        session.messages.push(
+          {
+            role: "user" as const,
+            content: [{ type: "text" as const, text: "hello" }],
+            timestamp: Date.now(),
+          },
+          createRateLimitAssistant(),
+        );
+        // Total: 3 messages, but original had 3 — without compaction-aware check
+        // this terminal error would be missed.
+      }
+      // Second prompt succeeds
+    });
+
+    await runPromptWithRateLimitRetry({
+      activeSession: session,
+      effectivePrompt: "hello",
+      images: [],
+      abortable: async <T>(promise: Promise<T>) => await promise,
+      assistantTexts: [],
+      toolMetas: [],
+      didSendViaMessagingTool: () => false,
+      getSuccessfulCronAdds: () => 0,
+      didEmitReasoning: () => false,
+      getCompactionCount: () => compactionCount,
+      provider: "openai",
+      modelId: "mock-1",
+    });
+
+    // Should have retried because compaction-aware classifyTerminalFailure
+    // detected the error even though messages.length <= original snapshot length.
+    expect(session.prompt).toHaveBeenCalledTimes(2);
+    expect(session.agent.replaceMessages).toHaveBeenCalledTimes(1);
   });
 });
 
