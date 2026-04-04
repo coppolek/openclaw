@@ -14,8 +14,8 @@ import {
 import {
   hasGoogleVertexAvailableAuth,
   resolveGoogleVertexBaseUrl,
+  resolveGoogleVertexClientRegion,
   resolveGoogleVertexConfigApiKey,
-  resolveGoogleVertexRegion,
 } from "./vertex-region.js";
 
 let googleImageGenerationProviderPromise: Promise<ImageGenerationProvider> | null = null;
@@ -152,10 +152,9 @@ export default definePluginEntry({
       ...GOOGLE_GEMINI_PROVIDER_HOOKS_WITH_TOOL_COMPAT,
       isModernModelRef: ({ modelId }) => isModernGoogleModel(modelId),
       normalizeTransport: ({ baseUrl }) => {
-        if (baseUrl && /aiplatform\.googleapis\.com/.test(baseUrl)) {
-          return { api: "google-generative-ai" as const, baseUrl };
-        }
-        const region = resolveGoogleVertexRegion();
+        // resolveGoogleVertexClientRegion prefers a real resolved endpoint from baseUrl,
+        // but falls back to env when baseUrl is a pi-ai template like {location}-aiplatform.googleapis.com.
+        const region = resolveGoogleVertexClientRegion({ baseUrl, env: process.env });
         return {
           api: "google-generative-ai" as const,
           baseUrl: resolveGoogleVertexBaseUrl(region),
