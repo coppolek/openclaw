@@ -714,11 +714,6 @@ export function createGoogleGenerativeAiTransportStreamFn(): StreamFn {
           params = nextParams as GoogleGenerateContentRequest;
         }
         const requestUrl = buildGoogleRequestUrl(model, vertexContext);
-        if (model.provider === "google-vertex") {
-          process.stderr.write(
-            `[gv-debug] url=${requestUrl} baseUrl=${model.baseUrl ?? "none"} apiKey=${apiKey ? apiKey.slice(0, 20) : "none"} proj=${vertexContext?.projectId ?? "none"} loc=${vertexContext?.location ?? "none"}\n`,
-          );
-        }
         const response = await fetch(requestUrl, {
           method: "POST",
           headers: buildGoogleHeaders(model, apiKey, options?.headers),
