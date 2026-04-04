@@ -1,5 +1,5 @@
+import { readChannelAllowFromStore } from "openclaw/plugin-sdk/channel-pairing";
 import { coerceNativeSetting, normalizeAllowFromList } from "openclaw/plugin-sdk/channel-policy";
-import { readChannelAllowFromStore } from "openclaw/plugin-sdk/conversation-runtime";
 import {
   resolveNativeCommandsEnabled,
   resolveNativeSkillsEnabled,
