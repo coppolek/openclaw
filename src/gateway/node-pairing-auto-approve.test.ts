@@ -8,6 +8,9 @@ describe("shouldAutoApproveNodePairingFromTrustedCidrs", () => {
         role: "node",
         reason: "not-paired",
         scopes: [],
+        hasBrowserOriginHeader: false,
+        isControlUi: false,
+        isWebchat: false,
         reportedClientIp: "192.168.1.42",
         autoApproveCidrs: ["192.168.1.0/24"],
       }),
@@ -20,6 +23,9 @@ describe("shouldAutoApproveNodePairingFromTrustedCidrs", () => {
         role: "node",
         reason: "not-paired",
         scopes: [],
+        hasBrowserOriginHeader: false,
+        isControlUi: false,
+        isWebchat: false,
         reportedClientIp: "192.168.1.42",
         autoApproveCidrs: ["192.168.1.42"],
       }),
@@ -32,6 +38,9 @@ describe("shouldAutoApproveNodePairingFromTrustedCidrs", () => {
         role: "node",
         reason: "not-paired",
         scopes: [],
+        hasBrowserOriginHeader: false,
+        isControlUi: false,
+        isWebchat: false,
         reportedClientIp: "fd00:1234:5678::9",
         autoApproveCidrs: ["fd00:1234:5678::/64"],
       }),
@@ -44,6 +53,9 @@ describe("shouldAutoApproveNodePairingFromTrustedCidrs", () => {
         role: "node",
         reason: "not-paired",
         scopes: [],
+        hasBrowserOriginHeader: false,
+        isControlUi: false,
+        isWebchat: false,
         reportedClientIp: "192.168.2.42",
         autoApproveCidrs: ["192.168.1.0/24"],
       }),
@@ -56,6 +68,9 @@ describe("shouldAutoApproveNodePairingFromTrustedCidrs", () => {
         role: "node",
         reason: "not-paired",
         scopes: [],
+        hasBrowserOriginHeader: false,
+        isControlUi: false,
+        isWebchat: false,
         reportedClientIp: undefined,
         autoApproveCidrs: ["192.168.1.0/24"],
       }),
@@ -68,6 +83,54 @@ describe("shouldAutoApproveNodePairingFromTrustedCidrs", () => {
         role: "operator",
         reason: "not-paired",
         scopes: [],
+        hasBrowserOriginHeader: false,
+        isControlUi: false,
+        isWebchat: false,
+        reportedClientIp: "192.168.1.42",
+        autoApproveCidrs: ["192.168.1.0/24"],
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects browser-origin node clients", () => {
+    expect(
+      shouldAutoApproveNodePairingFromTrustedCidrs({
+        role: "node",
+        reason: "not-paired",
+        scopes: [],
+        hasBrowserOriginHeader: true,
+        isControlUi: false,
+        isWebchat: false,
+        reportedClientIp: "192.168.1.42",
+        autoApproveCidrs: ["192.168.1.0/24"],
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects control-ui node clients", () => {
+    expect(
+      shouldAutoApproveNodePairingFromTrustedCidrs({
+        role: "node",
+        reason: "not-paired",
+        scopes: [],
+        hasBrowserOriginHeader: false,
+        isControlUi: true,
+        isWebchat: false,
+        reportedClientIp: "192.168.1.42",
+        autoApproveCidrs: ["192.168.1.0/24"],
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects webchat node clients", () => {
+    expect(
+      shouldAutoApproveNodePairingFromTrustedCidrs({
+        role: "node",
+        reason: "not-paired",
+        scopes: [],
+        hasBrowserOriginHeader: false,
+        isControlUi: false,
+        isWebchat: true,
         reportedClientIp: "192.168.1.42",
         autoApproveCidrs: ["192.168.1.0/24"],
       }),
@@ -82,6 +145,9 @@ describe("shouldAutoApproveNodePairingFromTrustedCidrs", () => {
           role: "node",
           reason,
           scopes: [],
+          hasBrowserOriginHeader: false,
+          isControlUi: false,
+          isWebchat: false,
           reportedClientIp: "192.168.1.42",
           autoApproveCidrs: ["192.168.1.0/24"],
         }),
@@ -95,6 +161,9 @@ describe("shouldAutoApproveNodePairingFromTrustedCidrs", () => {
         role: "node",
         reason: "not-paired",
         scopes: ["operator.read"],
+        hasBrowserOriginHeader: false,
+        isControlUi: false,
+        isWebchat: false,
         reportedClientIp: "192.168.1.42",
         autoApproveCidrs: ["192.168.1.0/24"],
       }),

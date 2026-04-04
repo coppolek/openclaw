@@ -34,6 +34,13 @@ const OPERATOR_CLIENT = {
   platform: "test",
   mode: GATEWAY_CLIENT_MODES.TEST,
 };
+
+const CONTROL_UI_NODE_CLIENT = {
+  id: GATEWAY_CLIENT_NAMES.CONTROL_UI,
+  version: "1.0.0",
+  platform: "web",
+  mode: GATEWAY_CLIENT_MODES.WEBCHAT,
+};
 let started: Awaited<ReturnType<typeof startConnectedServerWithClient>> | null = null;
 
 function pairingReasonFromResponse(
@@ -229,6 +236,47 @@ describe("gateway trusted CIDR node pairing auto-approve", () => {
     const pending = pendingForDevice(await listDevicePairing(), loaded.identity.deviceId);
     expect(pending).toHaveLength(1);
     expect(pending[0]?.role).toBe("operator");
+    expect(await getPairedDevice(loaded.identity.deviceId)).toBeNull();
+  });
+
+  test("keeps browser control-ui node pairing manual even on matching CIDRs", async () => {
+    if (!started) {
+      throw new Error("expected started gateway server");
+    }
+    const controlUiOrigin = `http://127.0.0.1:${started.port}`;
+    await writeGatewayConfig({
+      trustedProxies: ["127.0.0.1"],
+      controlUi: {
+        allowedOrigins: [controlUiOrigin],
+      },
+      nodes: {
+        pairing: {
+          autoApproveCidrs: ["203.0.113.0/24"],
+        },
+      },
+    });
+    const loaded = loadDeviceIdentity("trusted-cidr-control-ui-node-manual");
+
+    const attempt = await connectGatewayDevice({
+      port: started.port,
+      headers: {
+        ...TRUSTED_PROXY_HEADERS,
+        origin: controlUiOrigin,
+      },
+      identityPath: loaded.identityPath,
+      role: "node",
+      scopes: [],
+      client: CONTROL_UI_NODE_CLIENT,
+    });
+    expect(attempt.res.ok).toBe(false);
+    expect(attempt.res.error?.message).toBe("pairing required");
+    expect(pairingReasonFromResponse(attempt.res)).toBe("not-paired");
+    attempt.ws.close();
+
+    const pending = pendingForDevice(await listDevicePairing(), loaded.identity.deviceId);
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.silent).toBe(false);
+    expect(pending[0]?.role).toBe("node");
     expect(await getPairedDevice(loaded.identity.deviceId)).toBeNull();
   });
 

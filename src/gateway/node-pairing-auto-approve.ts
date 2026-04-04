@@ -10,6 +10,9 @@ export function shouldAutoApproveNodePairingFromTrustedCidrs(params: {
   role: string;
   reason: NodePairingAutoApproveReason;
   scopes: string[];
+  hasBrowserOriginHeader: boolean;
+  isControlUi: boolean;
+  isWebchat: boolean;
   reportedClientIp?: string;
   autoApproveCidrs?: string[];
 }): boolean {
@@ -20,6 +23,9 @@ export function shouldAutoApproveNodePairingFromTrustedCidrs(params: {
     return false;
   }
   if (params.scopes.length > 0) {
+    return false;
+  }
+  if (params.hasBrowserOriginHeader || params.isControlUi || params.isWebchat) {
     return false;
   }
   if (!params.reportedClientIp) {
