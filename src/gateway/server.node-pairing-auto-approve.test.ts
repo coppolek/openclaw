@@ -3,7 +3,7 @@ import { WebSocket } from "ws";
 import { type OpenClawConfig, writeConfigFile } from "../config/config.js";
 import { getPairedDevice, listDevicePairing } from "../infra/device-pairing.js";
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
-import { loadDeviceIdentity } from "./device-authz.test-helpers.js";
+import { loadDeviceIdentity, pairDeviceIdentity } from "./device-authz.test-helpers.js";
 import {
   connectReq,
   installGatewayTestHooks,
@@ -119,7 +119,7 @@ describe("gateway trusted CIDR node pairing auto-approve", () => {
     started?.envSnapshot.restore();
   });
 
-  test("auto-approves matching first-time node pairing and allows reconnect", async () => {
+  test("does not trust loopback trusted-proxy headers for silent node pairing", async () => {
     if (!started) {
       throw new Error("expected started gateway server");
     }
@@ -141,37 +141,15 @@ describe("gateway trusted CIDR node pairing auto-approve", () => {
       scopes: [],
       client: NODE_CLIENT,
     });
-    expect(first.res.ok).toBe(true);
+    expect(first.res.ok).toBe(false);
+    expect(first.res.error?.message).toBe("pairing required");
+    expect(pairingReasonFromResponse(first.res)).toBe("not-paired");
     first.ws.close();
 
-    const paired = await getPairedDevice(loaded.identity.deviceId);
-    expect(paired?.deviceId).toBe(loaded.identity.deviceId);
-    expect((paired?.roles ?? [paired?.role]).filter(Boolean)).toEqual(
-      expect.arrayContaining(["node"]),
-    );
-
-    const pendingAfterFirstPair = pendingForDevice(
-      await listDevicePairing(),
-      loaded.identity.deviceId,
-    );
-    expect(pendingAfterFirstPair).toEqual([]);
-
-    const second = await connectGatewayDevice({
-      port: started.port,
-      headers: TRUSTED_PROXY_HEADERS,
-      identityPath: loaded.identityPath,
-      role: "node",
-      scopes: [],
-      client: NODE_CLIENT,
-    });
-    expect(second.res.ok).toBe(true);
-    second.ws.close();
-
-    const pendingAfterReconnect = pendingForDevice(
-      await listDevicePairing(),
-      loaded.identity.deviceId,
-    );
-    expect(pendingAfterReconnect).toEqual([]);
+    const pending = pendingForDevice(await listDevicePairing(), loaded.identity.deviceId);
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.silent).toBe(false);
+    expect(await getPairedDevice(loaded.identity.deviceId)).toBeNull();
   });
 
   test("keeps non-matching node CIDRs on manual approval", async () => {
@@ -292,18 +270,13 @@ describe("gateway trusted CIDR node pairing auto-approve", () => {
         },
       },
     });
-    const loaded = loadDeviceIdentity("trusted-cidr-role-upgrade");
-
-    const first = await connectGatewayDevice({
-      port: started.port,
-      headers: TRUSTED_PROXY_HEADERS,
-      identityPath: loaded.identityPath,
+    const loaded = await pairDeviceIdentity({
+      name: "trusted-cidr-role-upgrade",
       role: "node",
       scopes: [],
-      client: NODE_CLIENT,
+      clientId: NODE_CLIENT.id,
+      clientMode: NODE_CLIENT.mode,
     });
-    expect(first.res.ok).toBe(true);
-    first.ws.close();
 
     const upgrade = await connectGatewayDevice({
       port: started.port,
@@ -334,18 +307,13 @@ describe("gateway trusted CIDR node pairing auto-approve", () => {
         },
       },
     });
-    const loaded = loadDeviceIdentity("trusted-cidr-scope-upgrade");
-
-    const first = await connectGatewayDevice({
-      port: started.port,
-      headers: TRUSTED_PROXY_HEADERS,
-      identityPath: loaded.identityPath,
+    const loaded = await pairDeviceIdentity({
+      name: "trusted-cidr-scope-upgrade",
       role: "node",
       scopes: [],
-      client: NODE_CLIENT,
+      clientId: NODE_CLIENT.id,
+      clientMode: NODE_CLIENT.mode,
     });
-    expect(first.res.ok).toBe(true);
-    first.ws.close();
 
     const upgrade = await connectGatewayDevice({
       port: started.port,

@@ -11,6 +11,7 @@ describe("shouldAutoApproveNodePairingFromTrustedCidrs", () => {
         hasBrowserOriginHeader: false,
         isControlUi: false,
         isWebchat: false,
+        reportedClientIpSource: "direct",
         reportedClientIp: "192.168.1.42",
         autoApproveCidrs: ["192.168.1.0/24"],
       }),
@@ -26,13 +27,14 @@ describe("shouldAutoApproveNodePairingFromTrustedCidrs", () => {
         hasBrowserOriginHeader: false,
         isControlUi: false,
         isWebchat: false,
+        reportedClientIpSource: "direct",
         reportedClientIp: "192.168.1.42",
         autoApproveCidrs: ["192.168.1.42"],
       }),
     ).toBe(true);
   });
 
-  it("accepts a node from a matching IPv6 CIDR", () => {
+  it("accepts a node from a matching IPv6 CIDR via a trusted proxy", () => {
     expect(
       shouldAutoApproveNodePairingFromTrustedCidrs({
         role: "node",
@@ -41,6 +43,7 @@ describe("shouldAutoApproveNodePairingFromTrustedCidrs", () => {
         hasBrowserOriginHeader: false,
         isControlUi: false,
         isWebchat: false,
+        reportedClientIpSource: "trusted-proxy",
         reportedClientIp: "fd00:1234:5678::9",
         autoApproveCidrs: ["fd00:1234:5678::/64"],
       }),
@@ -56,6 +59,7 @@ describe("shouldAutoApproveNodePairingFromTrustedCidrs", () => {
         hasBrowserOriginHeader: false,
         isControlUi: false,
         isWebchat: false,
+        reportedClientIpSource: "direct",
         reportedClientIp: "192.168.2.42",
         autoApproveCidrs: ["192.168.1.0/24"],
       }),
@@ -71,6 +75,7 @@ describe("shouldAutoApproveNodePairingFromTrustedCidrs", () => {
         hasBrowserOriginHeader: false,
         isControlUi: false,
         isWebchat: false,
+        reportedClientIpSource: "none",
         reportedClientIp: undefined,
         autoApproveCidrs: ["192.168.1.0/24"],
       }),
@@ -86,6 +91,7 @@ describe("shouldAutoApproveNodePairingFromTrustedCidrs", () => {
         hasBrowserOriginHeader: false,
         isControlUi: false,
         isWebchat: false,
+        reportedClientIpSource: "direct",
         reportedClientIp: "192.168.1.42",
         autoApproveCidrs: ["192.168.1.0/24"],
       }),
@@ -101,6 +107,7 @@ describe("shouldAutoApproveNodePairingFromTrustedCidrs", () => {
         hasBrowserOriginHeader: true,
         isControlUi: false,
         isWebchat: false,
+        reportedClientIpSource: "direct",
         reportedClientIp: "192.168.1.42",
         autoApproveCidrs: ["192.168.1.0/24"],
       }),
@@ -116,6 +123,7 @@ describe("shouldAutoApproveNodePairingFromTrustedCidrs", () => {
         hasBrowserOriginHeader: false,
         isControlUi: true,
         isWebchat: false,
+        reportedClientIpSource: "direct",
         reportedClientIp: "192.168.1.42",
         autoApproveCidrs: ["192.168.1.0/24"],
       }),
@@ -131,6 +139,23 @@ describe("shouldAutoApproveNodePairingFromTrustedCidrs", () => {
         hasBrowserOriginHeader: false,
         isControlUi: false,
         isWebchat: true,
+        reportedClientIpSource: "direct",
+        reportedClientIp: "192.168.1.42",
+        autoApproveCidrs: ["192.168.1.0/24"],
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects loopback trusted-proxy reported IPs", () => {
+    expect(
+      shouldAutoApproveNodePairingFromTrustedCidrs({
+        role: "node",
+        reason: "not-paired",
+        scopes: [],
+        hasBrowserOriginHeader: false,
+        isControlUi: false,
+        isWebchat: false,
+        reportedClientIpSource: "loopback-trusted-proxy",
         reportedClientIp: "192.168.1.42",
         autoApproveCidrs: ["192.168.1.0/24"],
       }),
@@ -148,6 +173,7 @@ describe("shouldAutoApproveNodePairingFromTrustedCidrs", () => {
           hasBrowserOriginHeader: false,
           isControlUi: false,
           isWebchat: false,
+          reportedClientIpSource: "direct",
           reportedClientIp: "192.168.1.42",
           autoApproveCidrs: ["192.168.1.0/24"],
         }),
@@ -164,6 +190,7 @@ describe("shouldAutoApproveNodePairingFromTrustedCidrs", () => {
         hasBrowserOriginHeader: false,
         isControlUi: false,
         isWebchat: false,
+        reportedClientIpSource: "direct",
         reportedClientIp: "192.168.1.42",
         autoApproveCidrs: ["192.168.1.0/24"],
       }),

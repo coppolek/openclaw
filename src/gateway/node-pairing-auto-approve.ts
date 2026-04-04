@@ -6,6 +6,12 @@ export type NodePairingAutoApproveReason =
   | "scope-upgrade"
   | "metadata-upgrade";
 
+export type NodePairingAutoApproveClientIpSource =
+  | "direct"
+  | "trusted-proxy"
+  | "loopback-trusted-proxy"
+  | "none";
+
 export function shouldAutoApproveNodePairingFromTrustedCidrs(params: {
   role: string;
   reason: NodePairingAutoApproveReason;
@@ -13,6 +19,7 @@ export function shouldAutoApproveNodePairingFromTrustedCidrs(params: {
   hasBrowserOriginHeader: boolean;
   isControlUi: boolean;
   isWebchat: boolean;
+  reportedClientIpSource: NodePairingAutoApproveClientIpSource;
   reportedClientIp?: string;
   autoApproveCidrs?: string[];
 }): boolean {
@@ -26,6 +33,12 @@ export function shouldAutoApproveNodePairingFromTrustedCidrs(params: {
     return false;
   }
   if (params.hasBrowserOriginHeader || params.isControlUi || params.isWebchat) {
+    return false;
+  }
+  if (
+    params.reportedClientIpSource === "none" ||
+    params.reportedClientIpSource === "loopback-trusted-proxy"
+  ) {
     return false;
   }
   if (!params.reportedClientIp) {

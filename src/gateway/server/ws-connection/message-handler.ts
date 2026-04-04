@@ -279,6 +279,13 @@ export function attachGatewayWsMessageHandler(params: {
       : clientIp && !isLoopbackAddress(clientIp)
         ? clientIp
         : undefined;
+  const reportedClientIpSource = !reportedClientIp
+    ? "none"
+    : hasProxyHeaders && remoteIsTrustedProxy
+      ? isLoopbackAddress(remoteAddr)
+        ? "loopback-trusted-proxy"
+        : "trusted-proxy"
+      : "direct";
 
   if (hasUntrustedProxyHeaders) {
     logWsControl.warn(
@@ -925,6 +932,7 @@ export function attachGatewayWsMessageHandler(params: {
                 hasBrowserOriginHeader,
                 isControlUi,
                 isWebchat,
+                reportedClientIpSource,
                 reportedClientIp,
                 autoApproveCidrs: configSnapshot.gateway?.nodes?.pairing?.autoApproveCidrs,
               },
