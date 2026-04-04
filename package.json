@@ -241,6 +241,10 @@
       "types": "./dist/plugin-sdk/infra-runtime.d.ts",
       "default": "./dist/plugin-sdk/infra-runtime.js"
     },
+    "./plugin-sdk/system-events": {
+      "types": "./dist/plugin-sdk/system-events.d.ts",
+      "default": "./dist/plugin-sdk/system-events.js"
+    },
     "./plugin-sdk/runtime-config-snapshot": {
       "types": "./dist/plugin-sdk/runtime-config-snapshot.d.ts",
       "default": "./dist/plugin-sdk/runtime-config-snapshot.js"
@@ -276,6 +280,14 @@
     "./plugin-sdk/conversation-runtime": {
       "types": "./dist/plugin-sdk/conversation-runtime.d.ts",
       "default": "./dist/plugin-sdk/conversation-runtime.js"
+    },
+    "./plugin-sdk/channel-conversation": {
+      "types": "./dist/plugin-sdk/channel-conversation.d.ts",
+      "default": "./dist/plugin-sdk/channel-conversation.js"
+    },
+    "./plugin-sdk/plugin-conversation-binding": {
+      "types": "./dist/plugin-sdk/plugin-conversation-binding.d.ts",
+      "default": "./dist/plugin-sdk/plugin-conversation-binding.js"
     },
     "./plugin-sdk/matrix-runtime-heavy": {
       "types": "./dist/plugin-sdk/matrix-runtime-heavy.d.ts",

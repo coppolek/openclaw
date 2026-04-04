@@ -1,12 +1,11 @@
 import { z } from "zod";
-import { isSafeScpRemoteHost } from "../infra/scp-host.js";
-import { isValidInboundPathRootPattern } from "../media/inbound-path-policy.js";
 import {
   normalizeCommandDescription,
   normalizeSlashCommandName,
   resolveCustomCommands,
 } from "../shared/custom-command-config.js";
-import { normalizeOptionalString } from "../shared/string-coerce.js";
+import { isSafeScpRemoteHost } from "../infra/scp-host.js";
+import { isValidInboundPathRootPattern } from "../media/inbound-path-policy.js";
 import { ToolPolicySchema } from "./zod-schema.agent-runtime.js";
 import {
   ChannelHealthMonitorSchema,
@@ -71,30 +70,6 @@ const TelegramCapabilitiesSchema = z.union([
     })
     .strict(),
 ]);
-const TextChunkModeSchema = z.enum(["length", "newline"]);
-const UnifiedStreamingModeSchema = z.enum(["off", "partial", "block", "progress"]);
-const ChannelStreamingBlockSchema = z
-  .object({
-    enabled: z.boolean().optional(),
-    coalesce: BlockStreamingCoalesceSchema.optional(),
-  })
-  .strict();
-const ChannelStreamingPreviewSchema = z
-  .object({
-    chunk: BlockStreamingChunkSchema.optional(),
-  })
-  .strict();
-const ChannelPreviewStreamingConfigSchema = z
-  .object({
-    mode: UnifiedStreamingModeSchema.optional(),
-    chunkMode: TextChunkModeSchema.optional(),
-    preview: ChannelStreamingPreviewSchema.optional(),
-    block: ChannelStreamingBlockSchema.optional(),
-  })
-  .strict();
-const SlackStreamingConfigSchema = ChannelPreviewStreamingConfigSchema.extend({
-  nativeTransport: z.boolean().optional(),
-}).strict();
 const SlackCapabilitiesSchema = z.union([
   z.array(z.string()),
   z
@@ -237,7 +212,11 @@ export const TelegramAccountSchemaBase = z
     dms: z.record(z.string(), DmConfigSchema.optional()).optional(),
     direct: z.record(z.string(), TelegramDirectSchema.optional()).optional(),
     textChunkLimit: z.number().int().positive().optional(),
-    streaming: ChannelPreviewStreamingConfigSchema.optional(),
+    chunkMode: z.enum(["length", "newline"]).optional(),
+    streaming: z.enum(["off", "partial", "block", "progress"]).optional(),
+    blockStreaming: z.boolean().optional(),
+    draftChunk: BlockStreamingChunkSchema.optional(),
+    blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
     mediaMaxMb: z.number().positive().optional(),
     timeoutSeconds: z.number().int().positive().optional(),
     retry: RetryConfigSchema,
@@ -527,7 +506,11 @@ export const DiscordAccountSchema = z
     dmHistoryLimit: z.number().int().min(0).optional(),
     dms: z.record(z.string(), DmConfigSchema.optional()).optional(),
     textChunkLimit: z.number().int().positive().optional(),
-    streaming: ChannelPreviewStreamingConfigSchema.optional(),
+    chunkMode: z.enum(["length", "newline"]).optional(),
+    blockStreaming: z.boolean().optional(),
+    blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
+    streaming: z.enum(["off", "partial", "block", "progress"]).optional(),
+    draftChunk: BlockStreamingChunkSchema.optional(),
     maxLinesPerMessage: z.number().int().positive().optional(),
     mediaMaxMb: z.number().positive().optional(),
     retry: RetryConfigSchema,
@@ -653,10 +636,10 @@ export const DiscordAccountSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
-    const activityText = normalizeOptionalString(value.activity) ?? "";
+    const activityText = typeof value.activity === "string" ? value.activity.trim() : "";
     const hasActivity = Boolean(activityText);
     const hasActivityType = value.activityType !== undefined;
-    const activityUrl = normalizeOptionalString(value.activityUrl) ?? "";
+    const activityUrl = typeof value.activityUrl === "string" ? value.activityUrl.trim() : "";
     const hasActivityUrl = Boolean(activityUrl);
 
     if ((hasActivityType || hasActivityUrl) && !hasActivity) {
@@ -873,7 +856,6 @@ export const SlackThreadSchema = z
     historyScope: z.enum(["thread", "channel"]).optional(),
     inheritParent: z.boolean().optional(),
     initialHistoryLimit: z.number().int().min(0).optional(),
-    requireExplicitMention: z.boolean().optional(),
   })
   .strict();
 
@@ -919,7 +901,11 @@ export const SlackAccountSchema = z
     dmHistoryLimit: z.number().int().min(0).optional(),
     dms: z.record(z.string(), DmConfigSchema.optional()).optional(),
     textChunkLimit: z.number().int().positive().optional(),
-    streaming: SlackStreamingConfigSchema.optional(),
+    chunkMode: z.enum(["length", "newline"]).optional(),
+    blockStreaming: z.boolean().optional(),
+    blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
+    streaming: z.enum(["off", "partial", "block", "progress"]).optional(),
+    nativeStreaming: z.boolean().optional(),
     mediaMaxMb: z.number().positive().optional(),
     reactionNotifications: z.enum(["off", "own", "all", "allowlist"]).optional(),
     reactionAllowlist: z.array(z.union([z.string(), z.number()])).optional(),
@@ -1445,12 +1431,7 @@ export const BlueBubblesAccountSchemaBase = z
     mediaMaxMb: z.number().int().positive().optional(),
     mediaLocalRoots: z.array(z.string()).optional(),
     sendReadReceipts: z.boolean().optional(),
-    network: z
-      .object({
-        dangerouslyAllowPrivateNetwork: z.boolean().optional(),
-      })
-      .strict()
-      .optional(),
+    allowPrivateNetwork: z.boolean().optional(),
     blockStreaming: z.boolean().optional(),
     blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
     groups: z.record(z.string(), BlueBubblesGroupConfigSchema.optional()).optional(),
@@ -1589,20 +1570,6 @@ export const MSTeamsConfigSchema = z
     feedbackEnabled: z.boolean().optional(),
     feedbackReflection: z.boolean().optional(),
     feedbackReflectionCooldownMs: z.number().int().min(0).optional(),
-    delegatedAuth: z
-      .object({
-        enabled: z.boolean().optional(),
-        scopes: z.array(z.string()).optional(),
-      })
-      .strict()
-      .optional(),
-    sso: z
-      .object({
-        enabled: z.boolean().optional(),
-        connectionName: z.string().optional(),
-      })
-      .strict()
-      .optional(),
   })
   .strict()
   .superRefine((value, ctx) => {

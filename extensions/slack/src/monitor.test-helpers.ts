@@ -186,6 +186,17 @@ export function resetSlackTestState(config: Record<string, unknown> = defaultSla
     code: "PAIRCODE",
     created: true,
   });
+  const client = getSlackClient();
+  client.auth.test.mockReset().mockResolvedValue({ user_id: "bot-user" });
+  client.conversations.info.mockReset().mockResolvedValue({
+    channel: { name: "dm", is_im: true },
+  });
+  client.conversations.replies.mockReset().mockResolvedValue({ messages: [] });
+  client.conversations.history.mockReset().mockResolvedValue({ messages: [] });
+  client.users.info.mockReset().mockResolvedValue({
+    user: { profile: { display_name: "Ada" } },
+  });
+  client.assistant.threads.setStatus.mockReset().mockResolvedValue({ ok: true });
   getSlackHandlers()?.clear();
 }
 
@@ -236,9 +247,9 @@ vi.mock("./monitor/send.runtime.js", () => {
   };
 });
 
-vi.mock("./monitor/conversation.runtime.js", async () => {
-  const actual = await vi.importActual<typeof import("./monitor/conversation.runtime.js")>(
-    "./monitor/conversation.runtime.js",
+vi.mock("./monitor/pairing.runtime.js", async () => {
+  const actual = await vi.importActual<typeof import("./monitor/pairing.runtime.js")>(
+    "./monitor/pairing.runtime.js",
   );
   return {
     ...actual,
