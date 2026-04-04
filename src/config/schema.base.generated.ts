@@ -21883,6 +21883,18 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                 },
                 additionalProperties: false,
               },
+              pairing: {
+                type: "object",
+                properties: {
+                  autoApproveCidrs: {
+                    type: "array",
+                    items: {
+                      type: "string",
+                    },
+                  },
+                },
+                additionalProperties: false,
+              },
               allowCommands: {
                 type: "array",
                 items: {
@@ -23648,6 +23660,21 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       label: "Strict Transport Security Header",
       help: "Value for the Strict-Transport-Security response header. Set only on HTTPS origins that you fully control; use false to explicitly disable.",
       tags: ["network"],
+    },
+    "gateway.nodes": {
+      label: "Gateway Nodes",
+      help: "Node-specific gateway controls for browser routing, pairing policy, and command allow/deny shaping. Keep pairing behavior explicit and narrowly scoped when enabling automation.",
+      tags: ["network"],
+    },
+    "gateway.nodes.pairing": {
+      label: "Gateway Node Pairing",
+      help: "Node pairing policy settings that can reduce manual approval for tightly scoped trusted networks. Use only with explicit CIDR/IP allowlists you control.",
+      tags: ["network"],
+    },
+    "gateway.nodes.pairing.autoApproveCidrs": {
+      label: "Gateway Node Pairing Auto-Approve CIDRs",
+      help: "Opt-in CIDR/IP allowlist for auto-approving first-time node-role device pairing with no requested scopes. Operator, browser, control UI, and any role, scope, or metadata upgrade pairing still require manual approval.",
+      tags: ["security", "access", "network", "advanced"],
     },
     "gateway.remote.url": {
       label: "Remote Gateway URL",

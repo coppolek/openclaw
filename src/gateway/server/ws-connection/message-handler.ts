@@ -66,6 +66,7 @@ import {
   resolveClientIp,
 } from "../../net.js";
 import { reconcileNodePairingOnConnect } from "../../node-connect-reconcile.js";
+import { shouldAutoApproveNodePairingFromTrustedCidrs } from "../../node-pairing-auto-approve.js";
 import { checkBrowserOrigin } from "../../origin-check.js";
 import {
   buildPairingConnectCloseReason,
@@ -916,6 +917,18 @@ export function attachGatewayWsMessageHandler(params: {
               isWebchat,
               reason,
             });
+            const allowSilentTrustedCidrsNodePairing = shouldAutoApproveNodePairingFromTrustedCidrs(
+              {
+                role,
+                reason,
+                scopes,
+                reportedClientIp,
+                autoApproveCidrs: configSnapshot.gateway?.nodes?.pairing?.autoApproveCidrs,
+              },
+            );
+            // QR bootstrap onboarding stays single-use, but the first node bootstrap handshake
+            // should seed bounded device tokens and only consume the bootstrap token once the
+            // hello-ok path succeeds so reconnects can recover from pre-hello failures.
             const allowSilentBootstrapPairing =
               authMethod === "bootstrap-token" &&
               reason === "not-paired" &&
@@ -937,7 +950,9 @@ export function attachGatewayWsMessageHandler(params: {
               silent:
                 reason === "scope-upgrade"
                   ? false
-                  : allowSilentLocalPairing || allowSilentBootstrapPairing,
+                  : allowSilentLocalPairing ||
+                    allowSilentBootstrapPairing ||
+                    allowSilentTrustedCidrsNodePairing,
             });
             const context = buildRequestContext();
             let approved: Awaited<ReturnType<typeof approveDevicePairing>> | undefined;

@@ -117,6 +117,30 @@ The macOS app can optionally attempt a **silent approval** when:
 
 If silent approval fails, it falls back to the normal “Approve/Reject” prompt.
 
+## Trusted CIDR device auto-approve
+
+Gateway device pairing can also opt in to first-time node auto-approval from
+explicit trusted CIDRs or exact IP entries:
+
+```yaml
+gateway:
+  nodes:
+    pairing:
+      autoApproveCidrs:
+        - "192.168.1.0/24"
+        - "fd00:1234:5678::/64"
+```
+
+Use this only for node clients you expect on a tightly controlled network path.
+
+Important limits:
+
+- It is opt-in. There is no blanket LAN auto-approve mode.
+- It only auto-approves first-time `role: node` device pairing with no requested scopes.
+- Operator, browser, and Control UI pairing stays manual.
+- Role, scope, and metadata upgrades still require manual approval.
+- Re-pair may still be required when device identity or auth details change.
+
 ## Storage (local, private)
 
 Pairing state is stored under the Gateway state directory (default `~/.openclaw`):
