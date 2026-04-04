@@ -1,5 +1,5 @@
-import { streamSimple } from "@mariozechner/pi-ai";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import { streamSimple } from "@mariozechner/pi-ai";
 import type { PromptOptions } from "@mariozechner/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../../config/config.js";
@@ -258,6 +258,9 @@ describe("runPromptWithRateLimitRetry", () => {
           session.messages = messages.slice();
         }),
       },
+      replaceMessages: (messages: AgentMessage[]) => {
+        session.agent.replaceMessages(messages);
+      },
     };
     return session;
   }
@@ -436,7 +439,7 @@ describe("runPromptWithRateLimitRetry", () => {
         provider: "openai",
         model: "mock-1",
         usage: baseAssistantUsage,
-        stopReason: "end" as const,
+        stopReason: "stop" as const,
         timestamp: Date.now(),
       },
       {

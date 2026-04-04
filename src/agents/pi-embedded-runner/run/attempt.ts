@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import os from "node:os";
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { Agent, AgentMessage } from "@mariozechner/pi-agent-core";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -120,7 +120,6 @@ import { prepareGooglePromptCacheStreamFn } from "../google-prompt-cache.js";
 import { getDmHistoryLimitFromSessionKey, limitHistoryTurns } from "../history.js";
 import { log } from "../logger.js";
 import { buildEmbeddedMessageActionDiscoveryInput } from "../message-action-discovery-input.js";
-import { retryPromptOnRateLimit } from "../rate-limit-retry.js";
 import {
   collectPromptCacheToolNames,
   beginPromptCacheObservation,
@@ -128,6 +127,7 @@ import {
   type PromptCacheChange,
 } from "../prompt-cache-observability.js";
 import { resolveCacheRetention } from "../prompt-cache-retention.js";
+import { retryPromptOnRateLimit } from "../rate-limit-retry.js";
 import { sanitizeSessionHistory, validateReplayTurns } from "../replay-history.js";
 import {
   clearActiveEmbeddedRun,
@@ -270,7 +270,7 @@ export {
 type RetryablePromptSession = {
   prompt: AgentSession["prompt"];
   messages: AgentSession["messages"];
-  agent: Pick<AgentSession["agent"], "replaceMessages">;
+  replaceMessages: (messages: AgentMessage[]) => void;
 };
 
 export async function runPromptWithRateLimitRetry(params: {
@@ -352,7 +352,7 @@ export async function runPromptWithRateLimitRetry(params: {
         compactionBaseline = currentCompactions;
       }
       if (params.activeSession.messages.length !== preRetryMessages.length) {
-        params.activeSession.agent.replaceMessages(preRetryMessages);
+        params.activeSession.replaceMessages(preRetryMessages);
       }
     },
     abortSignal: params.abortSignal,
@@ -1977,7 +1977,16 @@ export async function runEmbeddedAttempt(
             });
 
             await runPromptWithRateLimitRetry({
-              activeSession,
+              activeSession: {
+                prompt: activeSession.prompt.bind(activeSession),
+                messages: activeSession.messages,
+                replaceMessages: (messages) =>
+                  (
+                    activeSession.agent as Agent & {
+                      replaceMessages: (messages: AgentMessage[]) => void;
+                    }
+                  ).replaceMessages(messages),
+              },
               effectivePrompt,
               images: imageResult.images,
               abortable,
