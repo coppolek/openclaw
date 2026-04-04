@@ -7,6 +7,16 @@ import { buildGoogleMusicGenerationProvider } from "./music-generation-provider.
 import { registerGoogleProvider } from "./provider-registration.js";
 import { createGeminiWebSearchProvider } from "./src/gemini-web-search-provider.js";
 import { buildGoogleVideoGenerationProvider } from "./video-generation-provider.js";
+import {
+  buildGoogleVertexProvider,
+  mergeImplicitGoogleVertexProvider,
+} from "./vertex-provider-catalog.js";
+import {
+  hasGoogleVertexAvailableAuth,
+  resolveGoogleVertexBaseUrl,
+  resolveGoogleVertexConfigApiKey,
+  resolveGoogleVertexRegion,
+} from "./vertex-region.js";
 
 let googleImageGenerationProviderPromise: Promise<ImageGenerationProvider> | null = null;
 let googleMediaUnderstandingProviderPromise: Promise<MediaUnderstandingProvider> | null = null;
@@ -115,5 +125,42 @@ export default definePluginEntry({
     api.registerMusicGenerationProvider(buildGoogleMusicGenerationProvider());
     api.registerVideoGenerationProvider(buildGoogleVideoGenerationProvider());
     api.registerWebSearchProvider(createGeminiWebSearchProvider());
+    api.registerProvider({
+      id: "google-vertex",
+      label: "Google Vertex AI",
+      docsPath: "/providers/models",
+      auth: [],
+      catalog: {
+        order: "simple",
+        run: async (ctx) => {
+          if (!hasGoogleVertexAvailableAuth(ctx.env)) {
+            return null;
+          }
+          const implicit = buildGoogleVertexProvider({ env: ctx.env });
+          return {
+            provider: mergeImplicitGoogleVertexProvider({
+              existing: ctx.config.models?.providers?.["google-vertex"],
+              implicit,
+            }),
+          };
+        },
+      },
+      resolveConfigApiKey: ({ env }) => resolveGoogleVertexConfigApiKey(env),
+      normalizeModelId: ({ modelId }) => normalizeGoogleModelId(modelId),
+      resolveDynamicModel: (ctx) =>
+        resolveGoogle31ForwardCompatModel({ providerId: "google-vertex", ctx }),
+      ...GOOGLE_GEMINI_PROVIDER_HOOKS_WITH_TOOL_COMPAT,
+      isModernModelRef: ({ modelId }) => isModernGoogleModel(modelId),
+      normalizeTransport: ({ baseUrl }) => {
+        if (baseUrl && /aiplatform\.googleapis\.com/.test(baseUrl)) {
+          return { api: "google-generative-ai" as const, baseUrl };
+        }
+        const region = resolveGoogleVertexRegion();
+        return {
+          api: "google-generative-ai" as const,
+          baseUrl: resolveGoogleVertexBaseUrl(region),
+        };
+      },
+    });
   },
 });

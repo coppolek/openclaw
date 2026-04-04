@@ -10,6 +10,8 @@ import {
 import { parseGeminiAuth } from "../infra/gemini-auth.js";
 import { normalizeGoogleApiBaseUrl } from "../infra/google-api-base-url.js";
 import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
+import { GCP_VERTEX_GOOGLE_CREDENTIALS_MARKER } from "./model-auth-markers.js";
+import { resolveProviderEndpoint } from "./provider-attribution.js";
 import { buildGuardedModelFetch } from "./provider-transport-fetch.js";
 import { stripSystemPromptCacheBoundary } from "./system-prompt-cache-boundary.js";
 import { transformTransportMessages } from "./transport-message-transform.js";
@@ -62,7 +64,13 @@ type GoogleGenerateContentRequest = {
 type GoogleTransportContentBlock =
   | { type: "text"; text: string; textSignature?: string }
   | { type: "thinking"; thinking: string; thinkingSignature?: string }
-  | { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> };
+  | {
+      type: "toolCall";
+      id: string;
+      name: string;
+      arguments: Record<string, unknown>;
+      thoughtSignature?: string;
+    };
 
 type MutableAssistantOutput = {
   role: "assistant";
@@ -181,9 +189,46 @@ function resolveGoogleModelPath(modelId: string): string {
   return `models/${modelId}`;
 }
 
-function buildGoogleRequestUrl(model: GoogleTransportModel): string {
-  const baseUrl = normalizeGoogleApiBaseUrl(model.baseUrl);
-  return `${baseUrl}/${resolveGoogleModelPath(model.id)}:streamGenerateContent?alt=sse`;
+function isGoogleVertexEndpoint(baseUrl: string): boolean {
+  const endpoint = resolveProviderEndpoint(baseUrl);
+  return endpoint.endpointClass === "google-vertex";
+}
+
+function buildGoogleVertexRequestUrl(
+  baseUrl: string,
+  modelId: string,
+  projectId: string,
+  location: string,
+): string {
+  const origin = baseUrl.replace(/\/+$/, "");
+  const modelPath = modelId.startsWith("publishers/")
+    ? modelId
+    : `publishers/google/models/${modelId}`;
+  return `${origin}/v1/projects/${projectId}/locations/${location}/${modelPath}:streamGenerateContent?alt=sse`;
+}
+
+function buildGoogleRequestUrl(
+  model: GoogleTransportModel,
+  vertexContext?: { projectId?: string; location?: string },
+): string {
+  const baseUrl = model.baseUrl ?? "";
+  if (isGoogleVertexEndpoint(baseUrl)) {
+    const projectId =
+      vertexContext?.projectId ||
+      model.headers?.["x-openclaw-vertex-project-id"] ||
+      process.env.GOOGLE_CLOUD_PROJECT ||
+      process.env.GOOGLE_CLOUD_PROJECT_ID;
+    const location =
+      vertexContext?.location ||
+      model.headers?.["x-openclaw-vertex-location"] ||
+      process.env.GOOGLE_CLOUD_LOCATION ||
+      "us-central1";
+    if (projectId) {
+      return buildGoogleVertexRequestUrl(baseUrl, model.id, projectId, location);
+    }
+  }
+  const normalizedBaseUrl = normalizeGoogleApiBaseUrl(model.baseUrl);
+  return `${normalizedBaseUrl}/${resolveGoogleModelPath(model.id)}:streamGenerateContent?alt=sse`;
 }
 
 function resolveThinkingLevel(level: ThinkingLevel, modelId: string): GoogleThinkingLevel {
@@ -471,6 +516,21 @@ export function buildGoogleGenerativeAiParams(
   return params;
 }
 
+function stripInternalHeaders(
+  headers: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (!headers) {
+    return headers;
+  }
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (!key.startsWith("x-openclaw-vertex-")) {
+      result[key] = value;
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
 function buildGoogleHeaders(
   model: GoogleTransportModel,
   apiKey: string | undefined,
@@ -483,7 +543,7 @@ function buildGoogleHeaders(
         accept: "text/event-stream",
       },
       authHeaders,
-      model.headers,
+      stripInternalHeaders(model.headers),
       optionHeaders,
     ) ?? {
       accept: "text/event-stream",
@@ -586,6 +646,32 @@ function pushTextBlockEnd(
   }
 }
 
+// Resolve a real OAuth2 bearer token from ADC for Google Vertex AI requests.
+// The token + project + location are packed into a JSON blob that parseGeminiAuth
+// understands.
+async function resolveGoogleVertexApiKeyFromAdc(
+  model: GoogleTransportModel,
+): Promise<string | undefined> {
+  try {
+    const { resolveGoogleVertexAccessToken } = await import("./google-vertex-adc.js");
+    const token = await resolveGoogleVertexAccessToken();
+    if (!token) {
+      return undefined;
+    }
+    const location =
+      model.headers?.["x-openclaw-vertex-location"] ||
+      process.env.GOOGLE_CLOUD_LOCATION ||
+      "us-central1";
+    return JSON.stringify({
+      token: token.accessToken,
+      projectId: token.projectId,
+      location,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 export function createGoogleGenerativeAiTransportStreamFn(): StreamFn {
   return (rawModel, context, rawOptions) => {
     const model = rawModel as GoogleTransportModel;
@@ -603,14 +689,32 @@ export function createGoogleGenerativeAiTransportStreamFn(): StreamFn {
         timestamp: Date.now(),
       };
       try {
-        const apiKey = options?.apiKey ?? getEnvApiKey(model.provider) ?? undefined;
+        let apiKey = options?.apiKey ?? getEnvApiKey(model.provider) ?? undefined;
+        // When the API key is the ADC marker or a pi-ai placeholder sentinel,
+        // resolve a real ADC bearer token for Vertex AI endpoints.
+        const isVertexEndpoint = isGoogleVertexEndpoint(model.baseUrl ?? "");
+        const isAdcPlaceholder =
+          !apiKey ||
+          apiKey === GCP_VERTEX_GOOGLE_CREDENTIALS_MARKER ||
+          apiKey === "<authenticated>";
+        if (isVertexEndpoint && isAdcPlaceholder) {
+          const adcApiKey = await resolveGoogleVertexApiKeyFromAdc(model);
+          if (adcApiKey) {
+            apiKey = adcApiKey;
+          }
+        }
+        const authResult = apiKey ? parseGeminiAuth(apiKey) : undefined;
+        const vertexContext = authResult
+          ? { projectId: authResult.projectId, location: authResult.location }
+          : undefined;
         const fetch = buildGuardedModelFetch(model);
         let params = buildGoogleGenerativeAiParams(model, context, options);
         const nextParams = await options?.onPayload?.(params, model);
         if (nextParams !== undefined) {
           params = nextParams as GoogleGenerateContentRequest;
         }
-        const response = await fetch(buildGoogleRequestUrl(model), {
+        const requestUrl = buildGoogleRequestUrl(model, vertexContext);
+        const response = await fetch(requestUrl, {
           method: "POST",
           headers: buildGoogleHeaders(model, apiKey, options?.headers),
           body: JSON.stringify(params),
@@ -703,6 +807,7 @@ export function createGoogleGenerativeAiTransportStreamFn(): StreamFn {
                   id: toolCallId,
                   name: part.functionCall.name || "",
                   arguments: part.functionCall.args ?? {},
+                  ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
                 };
                 output.content.push(toolCall);
                 const blockIndex = output.content.length - 1;
