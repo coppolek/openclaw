@@ -7,8 +7,8 @@ type SlackSystemEventTestOverrides =
   import("./system-event-test-harness.js").SlackSystemEventTestOverrides;
 
 async function createChannelRuntimeMock() {
-  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/infra-runtime")>(
-    "openclaw/plugin-sdk/infra-runtime",
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/system-events")>(
+    "openclaw/plugin-sdk/system-events",
   );
   return {
     ...actual,
@@ -16,8 +16,8 @@ async function createChannelRuntimeMock() {
   };
 }
 
-vi.mock("openclaw/plugin-sdk/infra-runtime", createChannelRuntimeMock);
-vi.mock("openclaw/plugin-sdk/infra-runtime.js", createChannelRuntimeMock);
+vi.mock("openclaw/plugin-sdk/system-events", createChannelRuntimeMock);
+vi.mock("openclaw/plugin-sdk/system-events.js", createChannelRuntimeMock);
 
 type ReactionHandler = (args: { event: Record<string, unknown>; body: unknown }) => Promise<void>;
 

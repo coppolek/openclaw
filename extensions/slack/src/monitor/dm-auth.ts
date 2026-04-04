@@ -3,7 +3,7 @@ import { createChannelPairingChallengeIssuer } from "openclaw/plugin-sdk/channel
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { resolveSlackAllowListMatch } from "./allow-list.js";
 import type { SlackMonitorContext } from "./context.js";
-import { upsertChannelPairingRequest } from "./conversation.runtime.js";
+import { upsertChannelPairingRequest } from "./pairing.runtime.js";
 
 export async function authorizeSlackDirectMessage(params: {
   ctx: SlackMonitorContext;
