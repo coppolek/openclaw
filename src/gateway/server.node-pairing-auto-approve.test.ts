@@ -1,7 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { WebSocket } from "ws";
 import { type OpenClawConfig, writeConfigFile } from "../config/config.js";
-import { getPairedDevice, listDevicePairing } from "../infra/device-pairing.js";
+import {
+  approveDevicePairing,
+  getPairedDevice,
+  listDevicePairing,
+  requestDevicePairing,
+} from "../infra/device-pairing.js";
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
 import { loadDeviceIdentity, pairDeviceIdentity } from "./device-authz.test-helpers.js";
 import {
@@ -182,6 +187,52 @@ describe("gateway trusted CIDR node pairing auto-approve", () => {
     expect(pending).toHaveLength(1);
     expect(pending[0]?.silent).toBe(false);
     expect(await getPairedDevice(loaded.identity.deviceId)).toBeNull();
+  });
+
+  test("does not auto-approve re-pair requests on matching CIDRs", async () => {
+    if (!started) {
+      throw new Error("expected started gateway server");
+    }
+    await writeGatewayConfig({
+      trustedProxies: ["127.0.0.1"],
+      nodes: {
+        pairing: {
+          autoApproveCidrs: ["203.0.113.0/24"],
+        },
+      },
+    });
+    const legit = loadDeviceIdentity("trusted-cidr-node-repair-legit");
+    const stale = loadDeviceIdentity("trusted-cidr-node-repair-stale");
+
+    const seeded = await requestDevicePairing({
+      deviceId: legit.identity.deviceId,
+      publicKey: stale.publicKey,
+      role: "node",
+      scopes: [],
+      clientId: NODE_CLIENT.id,
+      clientMode: NODE_CLIENT.mode,
+    });
+    const seededApproval = await approveDevicePairing(seeded.request.requestId);
+    expect(seededApproval?.status).toBe("approved");
+    expect((await getPairedDevice(legit.identity.deviceId))?.publicKey).toBe(stale.publicKey);
+
+    const attempt = await connectGatewayDevice({
+      port: started.port,
+      headers: TRUSTED_PROXY_HEADERS,
+      identityPath: legit.identityPath,
+      role: "node",
+      scopes: [],
+      client: NODE_CLIENT,
+    });
+    expect(attempt.res.ok).toBe(false);
+    expect(attempt.res.error?.message).toBe("pairing required");
+    expect(pairingReasonFromResponse(attempt.res)).toBe("not-paired");
+    attempt.ws.close();
+
+    const pending = pendingForDevice(await listDevicePairing(), legit.identity.deviceId);
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.silent).toBe(false);
+    expect((await getPairedDevice(legit.identity.deviceId))?.publicKey).toBe(stale.publicKey);
   });
 
   test("keeps operator pairing manual even on matching CIDRs", async () => {

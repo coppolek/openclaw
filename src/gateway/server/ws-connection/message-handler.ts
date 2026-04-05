@@ -924,8 +924,9 @@ export function attachGatewayWsMessageHandler(params: {
               isWebchat,
               reason,
             });
-            const allowSilentTrustedCidrsNodePairing = shouldAutoApproveNodePairingFromTrustedCidrs(
-              {
+            const allowSilentTrustedCidrsNodePairing =
+              !existingPairedDevice &&
+              shouldAutoApproveNodePairingFromTrustedCidrs({
                 role,
                 reason,
                 scopes,
@@ -935,8 +936,7 @@ export function attachGatewayWsMessageHandler(params: {
                 reportedClientIpSource,
                 reportedClientIp,
                 autoApproveCidrs: configSnapshot.gateway?.nodes?.pairing?.autoApproveCidrs,
-              },
-            );
+              });
             // QR bootstrap onboarding stays single-use, but the first node bootstrap handshake
             // should seed bounded device tokens and only consume the bootstrap token once the
             // hello-ok path succeeds so reconnects can recover from pre-hello failures.
