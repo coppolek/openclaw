@@ -91,7 +91,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     lastStreamedReasoning: undefined,
     lastBlockReplyText: undefined,
     reasoningStreamOpen: false,
-    reasoningEmitted: false,
+    reasoningEmitCount: 0,
     assistantMessageIndex: 0,
     lastAssistantTextMessageIndex: -1,
     lastAssistantTextNormalized: undefined,
@@ -666,7 +666,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
       },
     });
 
-    state.reasoningEmitted = true;
+    state.reasoningEmitCount += 1;
 
     void params.onReasoningStream({
       text: formatted,
@@ -690,7 +690,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     pendingMessagingTargets.clear();
     state.successfulCronAdds = 0;
     state.pendingMessagingMediaUrls.clear();
-    state.reasoningEmitted = false;
+    state.reasoningEmitCount = 0;
     state.pendingToolMediaUrls = [];
     state.pendingToolAudioAsVoice = false;
     state.deterministicApprovalPromptPending = false;
@@ -786,7 +786,8 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     // Used to suppress agent's confirmation text (e.g., "Respondi no Telegram!")
     // which is generated AFTER the tool sends the actual answer.
     didSendViaMessagingTool: () => messagingToolSentTexts.length > 0,
-    didEmitReasoning: () => state.reasoningEmitted,
+    getReasoningEmitCount: () => state.reasoningEmitCount,
+    didEmitAssistantUpdate: () => state.emittedAssistantUpdate,
     didSendDeterministicApprovalPrompt: () => state.deterministicApprovalPromptSent,
     getLastToolError: () => (state.lastToolError ? { ...state.lastToolError } : undefined),
     getUsageTotals,

@@ -192,15 +192,15 @@ describe("sessions_yield helpers", () => {
   });
 
   it("strips trailing yield interrupt artifacts from memory and transcript state", () => {
-    const replaceMessages = vi.fn();
     const rewriteFile = vi.fn();
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "hi" }] },
+      { role: "custom", customType: "openclaw.sessions_yield_interrupt" },
+      { role: "assistant", stopReason: "aborted" },
+    ];
     const activeSession = {
-      messages: [
-        { role: "user", content: [{ type: "text", text: "hi" }] },
-        { role: "custom", customType: "openclaw.sessions_yield_interrupt" },
-        { role: "assistant", stopReason: "aborted" },
-      ],
-      agent: { replaceMessages },
+      messages,
+      agent: { state: { messages } },
       sessionManager: {
         fileEntries: [
           { type: "session", id: "session-root" },
@@ -228,7 +228,7 @@ describe("sessions_yield helpers", () => {
 
     stripSessionsYieldArtifacts(activeSession as never);
 
-    expect(replaceMessages).toHaveBeenCalledWith([
+    expect(activeSession.agent.state.messages).toEqual([
       { role: "user", content: [{ type: "text", text: "hi" }] },
     ]);
     expect(activeSession.sessionManager.fileEntries).toEqual([
@@ -294,7 +294,8 @@ describe("runPromptWithRateLimitRetry", () => {
         toolMetas: [],
         didSendViaMessagingTool: () => false,
         getSuccessfulCronAdds: () => 0,
-        didEmitReasoning: () => false,
+        getReasoningEmitCount: () => 0,
+        didEmitAssistantUpdate: () => false,
         getCompactionCount: () => 0,
         provider: "openai",
         modelId: "mock-1",
@@ -321,7 +322,8 @@ describe("runPromptWithRateLimitRetry", () => {
         toolMetas: [],
         didSendViaMessagingTool: () => false,
         getSuccessfulCronAdds: () => 0,
-        didEmitReasoning: () => false,
+        getReasoningEmitCount: () => 0,
+        didEmitAssistantUpdate: () => false,
         getCompactionCount: () => 0,
         provider: "openai",
         modelId: "mock-1",
@@ -340,7 +342,11 @@ describe("runPromptWithRateLimitRetry", () => {
 
   it("does not retry when reasoning has been emitted", async () => {
     const session = createRetryTestSession();
+    // Simulate reasoning being emitted during the prompt call: counter starts
+    // at 0 (baseline captured at entry) and increments to 1 during prompt.
+    let reasoningEmitCount = 0;
     session.prompt.mockImplementation(async () => {
+      reasoningEmitCount = 1;
       session.messages.push(createRateLimitAssistant());
     });
 
@@ -354,7 +360,8 @@ describe("runPromptWithRateLimitRetry", () => {
         toolMetas: [],
         didSendViaMessagingTool: () => false,
         getSuccessfulCronAdds: () => 0,
-        didEmitReasoning: () => true,
+        getReasoningEmitCount: () => reasoningEmitCount,
+        didEmitAssistantUpdate: () => false,
         getCompactionCount: () => 0,
         provider: "openai",
         modelId: "mock-1",
@@ -406,7 +413,8 @@ describe("runPromptWithRateLimitRetry", () => {
       toolMetas: [],
       didSendViaMessagingTool: () => false,
       getSuccessfulCronAdds: () => 0,
-      didEmitReasoning: () => false,
+      getReasoningEmitCount: () => 0,
+      didEmitAssistantUpdate: () => false,
       getCompactionCount: () => compactionCount,
       provider: "openai",
       modelId: "mock-1",
@@ -486,7 +494,8 @@ describe("runPromptWithRateLimitRetry", () => {
       toolMetas: [],
       didSendViaMessagingTool: () => false,
       getSuccessfulCronAdds: () => 0,
-      didEmitReasoning: () => false,
+      getReasoningEmitCount: () => 0,
+      didEmitAssistantUpdate: () => false,
       getCompactionCount: () => compactionCount,
       provider: "openai",
       modelId: "mock-1",

@@ -282,7 +282,8 @@ export async function runPromptWithRateLimitRetry(params: {
   toolMetas: Array<unknown>;
   didSendViaMessagingTool: () => boolean;
   getSuccessfulCronAdds: () => number;
-  didEmitReasoning: () => boolean;
+  getReasoningEmitCount: () => number;
+  didEmitAssistantUpdate: () => boolean;
   getCompactionCount: () => number;
   abortSignal?: AbortSignal;
   provider: string;
@@ -290,6 +291,7 @@ export async function runPromptWithRateLimitRetry(params: {
 }) {
   let preRetryMessages = params.activeSession.messages.slice();
   let compactionBaseline = params.getCompactionCount();
+  let reasoningBaseline = params.getReasoningEmitCount();
   await retryPromptOnRateLimit({
     prompt: () =>
       params.images.length > 0
@@ -326,7 +328,8 @@ export async function runPromptWithRateLimitRetry(params: {
       params.toolMetas.length === 0 &&
       !params.didSendViaMessagingTool() &&
       params.getSuccessfulCronAdds() === 0 &&
-      !params.didEmitReasoning(),
+      params.getReasoningEmitCount() <= reasoningBaseline &&
+      !params.didEmitAssistantUpdate(),
     rewind: () => {
       const currentCompactions = params.getCompactionCount();
       if (currentCompactions > compactionBaseline) {
@@ -350,6 +353,7 @@ export async function runPromptWithRateLimitRetry(params: {
         }
         preRetryMessages = current.slice(0, end);
         compactionBaseline = currentCompactions;
+        reasoningBaseline = params.getReasoningEmitCount();
       }
       if (params.activeSession.messages.length !== preRetryMessages.length) {
         params.activeSession.replaceMessages(preRetryMessages);
@@ -1545,7 +1549,8 @@ export async function runEmbeddedAttempt(
         getMessagingToolSentTargets,
         getSuccessfulCronAdds,
         didSendViaMessagingTool,
-        didEmitReasoning,
+        getReasoningEmitCount,
+        didEmitAssistantUpdate,
         getLastToolError,
         getUsageTotals,
         getCompactionCount,
@@ -1994,7 +1999,8 @@ export async function runEmbeddedAttempt(
               toolMetas,
               didSendViaMessagingTool,
               getSuccessfulCronAdds,
-              didEmitReasoning,
+              getReasoningEmitCount,
+              didEmitAssistantUpdate,
               getCompactionCount,
               abortSignal: runAbortController.signal,
               provider: params.provider,
