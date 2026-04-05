@@ -218,10 +218,15 @@ function buildGoogleRequestUrl(
       model.headers?.["x-openclaw-vertex-project-id"] ||
       process.env.GOOGLE_CLOUD_PROJECT ||
       process.env.GOOGLE_CLOUD_PROJECT_ID;
+    // Prefer vertexContext (from auth JSON blob) or explicit header, then env,
+    // then extract from the already-normalized baseUrl (set by normalizeTransport),
+    // then fall back to a safe default.
+    const locationFromBaseUrl = resolveProviderEndpoint(baseUrl).googleVertexRegion;
     const location =
       vertexContext?.location ||
       model.headers?.["x-openclaw-vertex-location"] ||
       process.env.GOOGLE_CLOUD_LOCATION ||
+      locationFromBaseUrl ||
       "us-central1";
     if (projectId) {
       return buildGoogleVertexRequestUrl(baseUrl, model.id, projectId, location);

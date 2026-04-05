@@ -16,6 +16,7 @@ import {
   resolveGoogleVertexBaseUrl,
   resolveGoogleVertexClientRegion,
   resolveGoogleVertexConfigApiKey,
+  resolveGoogleVertexRegionFromBaseUrl,
 } from "./vertex-region.js";
 
 let googleImageGenerationProviderPromise: Promise<ImageGenerationProvider> | null = null;
@@ -146,12 +147,42 @@ export default definePluginEntry({
         },
       },
       resolveConfigApiKey: ({ env }) => resolveGoogleVertexConfigApiKey(env),
+      // Format stored OAuth credentials as the JSON blob that parseGeminiAuth
+      // expects: { token, projectId }. Without this, buildOAuthApiKey falls back
+      // to cred.access (the raw token) which parseGeminiAuth treats as an API key
+      // (x-goog-api-key) rather than a Bearer token, breaking Vertex AI requests.
+      formatApiKey: (cred) => formatGoogleOauthApiKey(cred),
       normalizeModelId: ({ modelId }) => normalizeGoogleModelId(modelId),
       resolveDynamicModel: (ctx) =>
         resolveGoogle31ForwardCompatModel({ providerId: "google-vertex", ctx }),
       ...GOOGLE_GEMINI_PROVIDER_HOOKS_WITH_TOOL_COMPAT,
       isModernModelRef: ({ modelId }) => isModernGoogleModel(modelId),
-      normalizeTransport: ({ baseUrl }) => {
+      // Refresh expired google-vertex OAuth profiles via ADC so that stored
+      // credentials (e.g. from previous OAuth-backed auth flows) do not cause
+      // permanent "No credentials found" failures when the access token expires.
+      refreshOAuth: async (cred) => {
+        const { resolveGoogleVertexAdcToken } = await import("./vertex-adc.js");
+        const token = await resolveGoogleVertexAdcToken();
+        if (!token) {
+          throw new Error(
+            "Google Vertex AI: ADC credentials not available for token refresh. " +
+              "Run `gcloud auth application-default login` and try again.",
+          );
+        }
+        return { ...cred, access: token.accessToken, expires: token.expiresAt };
+      },
+      normalizeTransport: ({ provider, baseUrl }) => {
+        // Guard: skip normalization for providers that are not google-vertex and
+        // whose baseUrl doesn't look like a Google Vertex endpoint.
+        // Without this guard the fallback loop runs this hook for every provider
+        // that has no registered plugin (e.g. user-defined providers like llamacpp),
+        // silently rerouting them to Google Vertex AI and breaking their requests.
+        // We still allow through when provider === "google-vertex" so that pi-ai
+        // template baseUrls ({location}-aiplatform.googleapis.com) are handled by
+        // the env-var fallback in resolveGoogleVertexClientRegion.
+        if (provider !== "google-vertex" && !resolveGoogleVertexRegionFromBaseUrl(baseUrl)) {
+          return undefined;
+        }
         // resolveGoogleVertexClientRegion prefers a real resolved endpoint from baseUrl,
         // but falls back to env when baseUrl is a pi-ai template like {location}-aiplatform.googleapis.com.
         const region = resolveGoogleVertexClientRegion({ baseUrl, env: process.env });
