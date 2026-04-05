@@ -649,27 +649,25 @@ function pushTextBlockEnd(
 // Resolve a real OAuth2 bearer token from ADC for Google Vertex AI requests.
 // The token + project + location are packed into a JSON blob that parseGeminiAuth
 // understands.
-async function resolveGoogleVertexApiKeyFromAdc(
-  model: GoogleTransportModel,
-): Promise<string | undefined> {
-  try {
-    const { resolveGoogleVertexAccessToken } = await import("./google-vertex-adc.js");
-    const token = await resolveGoogleVertexAccessToken();
-    if (!token) {
-      return undefined;
-    }
-    const location =
-      model.headers?.["x-openclaw-vertex-location"] ||
-      process.env.GOOGLE_CLOUD_LOCATION ||
-      "us-central1";
-    return JSON.stringify({
-      token: token.accessToken,
-      projectId: token.projectId,
-      location,
-    });
-  } catch {
-    return undefined;
+async function resolveGoogleVertexApiKeyFromAdc(model: GoogleTransportModel): Promise<string> {
+  // Let errors propagate — callers must not silently fall back to sending a
+  // sentinel as a literal API key, which causes a confusing 401.
+  const { resolveGoogleVertexAccessToken } = await import("./google-vertex-adc.js");
+  const token = await resolveGoogleVertexAccessToken();
+  if (!token) {
+    throw new Error(
+      "Google Vertex AI: no ADC credentials found. Run `gcloud auth application-default login` and ensure the ADC file is an authorized_user credential.",
+    );
   }
+  const location =
+    model.headers?.["x-openclaw-vertex-location"] ||
+    process.env.GOOGLE_CLOUD_LOCATION ||
+    "us-central1";
+  return JSON.stringify({
+    token: token.accessToken,
+    projectId: token.projectId,
+    location,
+  });
 }
 
 export function createGoogleGenerativeAiTransportStreamFn(): StreamFn {
@@ -698,10 +696,7 @@ export function createGoogleGenerativeAiTransportStreamFn(): StreamFn {
           apiKey === GCP_VERTEX_GOOGLE_CREDENTIALS_MARKER ||
           apiKey === "<authenticated>";
         if (isVertexEndpoint && isAdcPlaceholder) {
-          const adcApiKey = await resolveGoogleVertexApiKeyFromAdc(model);
-          if (adcApiKey) {
-            apiKey = adcApiKey;
-          }
+          apiKey = await resolveGoogleVertexApiKeyFromAdc(model);
         }
         const authResult = apiKey ? parseGeminiAuth(apiKey) : undefined;
         const vertexContext = authResult
