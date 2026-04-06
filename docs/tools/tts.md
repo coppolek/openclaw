@@ -9,7 +9,7 @@ title: "Text-to-Speech"
 
 # Text-to-speech (TTS)
 
-OpenClaw can convert outbound replies into audio using ElevenLabs, Google Gemini, Microsoft, MiniMax, or OpenAI.
+OpenClaw can convert outbound replies into audio using ElevenLabs, Google Gemini, Microsoft, MiniMax, OpenAI, or Typecast.
 It works anywhere OpenClaw can send audio.
 
 ## Supported services
@@ -19,6 +19,7 @@ It works anywhere OpenClaw can send audio.
 - **Microsoft** (primary or fallback provider; current bundled implementation uses `node-edge-tts`)
 - **MiniMax** (primary or fallback provider; uses the T2A v2 API)
 - **OpenAI** (primary or fallback provider; also used for summaries)
+- **Typecast** (primary or fallback provider; AI voices with emotion control, 37+ languages)
 
 ### Microsoft speech notes
 
@@ -35,12 +36,13 @@ or ElevenLabs.
 
 ## Optional keys
 
-If you want OpenAI, ElevenLabs, Google Gemini, or MiniMax:
+If you want OpenAI, ElevenLabs, Google Gemini, MiniMax, or Typecast:
 
 - `ELEVENLABS_API_KEY` (or `XI_API_KEY`)
 - `GEMINI_API_KEY` (or `GOOGLE_API_KEY`)
 - `MINIMAX_API_KEY`
 - `OPENAI_API_KEY`
+- `TYPECAST_API_KEY`
 
 Microsoft speech does **not** require an API key.
 
@@ -57,6 +59,8 @@ so that provider must also be authenticated if you enable summaries.
 - [MiniMax T2A v2 API](https://platform.minimaxi.com/document/T2A%20V2)
 - [node-edge-tts](https://github.com/SchneeHertz/node-edge-tts)
 - [Microsoft Speech output formats](https://learn.microsoft.com/azure/ai-services/speech-service/rest-text-to-speech#audio-outputs)
+- [Typecast API](https://docs.typecast.ai)
+- [Typecast Voices](https://typecast.ai)
 
 ## Is it enabled by default?
 
@@ -118,6 +122,33 @@ Full schema is in [Gateway configuration](/gateway/configuration).
             useSpeakerBoost: true,
             speed: 1.0,
           },
+        },
+      },
+    },
+  },
+}
+```
+
+### Typecast primary with emotion control
+
+```json5
+{
+  messages: {
+    tts: {
+      auto: "always",
+      provider: "typecast",
+      typecast: {
+        apiKey: "typecast_api_key", // pragma: allowlist secret
+        voiceId: "tc_your_voice_id",
+        model: "ssfm-v30",
+        language: "kor",
+        emotionPreset: "happy",
+        emotionIntensity: 1.2,
+        output: {
+          audioFormat: "mp3",
+          audioTempo: 1.0,
+          volume: 100,
+          audioPitch: 0,
         },
       },
     },
@@ -266,7 +297,7 @@ Then run:
   - `tagged` only sends audio when the reply includes `[[tts:key=value]]` directives or a `[[tts:text]]...[[/tts:text]]` block.
 - `enabled`: legacy toggle (doctor migrates this to `auto`).
 - `mode`: `"final"` (default) or `"all"` (includes tool/block replies).
-- `provider`: speech provider id such as `"elevenlabs"`, `"google"`, `"microsoft"`, `"minimax"`, or `"openai"` (fallback is automatic).
+- `provider`: speech provider id such as `"elevenlabs"`, `"google"`, `"microsoft"`, `"minimax"`, `"openai"`, or `"typecast"` (fallback is automatic).
 - If `provider` is **unset**, OpenClaw uses the first configured speech provider in registry auto-select order.
 - Legacy `provider: "edge"` still works and is normalized to `microsoft`.
 - `summaryModel`: optional cheap model for auto-summary; defaults to `agents.defaults.model.primary`.
@@ -310,6 +341,18 @@ Then run:
 - `providers.microsoft.proxy`: proxy URL for Microsoft speech requests.
 - `providers.microsoft.timeoutMs`: request timeout override (ms).
 - `edge.*`: legacy alias for the same Microsoft settings.
+- `typecast.apiKey`: Typecast API key (falls back to `TYPECAST_API_KEY`).
+- `typecast.baseHost`: override Typecast API base URL (default `https://api.typecast.ai`).
+- `typecast.voiceId`: Typecast voice ID (required; format `tc_xxx` or `uc_xxx`).
+- `typecast.model`: TTS model (`ssfm-v21` or `ssfm-v30`; default `ssfm-v30`).
+- `typecast.language`: ISO 639-3 language code (e.g. `kor`, `eng`, `jpn`). Auto-detected if unset.
+- `typecast.emotionPreset`: emotion preset (`normal`, `happy`, `sad`, `angry`, `whisper`, `toneup`, `tonedown`).
+- `typecast.emotionIntensity`: emotion intensity `0..2` (default `1.0`).
+- `typecast.seed`: integer for reproducible output.
+- `typecast.output.volume`: output volume `0..200` (default `100`).
+- `typecast.output.audioPitch`: pitch adjustment in semitones `-12..12` (default `0`).
+- `typecast.output.audioTempo`: speed multiplier `0.5..2.0` (default `1.0`).
+- `typecast.output.audioFormat`: `wav` or `mp3` (default `mp3`).
 
 ## Model-driven overrides (default on)
 
@@ -334,7 +377,7 @@ Here you go.
 
 Available directive keys (when enabled):
 
-- `provider` (registered speech provider id, for example `openai`, `elevenlabs`, `google`, `minimax`, or `microsoft`; requires `allowProvider: true`)
+- `provider` (registered speech provider id, for example `openai`, `elevenlabs`, `google`, `minimax`, `microsoft`, or `typecast`; requires `allowProvider: true`)
 - `voice` (OpenAI voice), `voiceName` / `voice_name` / `google_voice` (Google voice), or `voiceId` (ElevenLabs / MiniMax)
 - `model` (OpenAI TTS model, ElevenLabs model id, or MiniMax model) or `google_model` (Google TTS model)
 - `stability`, `similarityBoost`, `style`, `speed`, `useSpeakerBoost`
