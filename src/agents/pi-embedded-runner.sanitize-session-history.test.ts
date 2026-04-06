@@ -159,7 +159,7 @@ describe("sanitizeSessionHistory", () => {
   };
 
   const getAssistantContentTypes = (messages: AgentMessage[]) =>
-    getAssistantMessage(messages).content.map((block: { type: string }) => block.type);
+    getAssistantMessage(messages).content.map((block) => block.type);
 
   const makeThinkingAndTextAssistantMessages = (
     thinkingSignature: string = "some_sig",
