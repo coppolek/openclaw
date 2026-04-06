@@ -7,7 +7,6 @@ const SRC_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const REPO_ROOT = resolve(SRC_ROOT, "..");
 const sourceCache = new Map<string, string>();
 const tsFilesCache = new Map<string, string[]>();
-
 type FileFilter = {
   excludeTests?: boolean;
   testOnly?: boolean;
