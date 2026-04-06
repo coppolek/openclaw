@@ -96,6 +96,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     lastStreamedReasoning: undefined,
     lastBlockReplyText: undefined,
     reasoningStreamOpen: false,
+    currentAssistantPhase: undefined,
     assistantMessageIndex: 0,
     lastAssistantStreamItemId: undefined,
     lastAssistantTextMessageIndex: -1,
@@ -205,6 +206,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     state.lastStreamedReasoning = undefined;
     state.lastReasoningSent = undefined;
     state.reasoningStreamOpen = false;
+    state.currentAssistantPhase = undefined;
     state.suppressBlockChunks = false;
     state.assistantMessageIndex += 1;
     state.lastAssistantStreamItemId = undefined;
@@ -562,6 +564,9 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
 
   const emitBlockChunk = (text: string, options?: { assistantMessageIndex?: number }) => {
     if (state.suppressBlockChunks || params.silentExpected) {
+      return;
+    }
+    if (state.currentAssistantPhase === "commentary") {
       return;
     }
     // Strip <think> and <final> blocks across chunk boundaries to avoid leaking reasoning.
