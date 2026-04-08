@@ -13,7 +13,9 @@ import type { ModelCatalogEntry } from "../agents/model-catalog.js";
 import {
   inferUniqueProviderFromConfiguredModels,
   normalizeStoredOverrideModel,
+  legacyModelKey,
   parseModelRef,
+  modelKey,
   resolveConfiguredModelRef,
   resolveDefaultModelForAgent,
   resolvePersistedSelectedModelRef,
@@ -1115,6 +1117,7 @@ export function buildGatewaySessionRow(params: {
   cfg: OpenClawConfig;
   storePath: string;
   store: Record<string, SessionEntry>;
+  catalog?: ModelCatalogEntry[];
   key: string;
   entry?: SessionEntry;
   now?: number;
@@ -1236,13 +1239,28 @@ export function buildGatewaySessionRow(params: {
     );
   const selectedModelProvider = selectedModel?.provider ?? modelProvider ?? DEFAULT_PROVIDER;
   const selectedModelId = selectedModel?.model ?? model ?? DEFAULT_MODEL;
+  const agentThinkingDefault = resolveAgentConfig(cfg, sessionAgentId)?.thinkingDefault;
+  const configuredModels = cfg.agents?.defaults?.models;
+  const selectedModelKey = modelKey(selectedModelProvider, selectedModelId);
+  const selectedLegacyModelKey = legacyModelKey(selectedModelProvider, selectedModelId);
+  const perModelThinking =
+    configuredModels?.[selectedModelKey]?.params?.thinking ??
+    (selectedLegacyModelKey
+      ? configuredModels?.[selectedLegacyModelKey]?.params?.thinking
+      : undefined);
+  const canResolveThinkingDefaultFromConfig =
+    Boolean(agentThinkingDefault) ||
+    Boolean(cfg.agents?.defaults?.thinkingDefault) ||
+    Boolean(perModelThinking);
   const effectiveThinkingDefault =
-    resolveAgentConfig(cfg, sessionAgentId)?.thinkingDefault ??
-    resolveThinkingDefault({
-      cfg,
-      provider: selectedModelProvider,
-      model: selectedModelId,
-    });
+    params.catalog || canResolveThinkingDefaultFromConfig
+      ? resolveThinkingDefault({
+          cfg,
+          provider: selectedModelProvider,
+          model: selectedModelId,
+          catalog: params.catalog,
+        })
+      : undefined;
 
   let derivedTitle: string | undefined;
   let lastMessagePreview: string | undefined;
@@ -1340,9 +1358,10 @@ export function listSessionsFromStore(params: {
   cfg: OpenClawConfig;
   storePath: string;
   store: Record<string, SessionEntry>;
+  catalog?: ModelCatalogEntry[];
   opts: import("./protocol/index.js").SessionsListParams;
 }): SessionsListResult {
-  const { cfg, storePath, store, opts } = params;
+  const { cfg, storePath, store, catalog, opts } = params;
   const now = Date.now();
 
   const includeGlobal = opts.includeGlobal === true;
@@ -1408,6 +1427,7 @@ export function listSessionsFromStore(params: {
         cfg,
         storePath,
         store,
+        catalog,
         key,
         entry,
         now,

@@ -698,6 +698,53 @@ describe("gateway server sessions", () => {
     ws.close();
   });
 
+  test("sessions.list uses the gateway model catalog for effective thinking defaults", async () => {
+    await createSessionStoreDir();
+    testState.agentConfig = {
+      model: { primary: "openai/gpt-5" },
+    };
+    await writeSessionStore({
+      entries: {
+        main: {
+          sessionId: "sess-main",
+          updatedAt: Date.now(),
+          modelProvider: "openai",
+          model: "gpt-5",
+        },
+      },
+    });
+
+    const respond = vi.fn();
+    const sessionsHandlers = await getSessionsHandlers();
+    await sessionsHandlers["sessions.list"]({
+      params: {},
+      respond,
+      context: {
+        loadGatewayModelCatalog: async () => [
+          {
+            provider: "openai",
+            id: "gpt-5",
+            name: "GPT-5",
+            reasoning: true,
+          },
+        ],
+      } as never,
+    });
+
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({
+        sessions: expect.arrayContaining([
+          expect.objectContaining({
+            key: "agent:main:main",
+            effectiveThinkingDefault: "low",
+          }),
+        ]),
+      }),
+      undefined,
+    );
+  });
+
   test("sessions.changed mutation events include live usage metadata", async () => {
     const { dir } = await createSessionStoreDir();
     await fs.writeFile(

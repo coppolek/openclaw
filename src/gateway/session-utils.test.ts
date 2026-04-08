@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
+import type { ModelCatalogEntry } from "../agents/model-catalog.js";
 import { resetConfigRuntimeState, setRuntimeConfigSnapshot } from "../config/config.js";
 import type { OpenClawConfig } from "../config/config.js";
 import type { SessionEntry } from "../config/sessions.js";
@@ -754,6 +755,59 @@ describe("listSessionsFromStore selected model display", () => {
 
     expect(result.sessions[0]?.thinkingLevel).toBe("medium");
     expect(result.sessions[0]?.effectiveThinkingDefault).toBe("high");
+  });
+
+  test("leaves the effective thinking default unset without a catalog when it is not explicitly configured", () => {
+    const cfg = createModelDefaultsConfig({
+      primary: "openai/gpt-5",
+    });
+
+    const result = listSessionsFromStore({
+      cfg,
+      storePath: "/tmp/sessions.json",
+      store: {
+        "agent:main:main": {
+          sessionId: "sess-main",
+          updatedAt: Date.now(),
+          modelProvider: "openai",
+          model: "gpt-5",
+        } as SessionEntry,
+      },
+      opts: {},
+    });
+
+    expect(result.sessions[0]?.effectiveThinkingDefault).toBeUndefined();
+  });
+
+  test("uses the provided model catalog to resolve the effective thinking default", () => {
+    const cfg = createModelDefaultsConfig({
+      primary: "openai/gpt-5",
+    });
+    const catalog: ModelCatalogEntry[] = [
+      {
+        provider: "openai",
+        id: "gpt-5",
+        name: "GPT-5",
+        reasoning: true,
+      },
+    ];
+
+    const result = listSessionsFromStore({
+      cfg,
+      storePath: "/tmp/sessions.json",
+      store: {
+        "agent:main:main": {
+          sessionId: "sess-main",
+          updatedAt: Date.now(),
+          modelProvider: "openai",
+          model: "gpt-5",
+        } as SessionEntry,
+      },
+      catalog,
+      opts: {},
+    });
+
+    expect(result.sessions[0]?.effectiveThinkingDefault).toBe("low");
   });
 });
 
