@@ -127,7 +127,7 @@ export function buildInboundMetaSystemPrompt(
   const channelValue = resolveInboundChannel(ctx);
 
   // Normalize selfJid by stripping device suffix for cleaner model consumption
-  const rawSelfJid = safeTrim(ctx.SelfJid);
+  const rawSelfJid = normalizeOptionalString(ctx.SelfJid);
   const selfJidNormalized = rawSelfJid ? rawSelfJid.replace(/:\d+/, "") : undefined;
 
   const payload = {
@@ -140,7 +140,7 @@ export function buildInboundMetaSystemPrompt(
     response_format:
       options?.includeFormattingHints === false ? undefined : resolveInboundFormattingHints(ctx),
     self_jid: selfJidNormalized,
-    self_e164: safeTrim(ctx.SelfE164),
+    self_e164: normalizeOptionalString(ctx.SelfE164),
   };
 
   // Keep the instructions local to the payload so the meaning survives prompt overrides.
