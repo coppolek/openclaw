@@ -288,6 +288,8 @@ export async function runPromptWithRateLimitRetry(params: {
   abortSignal?: AbortSignal;
   provider: string;
   modelId: string;
+  computeBackoff?: (attempt: number) => number;
+  sleepWithAbort?: (delayMs: number, abortSignal?: AbortSignal) => Promise<void>;
 }) {
   let preRetryMessages = params.activeSession.messages.slice();
   let compactionBaseline = params.getCompactionCount();
@@ -362,6 +364,8 @@ export async function runPromptWithRateLimitRetry(params: {
     abortSignal: params.abortSignal,
     provider: params.provider,
     modelId: params.modelId,
+    computeBackoff: params.computeBackoff,
+    sleepWithAbort: params.sleepWithAbort,
   });
 }
 
