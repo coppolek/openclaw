@@ -809,6 +809,52 @@ describe("listSessionsFromStore selected model display", () => {
 
     expect(result.sessions[0]?.effectiveThinkingDefault).toBe("low");
   });
+
+  test("prefers per-agent thinkingDefault over model and global defaults", () => {
+    const cfg = {
+      agents: {
+        defaults: {
+          thinkingDefault: "low",
+          models: {
+            "openai/gpt-5": {
+              params: { thinking: "high" },
+            },
+          },
+        },
+        list: [
+          {
+            id: "alpha",
+            thinkingDefault: "minimal",
+          },
+        ],
+      },
+    } as OpenClawConfig;
+    const catalog: ModelCatalogEntry[] = [
+      {
+        provider: "openai",
+        id: "gpt-5",
+        name: "GPT-5",
+        reasoning: true,
+      },
+    ];
+
+    const result = listSessionsFromStore({
+      cfg,
+      storePath: "/tmp/sessions.json",
+      store: {
+        "agent:alpha:main": {
+          sessionId: "sess-alpha",
+          updatedAt: Date.now(),
+          modelProvider: "openai",
+          model: "gpt-5",
+        } as SessionEntry,
+      },
+      catalog,
+      opts: {},
+    });
+
+    expect(result.sessions[0]?.effectiveThinkingDefault).toBe("minimal");
+  });
 });
 
 describe("resolveSessionModelIdentityRef", () => {

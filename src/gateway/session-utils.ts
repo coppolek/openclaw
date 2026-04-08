@@ -1253,14 +1253,15 @@ export function buildGatewaySessionRow(params: {
     Boolean(cfg.agents?.defaults?.thinkingDefault) ||
     Boolean(perModelThinking);
   const effectiveThinkingDefault =
-    params.catalog || canResolveThinkingDefaultFromConfig
+    agentThinkingDefault ??
+    (params.catalog || canResolveThinkingDefaultFromConfig
       ? resolveThinkingDefault({
           cfg,
           provider: selectedModelProvider,
           model: selectedModelId,
           catalog: params.catalog,
         })
-      : undefined;
+      : undefined);
 
   let derivedTitle: string | undefined;
   let lastMessagePreview: string | undefined;
