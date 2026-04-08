@@ -15071,6 +15071,9 @@ export const GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA = [
           additionalProperties: {
             type: "object",
             properties: {
+              name: {
+                type: "string",
+              },
               requireMention: {
                 type: "boolean",
               },
@@ -15127,6 +15130,13 @@ export const GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA = [
                   },
                   additionalProperties: false,
                 },
+              },
+              forceActivation: {
+                type: "string",
+                enum: ["always", "mentions", "never"],
+              },
+              systemPrompt: {
+                type: "string",
               },
             },
             additionalProperties: false,
@@ -15322,6 +15332,9 @@ export const GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA = [
                 additionalProperties: {
                   type: "object",
                   properties: {
+                    name: {
+                      type: "string",
+                    },
                     requireMention: {
                       type: "boolean",
                     },
@@ -15378,6 +15391,13 @@ export const GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA = [
                         },
                         additionalProperties: false,
                       },
+                    },
+                    forceActivation: {
+                      type: "string",
+                      enum: ["always", "mentions", "never"],
+                    },
+                    systemPrompt: {
+                      type: "string",
                     },
                   },
                   additionalProperties: false,
