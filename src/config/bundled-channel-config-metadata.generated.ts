@@ -13308,6 +13308,16 @@ export const GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA = [
         ackReaction: {
           type: "string",
         },
+        streamThrottleMs: {
+          type: "integer",
+          minimum: 250,
+          maximum: 9007199254740991,
+        },
+        minInitialChars: {
+          type: "integer",
+          minimum: 0,
+          maximum: 9007199254740991,
+        },
         errorPolicy: {
           type: "string",
           enum: ["always", "once", "silent"],
@@ -14340,6 +14350,16 @@ export const GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA = [
               },
               ackReaction: {
                 type: "string",
+              },
+              streamThrottleMs: {
+                type: "integer",
+                minimum: 250,
+                maximum: 9007199254740991,
+              },
+              minInitialChars: {
+                type: "integer",
+                minimum: 0,
+                maximum: 9007199254740991,
               },
               errorPolicy: {
                 type: "string",
