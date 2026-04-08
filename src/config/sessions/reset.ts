@@ -1,7 +1,5 @@
 import { resolveSessionThreadInfo } from "../../channels/plugins/session-conversation.js";
 import {
-  normalizeLowercaseStringOrEmpty,
-  normalizeOptionalLowercaseString,
   resolveHumanResetBoundaryMs,
   resolveHumanResetCycleKey,
 } from "../../infra/format-time/human-day.js";
