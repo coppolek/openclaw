@@ -7,6 +7,7 @@ import type { GetReplyOptions, ReplyPayload } from "../auto-reply/types.js";
 import type { AgentBinding } from "../config/types.agents.js";
 import type { HooksConfig } from "../config/types.hooks.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { RunCronAgentTurnResult } from "../cron/isolated-agent.js";
 import type { TailscaleWhoisIdentity } from "../infra/tailscale.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 
@@ -17,7 +18,7 @@ export type GetReplyFromConfigFn = (
 ) => Promise<ReplyPayload | ReplyPayload[] | undefined>;
 export type CronIsolatedRunFn = (
   ...args: unknown[]
-) => Promise<{ status: string; summary: string }>;
+) => Promise<RunCronAgentTurnResult>;
 export type AgentCommandFn = (...args: unknown[]) => Promise<void>;
 export type SendWhatsAppFn = (...args: unknown[]) => Promise<{ messageId: string; toJid: string }>;
 export type RunBtwSideQuestionFn = (...args: unknown[]) => Promise<unknown>;
