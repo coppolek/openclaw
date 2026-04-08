@@ -52,12 +52,14 @@ function createSingleAgentAvatarConfig(workspace: string): OpenClawConfig {
 function createModelDefaultsConfig(params: {
   primary: string;
   models?: Record<string, Record<string, never>>;
+  thinkingDefault?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "adaptive";
 }): OpenClawConfig {
   return {
     agents: {
       defaults: {
         model: { primary: params.primary },
         models: params.models,
+        thinkingDefault: params.thinkingDefault,
       },
     },
   } as OpenClawConfig;
@@ -727,6 +729,31 @@ describe("listSessionsFromStore selected model display", () => {
 
     expect(result.sessions[0]?.modelProvider).toBe("anthropic");
     expect(result.sessions[0]?.model).toBe("claude-opus-4-6");
+  });
+
+  test("surfaces the effective thinking default separately from the session override", () => {
+    const cfg = createModelDefaultsConfig({
+      primary: "openai/gpt-5",
+      thinkingDefault: "high",
+    });
+
+    const result = listSessionsFromStore({
+      cfg,
+      storePath: "/tmp/sessions.json",
+      store: {
+        "agent:main:main": {
+          sessionId: "sess-main",
+          updatedAt: Date.now(),
+          modelProvider: "openai",
+          model: "gpt-5",
+          thinkingLevel: "medium",
+        } as SessionEntry,
+      },
+      opts: {},
+    });
+
+    expect(result.sessions[0]?.thinkingLevel).toBe("medium");
+    expect(result.sessions[0]?.effectiveThinkingDefault).toBe("high");
   });
 });
 

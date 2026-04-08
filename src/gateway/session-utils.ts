@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  resolveAgentConfig,
   resolveAgentEffectiveModelPrimary,
   resolveAgentModelFallbacksOverride,
   resolveAgentWorkspaceDir,
@@ -16,6 +17,7 @@ import {
   resolveConfiguredModelRef,
   resolveDefaultModelForAgent,
   resolvePersistedSelectedModelRef,
+  resolveThinkingDefault,
 } from "../agents/model-selection.js";
 import {
   getSessionDisplaySubagentRunByChildSessionKey,
@@ -1232,6 +1234,15 @@ export function buildGatewaySessionRow(params: {
         allowAsyncLoad: false,
       }),
     );
+  const selectedModelProvider = selectedModel?.provider ?? modelProvider ?? DEFAULT_PROVIDER;
+  const selectedModelId = selectedModel?.model ?? model ?? DEFAULT_MODEL;
+  const effectiveThinkingDefault =
+    resolveAgentConfig(cfg, sessionAgentId)?.thinkingDefault ??
+    resolveThinkingDefault({
+      cfg,
+      provider: selectedModelProvider,
+      model: selectedModelId,
+    });
 
   let derivedTitle: string | undefined;
   let lastMessagePreview: string | undefined;
@@ -1274,6 +1285,7 @@ export function buildGatewaySessionRow(params: {
     systemSent: entry?.systemSent,
     abortedLastRun: entry?.abortedLastRun,
     thinkingLevel: entry?.thinkingLevel,
+    effectiveThinkingDefault,
     fastMode: entry?.fastMode,
     verboseLevel: entry?.verboseLevel,
     reasoningLevel: entry?.reasoningLevel,
