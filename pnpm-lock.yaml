@@ -1061,6 +1061,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
+  extensions/serper: {}
+
   extensions/sglang:
     devDependencies:
       '@openclaw/plugin-sdk':
