@@ -426,6 +426,39 @@ describe("createAcpDispatchDeliveryCoordinator", () => {
     );
   });
 
+  it("passes accountId into TTS runtime when ACP ttsChannel is feishu", async () => {
+    const coordinator = createAcpDispatchDeliveryCoordinator({
+      cfg: createAcpTestConfig({
+        messages: {
+          tts: {
+            auto: "always",
+            provider: "openai",
+          },
+        },
+      }),
+      ctx: buildTestCtx({
+        Provider: "feishu",
+        Surface: "feishu",
+        AccountId: "english-bot",
+        SessionKey: "agent:codex-acp:session-1",
+      }),
+      dispatcher: createDispatcher(),
+      inboundAudio: false,
+      ttsChannel: "feishu",
+      shouldRouteToOriginating: false,
+    });
+
+    await coordinator.deliver("final", { text: "hello from acp" });
+
+    expect(ttsMocks.maybeApplyTtsToPayload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "feishu",
+        accountId: "english-bot",
+        kind: "final",
+      }),
+    );
+  });
+
   it("treats routed discord block text as visible", async () => {
     const coordinator = createAcpDispatchDeliveryCoordinator({
       cfg: createAcpTestConfig(),
