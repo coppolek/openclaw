@@ -310,7 +310,7 @@ export async function buildActivity(
         conversationRef.conversation?.conversationType,
       );
       const isPersonal = conversationType === "personal";
-      const isImage = media.kind === "image";
+      const isImage = contentType?.startsWith("image/") ?? false;
 
       if (
         requiresFileConsent({
@@ -327,6 +327,9 @@ export async function buildActivity(
           conversationId,
           description: msg.text || undefined,
         });
+
+        consentActivity.channelData = activity.channelData;
+        consentActivity.entities = activity.entities;
 
         // Return the consent activity (caller sends it)
         return consentActivity;
