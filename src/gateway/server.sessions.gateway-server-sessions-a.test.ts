@@ -717,8 +717,16 @@ describe("gateway server sessions", () => {
     const respond = vi.fn();
     const sessionsHandlers = await getSessionsHandlers();
     await sessionsHandlers["sessions.list"]({
+      req: {
+        type: "req",
+        id: "req-sessions-list-thinking-default",
+        method: "sessions.list",
+        params: {},
+      },
       params: {},
       respond,
+      client: null,
+      isWebchatConnect: () => false,
       context: {
         loadGatewayModelCatalog: async () => [
           {
