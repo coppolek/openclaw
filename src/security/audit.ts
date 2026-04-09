@@ -779,7 +779,7 @@ export function collectLoggingFindings(cfg: OpenClawConfig): SecurityAuditFindin
       severity: "warn",
       title: "Tool summary redaction is disabled",
       detail: `logging.redactSensitive="off" can leak secrets into logs and status output.`,
-      remediation: `Set logging.redactSensitive="tools".`,
+      remediation: `Set logging.redactSensitive="tools" or "all".`,
     },
   ];
 }
