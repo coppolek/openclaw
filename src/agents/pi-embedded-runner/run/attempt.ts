@@ -96,8 +96,8 @@ import {
 } from "../../session-write-lock.js";
 import { detectRuntimeShell } from "../../shell-utils.js";
 import {
-  applySkillEnvOverrides,
-  applySkillEnvOverridesFromSnapshot,
+  applySkillEnvOverridesFromSnapshotWithResult,
+  applySkillEnvOverridesWithResult,
   resolveSkillsPromptForRun,
 } from "../../skills.js";
 import { resolveSystemPromptOverride } from "../../system-prompt-override.js";
@@ -134,7 +134,11 @@ import {
 import { buildEmbeddedSandboxInfo } from "../sandbox-info.js";
 import { prewarmSessionFile, trackSessionManagerAccess } from "../session-manager-cache.js";
 import { prepareSessionManagerForRun } from "../session-manager-init.js";
-import { resolveEmbeddedRunSkillEntries } from "../skills-runtime.js";
+import {
+  resolveEmbeddedRunAllowedSensitiveKeys,
+  resolveEmbeddedRunSkillEntries,
+  syncCurrentSkillEnvToSandbox,
+} from "../skills-runtime.js";
 import {
   describeEmbeddedAgentStreamStrategy,
   resetEmbeddedAgentBaseStreamFnCacheForTest,
@@ -344,11 +348,21 @@ export async function runEmbeddedAttempt(
 
   await fs.mkdir(resolvedWorkspace, { recursive: true });
 
+  // Collect skill-declared env var names before sandbox creation so they can
+  // bypass the default block list during container creation. On the non-snapshot
+  // path, only eligible skills should widen the sandbox allowlist.
+  const allowedSensitiveKeys = resolveEmbeddedRunAllowedSensitiveKeys({
+    workspaceDir: resolvedWorkspace,
+    config: params.config,
+    skillsSnapshot: params.skillsSnapshot,
+  });
+
   const sandboxSessionKey = params.sessionKey?.trim() || params.sessionId;
   const sandbox = await resolveSandboxContext({
     config: params.config,
     sessionKey: sandboxSessionKey,
     workspaceDir: resolvedWorkspace,
+    allowedSensitiveKeys,
   });
   const effectiveWorkspace = sandbox?.enabled
     ? sandbox.workspaceAccess === "rw"
@@ -370,15 +384,20 @@ export async function runEmbeddedAttempt(
       agentId: sessionAgentId,
       skillsSnapshot: params.skillsSnapshot,
     });
-    restoreSkillEnv = params.skillsSnapshot
-      ? applySkillEnvOverridesFromSnapshot({
+    const skillEnvOverrides = params.skillsSnapshot
+      ? applySkillEnvOverridesFromSnapshotWithResult({
           snapshot: params.skillsSnapshot,
           config: params.config,
         })
-      : applySkillEnvOverrides({
+      : applySkillEnvOverridesWithResult({
           skills: skillEntries ?? [],
           config: params.config,
         });
+    restoreSkillEnv = skillEnvOverrides.restore;
+    syncCurrentSkillEnvToSandbox({
+      sandbox,
+      envKeys: skillEnvOverrides.injectedKeys,
+    });
 
     const skillsPrompt = resolveSkillsPromptForRun({
       skillsSnapshot: params.skillsSnapshot,
