@@ -1,5 +1,7 @@
+import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { streamSimple } from "@mariozechner/pi-ai";
-import { describe, expect, it, vi } from "vitest";
+import type { PromptOptions } from "@mariozechner/pi-coding-agent";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../../config/config.js";
 import { appendBootstrapPromptWarning } from "../../bootstrap-budget.js";
 import { SYSTEM_PROMPT_CACHE_BOUNDARY } from "../../system-prompt-cache-boundary.js";
@@ -8,6 +10,8 @@ import {
   buildAfterTurnRuntimeContext,
   composeSystemPromptWithHookContext,
   decodeHtmlEntitiesInObject,
+  runPromptWithRateLimitRetry,
+  persistSessionsYieldContextMessage,
   prependSystemPromptAddition,
   resetEmbeddedAgentBaseStreamFnCacheForTest,
   resolveEmbeddedAgentBaseStreamFn,
@@ -20,12 +24,29 @@ import {
   wrapStreamFnSanitizeMalformedToolCalls,
   wrapStreamFnTrimToolCallNames,
 } from "./attempt.js";
+import {
+  buildSessionsYieldContextMessage,
+  queueSessionsYieldInterruptMessage,
+  stripSessionsYieldArtifacts,
+} from "./attempt.sessions-yield.js";
 
 type FakeWrappedStream = {
   result: () => Promise<unknown>;
   [Symbol.asyncIterator]: () => AsyncIterator<unknown>;
 };
 
+const baseAssistantUsage = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+};
+
+beforeEach(() => {
+  vi.useRealTimers();
+});
 function createFakeStream(params: {
   events: unknown[];
   resultMessage: unknown;
@@ -125,6 +146,393 @@ describe("resolvePromptBuildHookResult", () => {
     expect(result.prependContext).toBe("prompt context\n\nlegacy context");
     expect(result.prependSystemContext).toBe("prompt prepend\n\nlegacy prepend");
     expect(result.appendSystemContext).toBe("prompt append\n\nlegacy append");
+  });
+});
+
+describe("sessions_yield helpers", () => {
+  it("builds a hidden follow-up context note", () => {
+    expect(buildSessionsYieldContextMessage("Waiting for subagent")).toContain(
+      "Waiting for subagent",
+    );
+    expect(buildSessionsYieldContextMessage("Waiting for subagent")).toContain(
+      "ended intentionally via sessions_yield",
+    );
+  });
+
+  it("queues a hidden interrupt steering message", () => {
+    const steer = vi.fn();
+    queueSessionsYieldInterruptMessage({ agent: { steer } });
+    expect(steer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: "custom",
+        customType: "openclaw.sessions_yield_interrupt",
+        display: false,
+        details: { source: "sessions_yield" },
+      }),
+    );
+  });
+
+  it("persists a hidden yield context message without triggering a turn", async () => {
+    const sendCustomMessage = vi.fn(async () => {});
+    await persistSessionsYieldContextMessage(
+      {
+        sendCustomMessage,
+      },
+      "Waiting for subagent",
+    );
+    expect(sendCustomMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customType: "openclaw.sessions_yield",
+        display: false,
+        details: { source: "sessions_yield", message: "Waiting for subagent" },
+        content: expect.stringContaining("Waiting for subagent"),
+      }),
+      { triggerTurn: false },
+    );
+  });
+
+  it("strips trailing yield interrupt artifacts from memory and transcript state", () => {
+    const rewriteFile = vi.fn();
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "hi" }] },
+      { role: "custom", customType: "openclaw.sessions_yield_interrupt" },
+      { role: "assistant", stopReason: "aborted" },
+    ];
+    const activeSession = {
+      messages,
+      agent: { state: { messages } },
+      sessionManager: {
+        fileEntries: [
+          { type: "session", id: "session-root" },
+          {
+            type: "custom_message",
+            id: "interrupt",
+            parentId: "session-root",
+            customType: "openclaw.sessions_yield_interrupt",
+          },
+          {
+            type: "message",
+            id: "aborted",
+            parentId: "interrupt",
+            message: { role: "assistant", stopReason: "aborted" },
+          },
+        ],
+        byId: new Map([
+          ["interrupt", { id: "interrupt" }],
+          ["aborted", { id: "aborted" }],
+        ]),
+        leafId: "aborted",
+        _rewriteFile: rewriteFile,
+      },
+    };
+
+    stripSessionsYieldArtifacts(activeSession as never);
+
+    expect(activeSession.agent.state.messages).toEqual([
+      { role: "user", content: [{ type: "text", text: "hi" }] },
+    ]);
+    expect(activeSession.sessionManager.fileEntries).toEqual([
+      { type: "session", id: "session-root" },
+    ]);
+    expect(activeSession.sessionManager.byId.has("interrupt")).toBe(false);
+    expect(activeSession.sessionManager.byId.has("aborted")).toBe(false);
+    expect(activeSession.sessionManager.leafId).toBe("session-root");
+    expect(rewriteFile).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("runPromptWithRateLimitRetry", () => {
+  const computeBackoff = vi.fn((_attempt: number) => 1_000);
+  const sleepWithAbort = vi.fn(async (_delayMs: number, _abortSignal?: AbortSignal) => undefined);
+
+  beforeEach(() => {
+    computeBackoff.mockClear();
+    computeBackoff.mockImplementation((attempt: number) => attempt * 1_000);
+    sleepWithAbort.mockReset();
+    sleepWithAbort.mockImplementation(async () => undefined);
+  });
+
+  function createRetryTestSession() {
+    const initialMessages: AgentMessage[] = [
+      {
+        role: "user",
+        content: [{ type: "text", text: "hello" }],
+        timestamp: Date.now(),
+      },
+    ];
+    const session = {
+      messages: initialMessages,
+      prompt: vi.fn<(prompt: string, options?: PromptOptions) => Promise<void>>(),
+      agent: {
+        replaceMessages: vi.fn((messages: AgentMessage[]) => {
+          session.messages = messages.slice();
+        }),
+      },
+      replaceMessages: (messages: AgentMessage[]) => {
+        session.agent.replaceMessages(messages);
+      },
+    };
+    return session;
+  }
+
+  function createRateLimitAssistant() {
+    return {
+      role: "assistant" as const,
+      content: [],
+      api: "openai-responses",
+      provider: "openai",
+      model: "mock-1",
+      usage: baseAssistantUsage,
+      stopReason: "error" as const,
+      errorMessage: "Too many requests",
+      timestamp: Date.now(),
+    };
+  }
+
+  it("rethrows exhausted thrown rate limits so callers stay on the promptError path", async () => {
+    const session = createRetryTestSession();
+    const error = Object.assign(new Error("Too Many Requests"), { status: 429 });
+    session.prompt.mockRejectedValue(error);
+
+    await expect(
+      runPromptWithRateLimitRetry({
+        activeSession: session,
+        effectivePrompt: "hello",
+        images: [],
+        abortable: async <T>(promise: Promise<T>) => await promise,
+        assistantTexts: [],
+        toolMetas: [],
+        didSendViaMessagingTool: () => false,
+        getSuccessfulCronAdds: () => 0,
+        getReasoningEmitCount: () => 0,
+        didEmitAssistantUpdate: () => false,
+        getCompactionCount: () => 0,
+        provider: "openai",
+        modelId: "mock-1",
+        computeBackoff,
+        sleepWithAbort,
+      }),
+    ).rejects.toBe(error);
+
+    expect(session.prompt).toHaveBeenCalledTimes(4);
+    expect(session.agent.replaceMessages).not.toHaveBeenCalled();
+    expect(computeBackoff).toHaveBeenNthCalledWith(1, 1);
+    expect(computeBackoff).toHaveBeenNthCalledWith(2, 2);
+    expect(computeBackoff).toHaveBeenNthCalledWith(3, 3);
+    expect(sleepWithAbort).toHaveBeenCalledTimes(3);
+  });
+
+  it("rewinds intermediate terminal rate-limit assistants and returns the final assistant failure", async () => {
+    const session = createRetryTestSession();
+    session.prompt.mockImplementation(async () => {
+      session.messages.push(createRateLimitAssistant());
+    });
+
+    await expect(
+      runPromptWithRateLimitRetry({
+        activeSession: session,
+        effectivePrompt: "hello",
+        images: [],
+        abortable: async <T>(promise: Promise<T>) => await promise,
+        assistantTexts: [],
+        toolMetas: [],
+        didSendViaMessagingTool: () => false,
+        getSuccessfulCronAdds: () => 0,
+        getReasoningEmitCount: () => 0,
+        didEmitAssistantUpdate: () => false,
+        getCompactionCount: () => 0,
+        provider: "openai",
+        modelId: "mock-1",
+        computeBackoff,
+        sleepWithAbort,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(session.prompt).toHaveBeenCalledTimes(4);
+    expect(session.agent.replaceMessages).toHaveBeenCalledTimes(3);
+    expect(computeBackoff).toHaveBeenNthCalledWith(1, 1);
+    expect(computeBackoff).toHaveBeenNthCalledWith(2, 2);
+    expect(computeBackoff).toHaveBeenNthCalledWith(3, 3);
+    expect(sleepWithAbort).toHaveBeenCalledTimes(3);
+    expect(session.messages).toHaveLength(2);
+    expect(session.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      stopReason: "error",
+      errorMessage: "Too many requests",
+    });
+  });
+
+  it("does not retry when reasoning has been emitted", async () => {
+    const session = createRetryTestSession();
+    // Simulate reasoning being emitted during the prompt call: counter starts
+    // at 0 (baseline captured at entry) and increments to 1 during prompt.
+    let reasoningEmitCount = 0;
+    session.prompt.mockImplementation(async () => {
+      reasoningEmitCount = 1;
+      session.messages.push(createRateLimitAssistant());
+    });
+
+    await expect(
+      runPromptWithRateLimitRetry({
+        activeSession: session,
+        effectivePrompt: "hello",
+        images: [],
+        abortable: async <T>(promise: Promise<T>) => await promise,
+        assistantTexts: [],
+        toolMetas: [],
+        didSendViaMessagingTool: () => false,
+        getSuccessfulCronAdds: () => 0,
+        getReasoningEmitCount: () => reasoningEmitCount,
+        didEmitAssistantUpdate: () => false,
+        getCompactionCount: () => 0,
+        provider: "openai",
+        modelId: "mock-1",
+        computeBackoff,
+        sleepWithAbort,
+      }),
+    ).resolves.toBeUndefined();
+
+    // Should not retry — reasoning was already streamed to the user.
+    expect(session.prompt).toHaveBeenCalledTimes(1);
+    expect(session.agent.replaceMessages).not.toHaveBeenCalled();
+  });
+
+  it("rewinds to post-compaction state when compaction occurs during prompt", async () => {
+    const session = createRetryTestSession();
+    let compactionCount = 0;
+    let promptCalls = 0;
+
+    session.prompt.mockImplementation(async () => {
+      promptCalls++;
+      if (promptCalls === 1) {
+        // Simulate compaction during first prompt: replace messages with compacted set
+        const compacted = [
+          {
+            role: "user" as const,
+            content: [{ type: "text" as const, text: "compacted summary" }],
+            timestamp: Date.now(),
+          },
+        ];
+        session.messages = compacted;
+        compactionCount++;
+        // Then prompt adds user message + error assistant
+        session.messages.push(
+          {
+            role: "user" as const,
+            content: [{ type: "text" as const, text: "hello" }],
+            timestamp: Date.now(),
+          },
+          createRateLimitAssistant(),
+        );
+      }
+      // Second prompt succeeds — just add a normal assistant
+    });
+
+    await runPromptWithRateLimitRetry({
+      activeSession: session,
+      effectivePrompt: "hello",
+      images: [],
+      abortable: async <T>(promise: Promise<T>) => await promise,
+      assistantTexts: [],
+      toolMetas: [],
+      didSendViaMessagingTool: () => false,
+      getSuccessfulCronAdds: () => 0,
+      getReasoningEmitCount: () => 0,
+      didEmitAssistantUpdate: () => false,
+      getCompactionCount: () => compactionCount,
+      provider: "openai",
+      modelId: "mock-1",
+      computeBackoff,
+      sleepWithAbort,
+    });
+
+    expect(session.prompt).toHaveBeenCalledTimes(2);
+    // rewind should have used compacted messages (1 message), not original (1 message)
+    expect(session.agent.replaceMessages).toHaveBeenCalledTimes(1);
+    const rewindedMessages = session.agent.replaceMessages.mock.calls[0][0];
+    expect(rewindedMessages).toHaveLength(1);
+    expect(rewindedMessages[0]).toMatchObject({
+      role: "user",
+      content: [{ type: "text", text: "compacted summary" }],
+    });
+  });
+
+  it("classifyTerminalFailure detects errors after compaction shortens messages", async () => {
+    const session = createRetryTestSession();
+    // Start with a longer message history
+    session.messages = [
+      {
+        role: "user" as const,
+        content: [{ type: "text" as const, text: "msg1" }],
+        timestamp: Date.now(),
+      },
+      {
+        role: "assistant" as const,
+        content: [{ type: "text" as const, text: "reply1" }],
+        api: "openai-responses",
+        provider: "openai",
+        model: "mock-1",
+        usage: baseAssistantUsage,
+        stopReason: "stop" as const,
+        timestamp: Date.now(),
+      },
+      {
+        role: "user" as const,
+        content: [{ type: "text" as const, text: "msg2" }],
+        timestamp: Date.now(),
+      },
+    ];
+    let compactionCount = 0;
+    let promptCalls = 0;
+
+    session.prompt.mockImplementation(async () => {
+      promptCalls++;
+      if (promptCalls === 1) {
+        // Compaction replaces 3 messages with 1 summary, then prompt adds user + error
+        session.messages = [
+          {
+            role: "user" as const,
+            content: [{ type: "text" as const, text: "summary" }],
+            timestamp: Date.now(),
+          },
+        ];
+        compactionCount++;
+        session.messages.push(
+          {
+            role: "user" as const,
+            content: [{ type: "text" as const, text: "hello" }],
+            timestamp: Date.now(),
+          },
+          createRateLimitAssistant(),
+        );
+        // Total: 3 messages, but original had 3 — without compaction-aware check
+        // this terminal error would be missed.
+      }
+      // Second prompt succeeds
+    });
+
+    await runPromptWithRateLimitRetry({
+      activeSession: session,
+      effectivePrompt: "hello",
+      images: [],
+      abortable: async <T>(promise: Promise<T>) => await promise,
+      assistantTexts: [],
+      toolMetas: [],
+      didSendViaMessagingTool: () => false,
+      getSuccessfulCronAdds: () => 0,
+      getReasoningEmitCount: () => 0,
+      didEmitAssistantUpdate: () => false,
+      getCompactionCount: () => compactionCount,
+      provider: "openai",
+      modelId: "mock-1",
+      computeBackoff,
+      sleepWithAbort,
+    });
+
+    // Should have retried because compaction-aware classifyTerminalFailure
+    // detected the error even though messages.length <= original snapshot length.
+    expect(session.prompt).toHaveBeenCalledTimes(2);
+    expect(session.agent.replaceMessages).toHaveBeenCalledTimes(1);
   });
 });
 

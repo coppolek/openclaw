@@ -1,10 +1,12 @@
 import fs from "node:fs/promises";
 import os from "node:os";
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { Agent, AgentMessage } from "@mariozechner/pi-agent-core";
 import {
   createAgentSession,
   DefaultResourceLoader,
   SessionManager,
+  type AgentSession,
+  type PromptOptions,
 } from "@mariozechner/pi-coding-agent";
 import { filterHeartbeatPairs } from "../../../auto-reply/heartbeat-filter.js";
 import { resolveChannelCapabilities } from "../../../config/channel-capabilities.js";
@@ -73,6 +75,7 @@ import {
   materializeBundleMcpToolsForRun,
 } from "../../pi-bundle-mcp-tools.js";
 import {
+  classifyFailoverReason,
   downgradeOpenAIFunctionCallReasoningPairs,
   isCloudCodeAssistFormatError,
   resolveBootstrapMaxChars,
@@ -124,6 +127,7 @@ import {
   type PromptCacheChange,
 } from "../prompt-cache-observability.js";
 import { resolveCacheRetention } from "../prompt-cache-retention.js";
+import { retryPromptOnRateLimit } from "../rate-limit-retry.js";
 import { sanitizeSessionHistory, validateReplayTurns } from "../replay-history.js";
 import {
   clearActiveEmbeddedRun,
@@ -262,6 +266,108 @@ export {
   resolveEmbeddedAgentBaseStreamFn,
   resolveEmbeddedAgentStreamFn,
 };
+
+type RetryablePromptSession = {
+  prompt: AgentSession["prompt"];
+  messages: AgentSession["messages"];
+  replaceMessages: (messages: AgentMessage[]) => void;
+};
+
+export async function runPromptWithRateLimitRetry(params: {
+  activeSession: RetryablePromptSession;
+  effectivePrompt: string;
+  images: NonNullable<PromptOptions["images"]>;
+  abortable: <T>(promise: Promise<T>) => Promise<T>;
+  assistantTexts: string[];
+  toolMetas: Array<unknown>;
+  didSendViaMessagingTool: () => boolean;
+  getSuccessfulCronAdds: () => number;
+  getReasoningEmitCount: () => number;
+  didEmitAssistantUpdate: () => boolean;
+  getCompactionCount: () => number;
+  abortSignal?: AbortSignal;
+  provider: string;
+  modelId: string;
+  computeBackoff?: (attempt: number) => number;
+  sleepWithAbort?: (delayMs: number, abortSignal?: AbortSignal) => Promise<void>;
+}) {
+  let preRetryMessages = params.activeSession.messages.slice();
+  let compactionBaseline = params.getCompactionCount();
+  let reasoningBaseline = params.getReasoningEmitCount();
+  await retryPromptOnRateLimit({
+    prompt: () =>
+      params.images.length > 0
+        ? params.abortable(
+            params.activeSession.prompt(params.effectivePrompt, { images: params.images }),
+          )
+        : params.abortable(params.activeSession.prompt(params.effectivePrompt)),
+    classifyTerminalFailure: () => {
+      const messages = params.activeSession.messages;
+      // After compaction, messages may be shorter than the pre-retry snapshot
+      // even with new messages appended.  Skip the length guard when
+      // compaction occurred during this prompt.
+      if (
+        params.getCompactionCount() <= compactionBaseline &&
+        messages.length <= preRetryMessages.length
+      ) {
+        return null;
+      }
+      const last = messages[messages.length - 1];
+      if (last?.role !== "assistant") {
+        return null;
+      }
+      if (last.stopReason !== "error") {
+        return null;
+      }
+      const reason = classifyFailoverReason(last.errorMessage ?? "");
+      return {
+        isRateLimit: reason === "rate_limit",
+        rawError: last,
+      };
+    },
+    isReplaySafe: () =>
+      params.assistantTexts.length === 0 &&
+      params.toolMetas.length === 0 &&
+      !params.didSendViaMessagingTool() &&
+      params.getSuccessfulCronAdds() === 0 &&
+      params.getReasoningEmitCount() <= reasoningBaseline &&
+      !params.didEmitAssistantUpdate(),
+    rewind: () => {
+      const currentCompactions = params.getCompactionCount();
+      if (currentCompactions > compactionBaseline) {
+        // Compaction completed during this prompt — the pre-retry snapshot holds
+        // pre-compaction history and is now stale.  Derive the post-compaction
+        // pre-prompt baseline from the current messages by stripping messages the
+        // prompt added.  isReplaySafe() already confirmed no assistant text, no
+        // tool activity, no outbound messages, and no cron adds, so at most two
+        // messages were appended: the user prompt and a trailing error assistant.
+        const current = params.activeSession.messages;
+        let end = current.length;
+        if (
+          end > 0 &&
+          current[end - 1]?.role === "assistant" &&
+          (current[end - 1] as { stopReason?: string }).stopReason === "error"
+        ) {
+          end--;
+        }
+        if (end > 0 && current[end - 1]?.role === "user") {
+          end--;
+        }
+        preRetryMessages = current.slice(0, end);
+        compactionBaseline = currentCompactions;
+        reasoningBaseline = params.getReasoningEmitCount();
+      }
+      if (params.activeSession.messages.length !== preRetryMessages.length) {
+        params.activeSession.replaceMessages(preRetryMessages);
+      }
+    },
+    abortSignal: params.abortSignal,
+    provider: params.provider,
+    modelId: params.modelId,
+    computeBackoff: params.computeBackoff,
+    sleepWithAbort: params.sleepWithAbort,
+  });
+}
 
 const MAX_BTW_SNAPSHOT_MESSAGES = 100;
 
@@ -1447,6 +1553,8 @@ export async function runEmbeddedAttempt(
         getMessagingToolSentTargets,
         getSuccessfulCronAdds,
         didSendViaMessagingTool,
+        getReasoningEmitCount,
+        didEmitAssistantUpdate,
         getLastToolError,
         getUsageTotals,
         getCompactionCount,
@@ -1877,15 +1985,31 @@ export async function runEmbeddedAttempt(
               inFlightPrompt: effectivePrompt,
             });
 
-            // Only pass images option if there are actually images to pass
-            // This avoids potential issues with models that don't expect the images parameter
-            if (imageResult.images.length > 0) {
-              await abortable(
-                activeSession.prompt(effectivePrompt, { images: imageResult.images }),
-              );
-            } else {
-              await abortable(activeSession.prompt(effectivePrompt));
-            }
+            await runPromptWithRateLimitRetry({
+              activeSession: {
+                prompt: activeSession.prompt.bind(activeSession),
+                messages: activeSession.messages,
+                replaceMessages: (messages) =>
+                  (
+                    activeSession.agent as Agent & {
+                      replaceMessages: (messages: AgentMessage[]) => void;
+                    }
+                  ).replaceMessages(messages),
+              },
+              effectivePrompt,
+              images: imageResult.images,
+              abortable,
+              assistantTexts,
+              toolMetas,
+              didSendViaMessagingTool,
+              getSuccessfulCronAdds,
+              getReasoningEmitCount,
+              didEmitAssistantUpdate,
+              getCompactionCount,
+              abortSignal: runAbortController.signal,
+              provider: params.provider,
+              modelId: params.modelId,
+            });
           }
         } catch (err) {
           // Yield-triggered abort is intentional — treat as clean stop, not error.

@@ -554,6 +554,7 @@ export function handleMessageEnd(
     }
     ctx.state.lastReasoningSent = formattedReasoning;
     ctx.emitBlockReply({ text: formattedReasoning, isReasoning: true });
+    ctx.state.reasoningEmitCount += 1;
   };
 
   if (shouldEmitReasoningBeforeAnswer) {
