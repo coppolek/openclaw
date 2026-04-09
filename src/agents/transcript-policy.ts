@@ -56,9 +56,13 @@ function isAnthropicApi(modelApi?: string | null): boolean {
  * should express replay ownership through `buildReplayPolicy` instead.
  */
 function buildUnownedProviderTransportReplayFallback(params: {
+  provider?: string | null;
   modelApi?: string | null;
   modelId?: string | null;
 }): ProviderReplayPolicy | undefined {
+  const isMistral =
+    normalizeProviderId(params.provider ?? "") === "mistral" ||
+    normalizeLowercaseStringOrEmpty(params.modelId).includes("mistral");
   const isGoogle = isGoogleModelApi(params.modelApi);
   const isAnthropic = isAnthropicApi(params.modelApi);
   const isStrictOpenAiCompatible = params.modelApi === "openai-completions";
@@ -69,6 +73,7 @@ function buildUnownedProviderTransportReplayFallback(params: {
     params.modelApi === "azure-openai-responses";
 
   if (
+    !isMistral &&
     !isGoogle &&
     !isAnthropic &&
     !isStrictOpenAiCompatible &&
@@ -80,10 +85,10 @@ function buildUnownedProviderTransportReplayFallback(params: {
   const modelId = normalizeLowercaseStringOrEmpty(params.modelId);
   return {
     ...(isGoogle || isAnthropic ? { sanitizeMode: "full" as const } : {}),
-    ...(isGoogle || isAnthropic || requiresOpenAiCompatibleToolIdSanitization
+    ...(isMistral || isGoogle || isAnthropic || requiresOpenAiCompatibleToolIdSanitization
       ? {
           sanitizeToolCallIds: true,
-          toolCallIdMode: "strict" as const,
+          toolCallIdMode: isMistral ? ("strict9" as const) : ("strict" as const),
         }
       : {}),
     ...(isAnthropic ? { preserveSignatures: true } : {}),
@@ -188,6 +193,7 @@ export function resolveTranscriptPolicy(params: {
 
   return mergeTranscriptPolicy(
     buildUnownedProviderTransportReplayFallback({
+      provider: params.provider,
       modelApi: params.modelApi,
       modelId: params.modelId,
     }),
