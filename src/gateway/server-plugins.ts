@@ -5,6 +5,8 @@ import { applyPluginAutoEnable } from "../config/plugin-auto-enable.js";
 import { resolveGatewayStartupPluginIds } from "../plugins/channel-plugin-ids.js";
 import { normalizePluginsConfig } from "../plugins/config-state.js";
 import { loadOpenClawPlugins } from "../plugins/loader.js";
+import { createEmptyPluginRegistry } from "../plugins/registry-empty.js";
+import { setActivePluginRegistry } from "../plugins/runtime.js";
 import { getPluginRuntimeGatewayRequestScope } from "../plugins/runtime/gateway-request-scope.js";
 import type { PluginRuntime } from "../plugins/runtime/types.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
@@ -394,17 +396,20 @@ export function loadGatewayPlugins(params: {
   pluginIds?: string[];
   preferSetupRuntimeForChannelPlugins?: boolean;
 }) {
+  const activationAutoEnabled =
+    params.activationSourceConfig !== undefined
+      ? applyPluginAutoEnable({
+          config: params.activationSourceConfig,
+          env: process.env,
+        })
+      : undefined;
   const autoEnabled =
     params.activationSourceConfig !== undefined
       ? {
           config: params.cfg,
-          changes: [],
+          changes: activationAutoEnabled?.changes ?? [],
           autoEnabledReasons:
-            params.autoEnabledReasons ??
-            applyPluginAutoEnable({
-              config: params.activationSourceConfig,
-              env: process.env,
-            }).autoEnabledReasons,
+            params.autoEnabledReasons ?? activationAutoEnabled?.autoEnabledReasons ?? {},
         }
       : params.autoEnabledReasons !== undefined
         ? {
@@ -421,9 +426,18 @@ export function loadGatewayPlugins(params: {
     params.pluginIds ??
     resolveGatewayStartupPluginIds({
       config: resolvedConfig,
+      activationSourceConfig: params.activationSourceConfig,
       workspaceDir: params.workspaceDir,
       env: process.env,
     });
+  if (pluginIds.length === 0) {
+    const pluginRegistry = createEmptyPluginRegistry();
+    setActivePluginRegistry(pluginRegistry, undefined, "gateway-bindable", params.workspaceDir);
+    return {
+      pluginRegistry,
+      gatewayMethods: [...params.baseMethods],
+    };
+  }
   const pluginRegistry = loadOpenClawPlugins({
     config: resolvedConfig,
     activationSourceConfig: params.activationSourceConfig ?? params.cfg,
