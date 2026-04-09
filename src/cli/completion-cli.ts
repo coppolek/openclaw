@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -164,27 +165,55 @@ function updateCompletionProfile(
   return { next, changed: next !== content, hadExisting };
 }
 
-function getShellProfilePath(shell: CompletionShell): string {
-  const home = process.env.HOME || os.homedir();
+/**
+ * Resolve the shell profile path respecting shell-specific environment
+ * variables so we read/write the same file the user's shell actually loads.
+ *
+ * - zsh:  ${ZDOTDIR:-$HOME}/.zshrc
+ * - bash: ~/.bashrc (fallback ~/.bash_profile)
+ * - fish: ${XDG_CONFIG_HOME:-~/.config}/fish/config.fish
+ * - pwsh: platform default or ${XDG_CONFIG_HOME} on non-Windows
+ */
+export function getShellProfilePath(
+  shell: CompletionShell,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const home = env.HOME || os.homedir();
+
   if (shell === "zsh") {
-    return path.join(home, ".zshrc");
+    // zsh reads dotfiles from $ZDOTDIR when set, otherwise $HOME.
+    const zdotdir = env.ZDOTDIR || home;
+    return path.join(zdotdir, ".zshrc");
   }
+
   if (shell === "bash") {
-    return path.join(home, ".bashrc");
+    // Prefer .bashrc
+    const bashrc = path.join(home, ".bashrc");
+    if (existsSync(bashrc)) {
+      return bashrc;
+    }
+    // Fall back to .bash_profile.
+    return path.join(home, ".bash_profile");
   }
+
   if (shell === "fish") {
-    return path.join(home, ".config", "fish", "config.fish");
+    // fish follows the XDG Base Directory Specification.
+    const xdgConfig = env.XDG_CONFIG_HOME || path.join(home, ".config");
+    return path.join(xdgConfig, "fish", "config.fish");
   }
+
   // PowerShell
   if (process.platform === "win32") {
     return path.join(
-      process.env.USERPROFILE || home,
+      env.USERPROFILE || home,
       "Documents",
       "PowerShell",
       "Microsoft.PowerShell_profile.ps1",
     );
   }
-  return path.join(home, ".config", "powershell", "Microsoft.PowerShell_profile.ps1");
+  // pwsh on macOS/Linux also respects XDG_CONFIG_HOME
+  const xdgConfig = env.XDG_CONFIG_HOME || path.join(home, ".config");
+  return path.join(xdgConfig, "powershell", "Microsoft.PowerShell_profile.ps1");
 }
 
 export async function isCompletionInstalled(
@@ -310,10 +339,6 @@ export function registerCompletionCli(program: Command) {
 }
 
 export async function installCompletion(shell: string, yes: boolean, binName = "openclaw") {
-  const home = process.env.HOME || os.homedir();
-  let profilePath = "";
-  let sourceLine = "";
-
   const isShellSupported = isCompletionShell(shell);
   if (!isShellSupported) {
     console.error(`Automated installation not supported for ${shell} yet.`);
@@ -330,25 +355,15 @@ export async function installCompletion(shell: string, yes: boolean, binName = "
     return;
   }
 
-  if (shell === "zsh") {
-    profilePath = path.join(home, ".zshrc");
-    sourceLine = formatCompletionSourceLine("zsh", binName, cachePath);
-  } else if (shell === "bash") {
-    // Try .bashrc first, then .bash_profile
-    profilePath = path.join(home, ".bashrc");
-    try {
-      await fs.access(profilePath);
-    } catch {
-      profilePath = path.join(home, ".bash_profile");
-    }
-    sourceLine = formatCompletionSourceLine("bash", binName, cachePath);
-  } else if (shell === "fish") {
-    profilePath = path.join(home, ".config", "fish", "config.fish");
-    sourceLine = formatCompletionSourceLine("fish", binName, cachePath);
-  } else {
+  // PowerShell does not support automated profile installation yet.
+  if (shell === "powershell") {
     console.error(`Automated installation not supported for ${shell} yet.`);
     return;
   }
+
+  // Use the single source of truth for profile path resolution.
+  const profilePath = getShellProfilePath(shell);
+  const sourceLine = formatCompletionSourceLine(shell, binName, cachePath);
 
   try {
     // Check if profile exists
