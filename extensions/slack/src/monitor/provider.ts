@@ -25,6 +25,7 @@ import { normalizeStringEntries } from "openclaw/plugin-sdk/text-runtime";
 import { installRequestBodyLimitGuard } from "openclaw/plugin-sdk/webhook-request-guards";
 import { resolveSlackAccount } from "../accounts.js";
 import { resolveSlackWebClientOptions } from "../client.js";
+import { isSlackExecApprovalClientEnabled } from "../exec-approvals.js";
 import { normalizeSlackWebhookPath, registerSlackHttpHandler } from "../http/index.js";
 import { SLACK_TEXT_LIMIT } from "../limits.js";
 import { resolveSlackChannelAllowlist, type SlackChannelResolution } from "../resolve-channels.js";
@@ -55,12 +56,6 @@ import type { MonitorSlackOpts } from "./types.js";
 
 type SlackAppConstructor = typeof import("@slack/bolt").App;
 type SlackHttpReceiverConstructor = typeof import("@slack/bolt").HTTPReceiver;
-type IsSlackExecApprovalClientEnabled =
-  typeof import("./exec-approvals-enabled.runtime.js").isSlackExecApprovalClientEnabled;
-type SlackExecApprovalHandlerCtor =
-  typeof import("./exec-approvals.runtime.js").SlackExecApprovalHandler;
-type SlackExecApprovalHandlerInstance = InstanceType<SlackExecApprovalHandlerCtor>;
-type SlackExecApprovalHandlerParams = ConstructorParameters<SlackExecApprovalHandlerCtor>[0];
 type SlackBoltResolvedExports = {
   App: SlackAppConstructor;
   HTTPReceiver: SlackHttpReceiverConstructor;
@@ -133,20 +128,6 @@ function resolveSlackBoltInterop(params: {
 }
 
 let slackBoltInterop: SlackBoltResolvedExports | undefined;
-
-async function createSlackExecApprovalHandler(
-  params: SlackExecApprovalHandlerParams,
-): Promise<SlackExecApprovalHandlerInstance> {
-  const { SlackExecApprovalHandler } = await import("./exec-approvals.runtime.js");
-  return new SlackExecApprovalHandler(params);
-}
-
-async function isSlackExecApprovalClientEnabledForAccount(
-  params: Parameters<IsSlackExecApprovalClientEnabled>[0],
-): Promise<boolean> {
-  const { isSlackExecApprovalClientEnabled } = await import("./exec-approvals-enabled.runtime.js");
-  return isSlackExecApprovalClientEnabled(params);
-}
 
 function getSlackBoltInterop(): SlackBoltResolvedExports {
   if (!slackBoltInterop) {
@@ -466,11 +447,12 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
     : undefined;
 
   const handleSlackMessage = createSlackMessageHandler({ ctx, account, trackEvent });
-  const execApprovalsEnabled = await isSlackExecApprovalClientEnabledForAccount({
-    cfg,
-    accountId: account.accountId,
-  });
-  if (execApprovalsEnabled) {
+  if (
+    isSlackExecApprovalClientEnabled({
+      cfg,
+      accountId: account.accountId,
+    })
+  ) {
     registerChannelRuntimeContext({
       channelRuntime: opts.channelRuntime,
       channelId: "slack",
@@ -486,15 +468,6 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
 
   registerSlackMonitorEvents({ ctx, account, handleSlackMessage, trackEvent });
   await registerSlackMonitorSlashCommands({ ctx, account });
-  const execApprovalsHandler = execApprovalsEnabled
-    ? await createSlackExecApprovalHandler({
-        app,
-        accountId: account.accountId,
-        config: slackCfg.execApprovals ?? {},
-        cfg,
-      })
-    : null;
-  await execApprovalsHandler?.start();
   if (slackMode === "http" && slackHttpHandler) {
     unregisterHttpHandler = registerSlackHttpHandler({
       path: slackWebhookPath,
