@@ -514,7 +514,11 @@ function resolveConversationIdForThreadBinding(params: {
       })?.conversationId
     : null;
   if (normalizeOptionalString(pluginResolvedConversationId)) {
-    return normalizeOptionalString(pluginResolvedConversationId);
+    const normalizedPluginConversationId = normalizeOptionalString(pluginResolvedConversationId);
+    if (channelKey === "discord" && normalizedPluginConversationId?.startsWith("channel:")) {
+      return normalizeOptionalString(normalizedPluginConversationId.slice("channel:".length));
+    }
+    return normalizedPluginConversationId;
   }
   const compatibilityConversationId =
     channelKey && Object.hasOwn(threadBindingFallbackConversationResolvers, channelKey)
