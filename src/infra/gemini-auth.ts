@@ -7,22 +7,32 @@
 /**
  * Parse Gemini API key and return appropriate auth headers.
  *
- * OAuth format: `{"token": "...", "projectId": "..."}`
+ * OAuth format: `{"token": "...", "projectId": "...", "location": "..."}`
  *
  * @param apiKey - Either a traditional API key string or OAuth JSON
- * @returns Headers object with appropriate authentication
+ * @returns Headers object with appropriate authentication, plus optional Vertex AI fields
  */
-export function parseGeminiAuth(apiKey: string): { headers: Record<string, string> } {
+export function parseGeminiAuth(apiKey: string): {
+  headers: Record<string, string>;
+  projectId?: string;
+  location?: string;
+} {
   // Try parsing as OAuth JSON format
   if (apiKey.startsWith("{")) {
     try {
-      const parsed = JSON.parse(apiKey) as { token?: string; projectId?: string };
+      const parsed = JSON.parse(apiKey) as {
+        token?: string;
+        projectId?: string;
+        location?: string;
+      };
       if (typeof parsed.token === "string" && parsed.token) {
         return {
           headers: {
             Authorization: `Bearer ${parsed.token}`,
             "Content-Type": "application/json",
           },
+          projectId: parsed.projectId,
+          location: parsed.location,
         };
       }
     } catch {

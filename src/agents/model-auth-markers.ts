@@ -6,6 +6,7 @@ export const OAUTH_API_KEY_MARKER_PREFIX = "oauth:";
 export const OLLAMA_LOCAL_AUTH_MARKER = "ollama-local";
 export const CUSTOM_LOCAL_AUTH_MARKER = "custom-local";
 export const GCP_VERTEX_CREDENTIALS_MARKER = "gcp-vertex-credentials";
+export const GCP_VERTEX_GOOGLE_CREDENTIALS_MARKER = "gcp-vertex-google-credentials";
 export const NON_ENV_SECRETREF_MARKER = "secretref-managed"; // pragma: allowlist secret
 export const SECRETREF_ENV_HEADER_MARKER_PREFIX = "secretref-env:"; // pragma: allowlist secret
 
@@ -85,6 +86,7 @@ export function isNonSecretApiKeyMarker(
     trimmed === OLLAMA_LOCAL_AUTH_MARKER ||
     trimmed === CUSTOM_LOCAL_AUTH_MARKER ||
     trimmed === GCP_VERTEX_CREDENTIALS_MARKER ||
+    trimmed === GCP_VERTEX_GOOGLE_CREDENTIALS_MARKER ||
     trimmed === NON_ENV_SECRETREF_MARKER ||
     isAwsSdkAuthMarker(trimmed);
   if (isKnownMarker) {

@@ -21,15 +21,33 @@ export {
   shouldNormalizeGoogleProviderConfig,
 } from "./provider-policy.js";
 
-export function parseGeminiAuth(apiKey: string): { headers: Record<string, string> } {
-  const parsed = apiKey.startsWith("{") ? parseGoogleOauthApiKey(apiKey) : null;
-  if (parsed?.token) {
-    return {
-      headers: {
-        Authorization: `Bearer ${parsed.token}`,
-        "Content-Type": "application/json",
-      },
-    };
+export function parseGeminiAuth(apiKey: string): {
+  headers: Record<string, string>;
+  projectId?: string;
+  location?: string;
+} {
+  if (apiKey.startsWith("{")) {
+    const parsed = parseGoogleOauthApiKey(apiKey);
+    if (parsed?.token) {
+      // Also extract location from the raw JSON since parseGoogleOauthApiKey doesn't include it.
+      let location: string | undefined;
+      try {
+        const raw = JSON.parse(apiKey) as { location?: unknown };
+        if (typeof raw.location === "string" && raw.location) {
+          location = raw.location;
+        }
+      } catch {
+        // ignore
+      }
+      return {
+        headers: {
+          Authorization: `Bearer ${parsed.token}`,
+          "Content-Type": "application/json",
+        },
+        projectId: parsed.projectId,
+        location,
+      };
+    }
   }
 
   return {

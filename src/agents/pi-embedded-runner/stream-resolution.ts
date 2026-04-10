@@ -117,6 +117,13 @@ export function resolveEmbeddedAgentStreamFn(params: {
     return createAnthropicVertexStreamFnForModel(params.model);
   }
 
+  if (params.model.provider === "google-vertex") {
+    const boundaryAwareStreamFn = createBoundaryAwareStreamFnForModel(params.model);
+    if (boundaryAwareStreamFn) {
+      return boundaryAwareStreamFn;
+    }
+  }
+
   if (params.currentStreamFn === undefined || params.currentStreamFn === streamSimple) {
     const boundaryAwareStreamFn = createBoundaryAwareStreamFnForModel(params.model);
     if (boundaryAwareStreamFn) {

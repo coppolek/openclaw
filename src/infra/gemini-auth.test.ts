@@ -8,6 +8,19 @@ describe("parseGeminiAuth", () => {
         Authorization: "Bearer oauth-token",
         "Content-Type": "application/json",
       },
+      projectId: "demo",
+      location: undefined,
+    });
+  });
+
+  it("returns location from OAuth JSON when present", () => {
+    expect(parseGeminiAuth('{"token":"t","projectId":"p","location":"europe-west4"}')).toEqual({
+      headers: {
+        Authorization: "Bearer t",
+        "Content-Type": "application/json",
+      },
+      projectId: "p",
+      location: "europe-west4",
     });
   });
 
