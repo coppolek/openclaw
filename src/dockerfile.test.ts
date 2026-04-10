@@ -110,7 +110,7 @@ describe("Dockerfile", () => {
     expect(slimImageDigest).toBe(slimStandaloneDigest);
   });
 
-  it("smoke and e2e Dockerfiles use the same trixie-slim digest as the main Dockerfile", async () => {
+  it("smoke Dockerfiles use the same trixie-slim digest as the main Dockerfile", async () => {
     const dockerfile = await readFile(dockerfilePath, "utf8");
     const slimDigest = dockerfile.match(
       /ARG OPENCLAW_NODE_TRIXIE_SLIM_IMAGE="[^@]+@(sha256:[a-f0-9]{64})"/,
@@ -125,6 +125,23 @@ describe("Dockerfile", () => {
     for (const file of smokeFiles) {
       const content = await readFile(file, "utf8");
       expect(content, `${file} digest mismatch`).toContain(`node:24-trixie-slim@${slimDigest}`);
+    }
+  });
+
+  it("e2e Dockerfiles use the same trixie digest as the main Dockerfile", async () => {
+    const dockerfile = await readFile(dockerfilePath, "utf8");
+    const imageDigest = dockerfile.match(
+      /ARG OPENCLAW_NODE_TRIXIE_IMAGE="[^@]+@(sha256:[a-f0-9]{64})"/,
+    )?.[1];
+    expect(imageDigest).toBeDefined();
+
+    const e2eFiles = [
+      join(repoRoot, "scripts/e2e/Dockerfile"),
+      join(repoRoot, "scripts/e2e/Dockerfile.qr-import"),
+    ];
+    for (const file of e2eFiles) {
+      const content = await readFile(file, "utf8");
+      expect(content, `${file} digest mismatch`).toContain(`node:24-trixie@${imageDigest}`);
     }
   });
 });
