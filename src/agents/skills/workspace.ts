@@ -271,6 +271,27 @@ function unwrapLoadedSkills(loaded: unknown): Skill[] {
   return [];
 }
 
+function canonicalizeLoadedSkillPaths(skills: Skill[]): Skill[] {
+  return skills.map((skill) => {
+    const baseDir = tryRealpath(skill.baseDir) ?? path.resolve(skill.baseDir);
+    const filePath = tryRealpath(skill.filePath) ?? path.resolve(skill.filePath);
+    return {
+      ...skill,
+      baseDir,
+      filePath,
+      ...(skill.sourceInfo
+        ? {
+            sourceInfo: {
+              ...skill.sourceInfo,
+              path: filePath,
+              ...(skill.sourceInfo.baseDir !== undefined ? { baseDir } : {}),
+            },
+          }
+        : {}),
+    };
+  });
+}
+
 function loadSkillEntries(
   workspaceDir: string,
   opts?: {
@@ -335,7 +356,7 @@ function loadSkillEntries(
             rootDir,
             rootRealPath: baseDirRealPath,
           })
-        : unwrapLoadedSkills(loaded);
+        : canonicalizeLoadedSkillPaths(unwrapLoadedSkills(loaded));
     }
 
     const childDirs = listChildDirectories(baseDir);
@@ -415,7 +436,7 @@ function loadSkillEntries(
               rootDir,
               rootRealPath: baseDirRealPath,
             })
-          : unwrapLoadedSkills(loaded)),
+          : canonicalizeLoadedSkillPaths(unwrapLoadedSkills(loaded))),
       );
 
       if (loadedSkills.length >= limits.maxSkillsLoadedPerSource) {
