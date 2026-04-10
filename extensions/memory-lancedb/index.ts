@@ -535,9 +535,17 @@ export default definePluginEntry({
     // ========================================================================
 
     // Auto-recall: inject relevant memories before agent starts
+    // Guard: only run once per session to prevent infinite loops (#794)
     if (cfg.autoRecall) {
+      const AUTO_RECALL_MARKER = "memory-lancedb:autoRecall";
       api.on("before_agent_start", async (event) => {
         if (!event.prompt || event.prompt.length < 5) {
+          return;
+        }
+
+        // Prevent re-injection on subsequent agent runs within the same session
+        // Note: sessionState exists at runtime but not yet in before_agent_start TypeScript types
+        if ((event as any).sessionState?.getCustomEntries().some((e: any) => e.customType === AUTO_RECALL_MARKER)) {
           return;
         }
 
@@ -550,6 +558,10 @@ export default definePluginEntry({
           }
 
           api.logger.info?.(`memory-lancedb: injecting ${results.length} memories into context`);
+
+          // Mark as done so future agent runs in this session won't re-trigger
+          // Note: sessionState exists at runtime but not yet in before_agent_start TypeScript types
+          (event as any).sessionState?.appendCustomEntry(AUTO_RECALL_MARKER, { timestamp: Date.now() });
 
           return {
             prependContext: formatRelevantMemoriesContext(
