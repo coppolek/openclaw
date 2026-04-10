@@ -1,12 +1,17 @@
 import type { ImageGenerationProvider } from "openclaw/plugin-sdk/image-generation";
 import type { MediaUnderstandingProvider } from "openclaw/plugin-sdk/media-understanding";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import { buildProviderReplayFamilyHooks } from "openclaw/plugin-sdk/provider-model-shared";
+import { buildProviderStreamFamilyHooks } from "openclaw/plugin-sdk/provider-stream-family";
+import { buildProviderToolCompatFamilyHooks } from "openclaw/plugin-sdk/provider-tools";
+import { normalizeGoogleModelId } from "./api.js";
 import { buildGoogleGeminiCliBackend } from "./cli-backend.js";
 import { registerGoogleGeminiCliProvider } from "./gemini-cli-provider.js";
 import { buildGoogleMusicGenerationProvider } from "./music-generation-provider.js";
+import { formatGoogleOauthApiKey } from "./oauth-token-shared.js";
+import { isModernGoogleModel, resolveGoogleGeminiForwardCompatModel } from "./provider-models.js";
 import { registerGoogleProvider } from "./provider-registration.js";
 import { createGeminiWebSearchProvider } from "./src/gemini-web-search-provider.js";
-import { buildGoogleVideoGenerationProvider } from "./video-generation-provider.js";
 import {
   buildGoogleVertexProvider,
   mergeImplicitGoogleVertexProvider,
@@ -18,10 +23,12 @@ import {
   resolveGoogleVertexConfigApiKey,
   resolveGoogleVertexRegionFromBaseUrl,
 } from "./vertex-region.js";
+import { buildGoogleVideoGenerationProvider } from "./video-generation-provider.js";
 
 let googleImageGenerationProviderPromise: Promise<ImageGenerationProvider> | null = null;
 let googleMediaUnderstandingProviderPromise: Promise<MediaUnderstandingProvider> | null = null;
 
+// oxlint-disable-next-line no-redundant-type-constituents -- false positive: path alias `openclaw/plugin-sdk/media-understanding` is unresolvable in oxlint type-aware mode, causing MediaUnderstandingProvider to appear as an error type; the intersection is intentionally correct
 type GoogleMediaUnderstandingProvider = MediaUnderstandingProvider & {
   describeImage: NonNullable<MediaUnderstandingProvider["describeImage"]>;
   describeImages: NonNullable<MediaUnderstandingProvider["describeImages"]>;
@@ -154,8 +161,10 @@ export default definePluginEntry({
       formatApiKey: (cred) => formatGoogleOauthApiKey(cred),
       normalizeModelId: ({ modelId }) => normalizeGoogleModelId(modelId),
       resolveDynamicModel: (ctx) =>
-        resolveGoogle31ForwardCompatModel({ providerId: "google-vertex", ctx }),
-      ...GOOGLE_GEMINI_PROVIDER_HOOKS_WITH_TOOL_COMPAT,
+        resolveGoogleGeminiForwardCompatModel({ providerId: "google-vertex", ctx }),
+      ...buildProviderReplayFamilyHooks({ family: "google-gemini" }),
+      ...buildProviderStreamFamilyHooks("google-thinking"),
+      ...buildProviderToolCompatFamilyHooks("gemini"),
       isModernModelRef: ({ modelId }) => isModernGoogleModel(modelId),
       // Refresh expired google-vertex OAuth profiles via ADC so that stored
       // credentials (e.g. from previous OAuth-backed auth flows) do not cause
