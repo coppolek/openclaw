@@ -1,5 +1,10 @@
 import type { OpenClawConfig } from "../../../config/config.js";
 import { sanitizeForLog } from "../../../terminal/ansi.js";
+import type { BundledPluginInstallPathOptions } from "./bundled-plugin-install-paths.js";
+import {
+  collectBundledPluginInstallPathWarnings,
+  scanBundledPluginInstallPathRepairs,
+} from "./bundled-plugin-install-paths.js";
 import {
   collectBundledPluginLoadPathWarnings,
   scanBundledPluginLoadPathMigrations,
@@ -37,6 +42,7 @@ import {
 export async function collectDoctorPreviewWarnings(params: {
   cfg: OpenClawConfig;
   doctorFixCommand: string;
+  bundledPluginPathOptions?: BundledPluginInstallPathOptions;
 }): Promise<string[]> {
   const warnings: string[] = [];
 
@@ -117,6 +123,22 @@ export async function collectDoctorPreviewWarnings(params: {
   const safeBinTrustedDirHints = scanExecSafeBinTrustedDirHints(params.cfg);
   if (safeBinTrustedDirHints.length > 0) {
     warnings.push(collectExecSafeBinTrustedDirHintWarnings(safeBinTrustedDirHints).join("\n"));
+  }
+
+  const staleBundledPluginPaths = scanBundledPluginInstallPathRepairs(
+    params.cfg,
+    params.bundledPluginPathOptions,
+  );
+  const installPathWarnings = staleBundledPluginPaths.filter(
+    (hit) => hit.installFieldHits.length > 0,
+  );
+  if (installPathWarnings.length > 0) {
+    warnings.push(
+      ...collectBundledPluginInstallPathWarnings({
+        hits: installPathWarnings,
+        doctorFixCommand: params.doctorFixCommand,
+      }),
+    );
   }
 
   return warnings;

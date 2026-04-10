@@ -1,14 +1,14 @@
 import { sanitizeForLog } from "../../terminal/ansi.js";
 import { maybeRepairAllowlistPolicyAllowFrom } from "./shared/allowlist-policy-repair.js";
+import type { BundledPluginInstallPathOptions } from "./shared/bundled-plugin-install-paths.js";
+import { maybeRepairBundledPluginInstallPaths } from "./shared/bundled-plugin-install-paths.js";
 import { maybeRepairBundledPluginLoadPaths } from "./shared/bundled-plugin-load-paths.js";
 import {
   collectChannelDoctorEmptyAllowlistExtraWarnings,
   collectChannelDoctorRepairMutations,
 } from "./shared/channel-doctor.js";
-import {
-  applyDoctorConfigMutation,
-  type DoctorConfigMutationState,
-} from "./shared/config-mutation-state.js";
+import type { DoctorConfigMutationState } from "./shared/config-mutation-state.js";
+import { applyDoctorConfigMutation } from "./shared/config-mutation-state.js";
 import { scanEmptyAllowlistPolicyWarnings } from "./shared/empty-allowlist-scan.js";
 import { maybeRepairExecSafeBinProfiles } from "./shared/exec-safe-bins.js";
 import { maybeRepairLegacyToolsBySenderKeys } from "./shared/legacy-tools-by-sender.js";
@@ -18,6 +18,7 @@ import { maybeRepairStalePluginConfig } from "./shared/stale-plugin-config.js";
 export async function runDoctorRepairSequence(params: {
   state: DoctorConfigMutationState;
   doctorFixCommand: string;
+  bundledPluginPathOptions?: BundledPluginInstallPathOptions;
 }): Promise<{
   state: DoctorConfigMutationState;
   changeNotes: string[];
@@ -52,6 +53,9 @@ export async function runDoctorRepairSequence(params: {
   })) {
     applyMutation(mutation);
   }
+  applyMutation(
+    maybeRepairBundledPluginInstallPaths(state.candidate, params.bundledPluginPathOptions),
+  );
   applyMutation(maybeRepairOpenPolicyAllowFrom(state.candidate));
   applyMutation(maybeRepairBundledPluginLoadPaths(state.candidate, process.env));
   applyMutation(maybeRepairStalePluginConfig(state.candidate, process.env));
