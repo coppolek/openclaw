@@ -246,7 +246,9 @@ describe("memory plugin e2e", () => {
           debug: vi.fn(),
         },
         registerTool: (tool: any, opts: any) => {
-          registeredTools.push({ tool, opts });
+          // Tools are registered as OpenClawPluginToolFactory functions; resolve with a mock context.
+          const resolved = typeof tool === "function" ? tool({ agentId: undefined }) : tool;
+          registeredTools.push({ tool: resolved, opts });
         },
         registerCli: vi.fn(),
         registerService: vi.fn(),
@@ -327,6 +329,242 @@ describe("memory plugin e2e", () => {
     expect(detectCategory("My email is test@example.com")).toBe("entity");
     expect(detectCategory("The server is running on port 3000")).toBe("fact");
     expect(detectCategory("Random note")).toBe("other");
+  });
+});
+
+describe("per-agent memory isolation", () => {
+  const { getDbPath } = installTmpDirHarness({ prefix: "openclaw-memory-isolation-test-" });
+
+  /**
+   * Returns a lancedb connect mock plus a minimal table stub.
+   * Each connect() call returns the same stub so we can focus on
+   * how many times connect was called and with which paths.
+   */
+  function buildLanceDbMocks() {
+    const openTable = vi.fn(async () => ({
+      vectorSearch: vi.fn(() => ({
+        limit: vi.fn(() => ({ toArray: vi.fn(async () => []) })),
+      })),
+      countRows: vi.fn(async () => 0),
+      add: vi.fn(async () => undefined),
+      delete: vi.fn(async () => undefined),
+    }));
+    const connect = vi.fn(async (_dbPath: string) => ({
+      tableNames: vi.fn(async () => ["memories"]),
+      openTable,
+    }));
+    return { connect, openTable };
+  }
+
+  function buildMockApi(overrides: {
+    dbPath: string;
+    autoRecall?: boolean;
+    autoCapture?: boolean;
+  }) {
+    const hookHandlers = new Map<string, (...args: unknown[]) => unknown>();
+    const factories: Array<{ factory: unknown; opts: unknown }> = [];
+    const mockApi = {
+      id: "memory-lancedb",
+      pluginConfig: {
+        embedding: { apiKey: "test-key", model: "text-embedding-3-small" },
+        dbPath: overrides.dbPath,
+        autoCapture: overrides.autoCapture ?? false,
+        autoRecall: overrides.autoRecall ?? false,
+      },
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+      registerTool: (tool: unknown, opts: unknown) => {
+        factories.push({ factory: tool, opts });
+      },
+      registerCli: vi.fn(),
+      registerService: vi.fn(),
+      on: (eventName: string, handler: (...args: unknown[]) => unknown) => {
+        hookHandlers.set(eventName, handler);
+      },
+      resolvePath: (p: string) => p,
+    };
+    return { mockApi, hookHandlers, factories };
+  }
+
+  test("tools with different agentIds connect to separate DB subdirectories", async () => {
+    const { connect } = buildLanceDbMocks();
+    vi.resetModules();
+    vi.doMock("openclaw/plugin-sdk/runtime-env", () => ({
+      ensureGlobalUndiciEnvProxyDispatcher: vi.fn(),
+    }));
+    vi.doMock("openai", () => ({
+      default: class MockOpenAI {
+        embeddings = { create: vi.fn(async () => ({ data: [{ embedding: [0.1, 0.2] }] })) };
+      },
+    }));
+    vi.doMock("./lancedb-runtime.js", () => ({
+      loadLanceDbModule: vi.fn(async () => ({ connect })),
+    }));
+
+    try {
+      const { default: plugin } = await import("./index.js");
+      const baseDbPath = getDbPath();
+      const { mockApi, factories } = buildMockApi({ dbPath: baseDbPath });
+
+      plugin.register(mockApi as never);
+
+      // Call the memory_recall factory with three different contexts
+      const recallFactory = factories.find(
+        (f) => (f.opts as { name?: string })?.name === "memory_recall",
+      )!.factory as (ctx: { agentId?: string }) => {
+        execute: (...a: unknown[]) => Promise<unknown>;
+      };
+      const toolA = recallFactory({ agentId: "agent-a" });
+      const toolB = recallFactory({ agentId: "agent-b" });
+      const toolLegacy = recallFactory({ agentId: undefined });
+
+      // Execute each to trigger DB initialization
+      await toolA.execute("call-a", { query: "test" });
+      await toolB.execute("call-b", { query: "test" });
+      await toolLegacy.execute("call-legacy", { query: "test" });
+
+      const calledPaths = connect.mock.calls.map((c) => c[0]);
+      expect(calledPaths).toHaveLength(3);
+
+      // Each agent gets a subdirectory; no-agentId falls back to the root dbPath
+      expect(calledPaths.some((p) => p.endsWith("agent-a"))).toBe(true);
+      expect(calledPaths.some((p) => p.endsWith("agent-b"))).toBe(true);
+      expect(calledPaths.some((p) => p === baseDbPath)).toBe(true);
+
+      // All three paths are distinct
+      expect(new Set(calledPaths).size).toBe(3);
+    } finally {
+      vi.doUnmock("openclaw/plugin-sdk/runtime-env");
+      vi.doUnmock("openai");
+      vi.doUnmock("./lancedb-runtime.js");
+      vi.resetModules();
+    }
+  });
+
+  test("same agentId reuses a single DB instance across tool types", async () => {
+    const { connect } = buildLanceDbMocks();
+    vi.resetModules();
+    vi.doMock("openclaw/plugin-sdk/runtime-env", () => ({
+      ensureGlobalUndiciEnvProxyDispatcher: vi.fn(),
+    }));
+    vi.doMock("openai", () => ({
+      default: class MockOpenAI {
+        embeddings = { create: vi.fn(async () => ({ data: [{ embedding: [0.1, 0.2] }] })) };
+      },
+    }));
+    vi.doMock("./lancedb-runtime.js", () => ({
+      loadLanceDbModule: vi.fn(async () => ({ connect })),
+    }));
+
+    try {
+      const { default: plugin } = await import("./index.js");
+      const { mockApi, factories } = buildMockApi({ dbPath: getDbPath() });
+
+      plugin.register(mockApi as never);
+
+      type ToolLike = { execute: (...a: unknown[]) => Promise<unknown> };
+      type Factory = (ctx: { agentId?: string }) => ToolLike;
+      const getFactory = (name: string) =>
+        factories.find((f) => (f.opts as { name?: string })?.name === name)!.factory as Factory;
+
+      // Two different tool types, same agentId
+      const recallTool = getFactory("memory_recall")({ agentId: "shared-agent" });
+      const storeTool = getFactory("memory_store")({ agentId: "shared-agent" });
+
+      await recallTool.execute("r", { query: "test" });
+      await storeTool.execute("s", {
+        text: "I prefer TypeScript",
+        importance: 0.8,
+        category: "preference",
+      });
+
+      // Only one connect call: both tools share the same MemoryDB instance
+      expect(connect).toHaveBeenCalledTimes(1);
+      expect(connect.mock.calls[0][0]).toMatch(/shared-agent$/);
+    } finally {
+      vi.doUnmock("openclaw/plugin-sdk/runtime-env");
+      vi.doUnmock("openai");
+      vi.doUnmock("./lancedb-runtime.js");
+      vi.resetModules();
+    }
+  });
+
+  test("before_agent_start hook connects to agent-specific DB path", async () => {
+    const { connect } = buildLanceDbMocks();
+    vi.resetModules();
+    vi.doMock("openclaw/plugin-sdk/runtime-env", () => ({
+      ensureGlobalUndiciEnvProxyDispatcher: vi.fn(),
+    }));
+    vi.doMock("openai", () => ({
+      default: class MockOpenAI {
+        embeddings = { create: vi.fn(async () => ({ data: [{ embedding: [0.1, 0.2] }] })) };
+      },
+    }));
+    vi.doMock("./lancedb-runtime.js", () => ({
+      loadLanceDbModule: vi.fn(async () => ({ connect })),
+    }));
+
+    try {
+      const { default: plugin } = await import("./index.js");
+      const { mockApi, hookHandlers } = buildMockApi({
+        dbPath: getDbPath(),
+        autoRecall: true,
+      });
+
+      plugin.register(mockApi as never);
+
+      const hook = hookHandlers.get("before_agent_start")!;
+      // Fire the hook for two agents
+      await hook({ prompt: "what do I prefer?" }, { agentId: "hook-agent-1" });
+      await hook({ prompt: "what do I prefer?" }, { agentId: "hook-agent-2" });
+
+      const calledPaths = connect.mock.calls.map((c) => c[0]);
+      expect(calledPaths.some((p) => p.endsWith("hook-agent-1"))).toBe(true);
+      expect(calledPaths.some((p) => p.endsWith("hook-agent-2"))).toBe(true);
+    } finally {
+      vi.doUnmock("openclaw/plugin-sdk/runtime-env");
+      vi.doUnmock("openai");
+      vi.doUnmock("./lancedb-runtime.js");
+      vi.resetModules();
+    }
+  });
+
+  test("no agentId falls back to root dbPath (backward compat)", async () => {
+    const { connect } = buildLanceDbMocks();
+    vi.resetModules();
+    vi.doMock("openclaw/plugin-sdk/runtime-env", () => ({
+      ensureGlobalUndiciEnvProxyDispatcher: vi.fn(),
+    }));
+    vi.doMock("openai", () => ({
+      default: class MockOpenAI {
+        embeddings = { create: vi.fn(async () => ({ data: [{ embedding: [0.1, 0.2] }] })) };
+      },
+    }));
+    vi.doMock("./lancedb-runtime.js", () => ({
+      loadLanceDbModule: vi.fn(async () => ({ connect })),
+    }));
+
+    try {
+      const { default: plugin } = await import("./index.js");
+      const baseDbPath = getDbPath();
+      const { mockApi, factories } = buildMockApi({ dbPath: baseDbPath });
+
+      plugin.register(mockApi as never);
+
+      type ToolLike = { execute: (...a: unknown[]) => Promise<unknown> };
+      const recallFactory = factories.find(
+        (f) => (f.opts as { name?: string })?.name === "memory_recall",
+      )!.factory as (ctx: { agentId?: string }) => ToolLike;
+      await recallFactory({ agentId: undefined }).execute("c", { query: "test" });
+
+      // Must connect to exactly the root path, not a subdirectory
+      expect(connect).toHaveBeenCalledTimes(1);
+      expect(connect.mock.calls[0][0]).toBe(baseDbPath);
+    } finally {
+      vi.doUnmock("openclaw/plugin-sdk/runtime-env");
+      vi.doUnmock("openai");
+      vi.doUnmock("./lancedb-runtime.js");
+      vi.resetModules();
+    }
   });
 });
 

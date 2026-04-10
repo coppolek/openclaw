@@ -7,6 +7,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import type * as LanceDB from "@lancedb/lancedb";
 import { Type } from "@sinclair/typebox";
 import OpenAI from "openai";
@@ -47,8 +48,8 @@ type MemorySearchResult = {
 const TABLE_NAME = "memories";
 
 class MemoryDB {
-  private db: LanceDB.Connection | null = null;
-  private table: LanceDB.Table | null = null;
+  private db?: LanceDB.Connection;
+  private table?: LanceDB.Table;
   private initPromise: Promise<void> | null = null;
 
   constructor(
@@ -293,8 +294,21 @@ export default definePluginEntry({
     const { model, dimensions, apiKey, baseUrl } = cfg.embedding;
 
     const vectorDim = dimensions ?? vectorDimsForModel(model);
-    const db = new MemoryDB(resolvedDbPath, vectorDim);
     const embeddings = new Embeddings(apiKey, model, baseUrl, dimensions);
+
+    // Per-agent DB map. Key is agentId; empty string is the legacy/no-agentId fallback.
+    // When agentId is provided each agent gets an isolated subdirectory under resolvedDbPath.
+    // When absent (CLI, legacy single-agent installs) the original resolvedDbPath is used as-is,
+    // which preserves backward compatibility with existing data.
+    const dbMap = new Map<string, MemoryDB>();
+    function getAgentDb(agentId: string | undefined): MemoryDB {
+      const key = agentId ?? "";
+      if (!dbMap.has(key)) {
+        const agentDbPath = agentId ? join(resolvedDbPath, agentId) : resolvedDbPath;
+        dbMap.set(key, new MemoryDB(agentDbPath, vectorDim));
+      }
+      return dbMap.get(key)!;
+    }
 
     api.logger.info(`memory-lancedb: plugin registered (db: ${resolvedDbPath}, lazy init)`);
 
@@ -303,7 +317,7 @@ export default definePluginEntry({
     // ========================================================================
 
     api.registerTool(
-      {
+      (ctx) => ({
         name: "memory_recall",
         label: "Memory Recall",
         description:
@@ -314,6 +328,7 @@ export default definePluginEntry({
         }),
         async execute(_toolCallId, params) {
           const { query, limit = 5 } = params as { query: string; limit?: number };
+          const db = getAgentDb(ctx.agentId);
 
           const vector = await embeddings.embed(query);
           const results = await db.search(vector, limit, 0.1);
@@ -346,12 +361,12 @@ export default definePluginEntry({
             details: { count: results.length, memories: sanitizedResults },
           };
         },
-      },
+      }),
       { name: "memory_recall" },
     );
 
     api.registerTool(
-      {
+      (ctx) => ({
         name: "memory_store",
         label: "Memory Store",
         description:
@@ -376,6 +391,7 @@ export default definePluginEntry({
             importance?: number;
             category?: MemoryEntry["category"];
           };
+          const db = getAgentDb(ctx.agentId);
 
           const vector = await embeddings.embed(text);
 
@@ -409,12 +425,12 @@ export default definePluginEntry({
             details: { action: "created", id: entry.id },
           };
         },
-      },
+      }),
       { name: "memory_store" },
     );
 
     api.registerTool(
-      {
+      (ctx) => ({
         name: "memory_forget",
         label: "Memory Forget",
         description: "Delete specific memories. GDPR-compliant.",
@@ -424,6 +440,7 @@ export default definePluginEntry({
         }),
         async execute(_toolCallId, params) {
           const { query, memoryId } = params as { query?: string; memoryId?: string };
+          const db = getAgentDb(ctx.agentId);
 
           if (memoryId) {
             await db.delete(memoryId);
@@ -480,7 +497,7 @@ export default definePluginEntry({
             details: { error: "missing_param" },
           };
         },
-      },
+      }),
       { name: "memory_forget" },
     );
 
@@ -496,7 +513,7 @@ export default definePluginEntry({
           .command("list")
           .description("List memories")
           .action(async () => {
-            const count = await db.count();
+            const count = await getAgentDb(undefined).count();
             console.log(`Total memories: ${count}`);
           });
 
@@ -507,7 +524,7 @@ export default definePluginEntry({
           .option("--limit <n>", "Max results", "5")
           .action(async (query, opts) => {
             const vector = await embeddings.embed(query);
-            const results = await db.search(vector, parseInt(opts.limit), 0.3);
+            const results = await getAgentDb(undefined).search(vector, parseInt(opts.limit), 0.3);
             // Strip vectors for output
             const output = results.map((r) => ({
               id: r.entry.id,
@@ -523,7 +540,7 @@ export default definePluginEntry({
           .command("stats")
           .description("Show memory statistics")
           .action(async () => {
-            const count = await db.count();
+            const count = await getAgentDb(undefined).count();
             console.log(`Total memories: ${count}`);
           });
       },
@@ -536,40 +553,46 @@ export default definePluginEntry({
 
     // Auto-recall: inject relevant memories before agent starts
     if (cfg.autoRecall) {
-      api.on("before_agent_start", async (event) => {
-        if (!event.prompt || event.prompt.length < 5) {
-          return;
-        }
-
-        try {
-          const vector = await embeddings.embed(event.prompt);
-          const results = await db.search(vector, 3, 0.3);
-
-          if (results.length === 0) {
-            return;
+      api.on(
+        "before_agent_start",
+        async (event, ctx): Promise<{ prependContext: string } | undefined> => {
+          if (!event.prompt || event.prompt.length < 5) {
+            return undefined;
           }
 
-          api.logger.info?.(`memory-lancedb: injecting ${results.length} memories into context`);
+          try {
+            const db = getAgentDb(ctx?.agentId);
+            const vector = await embeddings.embed(event.prompt);
+            const results = await db.search(vector, 3, 0.3);
 
-          return {
-            prependContext: formatRelevantMemoriesContext(
-              results.map((r) => ({ category: r.entry.category, text: r.entry.text })),
-            ),
-          };
-        } catch (err) {
-          api.logger.warn(`memory-lancedb: recall failed: ${String(err)}`);
-        }
-      });
+            if (results.length === 0) {
+              return undefined;
+            }
+
+            api.logger.info?.(`memory-lancedb: injecting ${results.length} memories into context`);
+
+            return {
+              prependContext: formatRelevantMemoriesContext(
+                results.map((r) => ({ category: r.entry.category, text: r.entry.text })),
+              ),
+            };
+          } catch (err) {
+            api.logger.warn(`memory-lancedb: recall failed: ${String(err)}`);
+            return undefined;
+          }
+        },
+      );
     }
 
     // Auto-capture: analyze and store important information after agent ends
     if (cfg.autoCapture) {
-      api.on("agent_end", async (event) => {
+      api.on("agent_end", async (event, ctx) => {
         if (!event.success || !event.messages || event.messages.length === 0) {
           return;
         }
 
         try {
+          const db = getAgentDb(ctx?.agentId);
           // Extract text content from messages (handling unknown[] type)
           const texts: string[] = [];
           for (const msg of event.messages) {
