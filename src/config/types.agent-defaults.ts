@@ -1,3 +1,4 @@
+import type { ToolSummaryLocale } from "../auto-reply/tool-meta.js";
 import type { AgentModelConfig, AgentSandboxConfig } from "./types.agents-shared.js";
 import type {
   BlockStreamingChunkConfig,
@@ -223,6 +224,17 @@ export type AgentDefaultsConfig = {
   thinkingDefault?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "adaptive";
   /** Default verbose level when no /verbose directive is present. */
   verboseDefault?: "off" | "on" | "full";
+  /**
+   * Tool summary delivery (the short "🧩 Read: path" style messages emitted when tools start).
+   * This controls localization and rate limiting only; whether summaries appear at all is still
+   * gated by verbose level and channel/tool-result delivery settings.
+   */
+  toolSummaries?: {
+    /** Minimum interval between emitted tool summaries, in milliseconds (default: 0). */
+    minIntervalMs?: number;
+    /** Locale used for localized tool labels and common exec action hints. Default: "en". */
+    locale?: ToolSummaryLocale;
+  };
   /** Default elevated level when no /elevated directive is present. */
   elevatedDefault?: "off" | "on" | "ask" | "full";
   /** Default block streaming level when no override is present. */

@@ -45,12 +45,28 @@ describe("tool meta formatting", () => {
     expect(out).toContain("`~/dir/a.txt`");
   });
 
+  it("localizes tool labels when requested", () => {
+    const out = formatToolAggregate("read", ["/tmp/demo.txt"], { locale: "ko" });
+    expect(out).toContain("파일 읽기");
+    expect(out).toContain("/tmp/demo.txt");
+  });
+
   it("keeps exec flags outside markdown and moves them to the front", () => {
     vi.stubEnv("HOME", home);
     const out = formatToolAggregate("exec", [`cd ${home}/dir && gemini 2>&1 · elevated`], {
       markdown: true,
     });
     expect(out).toBe("🛠️ Exec: elevated · `cd ~/dir && gemini 2>&1`");
+  });
+
+  it("adds localized exec hints for supported locales", () => {
+    const out = formatToolAggregate("exec", ["pnpm test"], { locale: "ja" });
+    expect(out).toBe("🛠️ コマンド実行: テスト実行 · pnpm test");
+  });
+
+  it("detects standalone tail -n log tracking commands", () => {
+    const out = formatToolAggregate("exec", ["tail -n 50 /var/log/app.log"], { locale: "zh-CN" });
+    expect(out).toBe("🛠️ 执行命令: 跟踪日志 · tail -n 50 /var/log/app.log");
   });
 
   it("formats prefixes with default labels", () => {
