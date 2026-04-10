@@ -27,12 +27,22 @@ export const createTestRegistry = (channels: TestChannelRegistration[] = []): Pl
   })),
   providers: [],
   speechProviders: [],
+  realtimeTranscriptionProviders: [],
+  realtimeVoiceProviders: [],
   mediaUnderstandingProviders: [],
   imageGenerationProviders: [],
+  videoGenerationProviders: [],
+  musicGenerationProviders: [],
+  webFetchProviders: [],
   webSearchProviders: [],
+  memoryEmbeddingProviders: [],
   gatewayHandlers: {},
+  gatewayMethodScopes: {},
   httpRoutes: [],
   cliRegistrars: [],
+  reloads: [],
+  nodeHostCommands: [],
+  securityAuditCollectors: [],
   services: [],
   commands: [],
   conversationBindingResolvedHandlers: [],
@@ -43,6 +53,7 @@ export const createChannelTestPluginBase = (params: {
   id: ChannelId;
   label?: string;
   docsPath?: string;
+  markdownCapable?: boolean;
   capabilities?: ChannelCapabilities;
   config?: Partial<ChannelPlugin["config"]>;
 }): Pick<ChannelPlugin, "id" | "meta" | "capabilities" | "config"> => ({
@@ -53,6 +64,7 @@ export const createChannelTestPluginBase = (params: {
     selectionLabel: params.label ?? String(params.id),
     docsPath: params.docsPath ?? `/channels/${params.id}`,
     blurb: "test stub.",
+    ...(params.markdownCapable !== undefined ? { markdownCapable: params.markdownCapable } : {}),
   },
   capabilities: params.capabilities ?? { chatTypes: ["direct"] },
   config: {

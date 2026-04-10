@@ -1,3 +1,7 @@
+// IHttpServerAdapter is re-exported via the public barrel (`export * from './http'`)
+// but tsgo cannot resolve the chain. Use the dist subpath directly (type-only import).
+import type { IHttpServerAdapter } from "@microsoft/teams.apps/dist/http/index.js";
+import { formatUnknownError } from "./errors.js";
 import type { MSTeamsAdapter } from "./messenger.js";
 import type { MSTeamsCredentials } from "./token.js";
 import { buildUserAgent } from "./user-agent.js";
@@ -54,18 +58,41 @@ export async function loadMSTeamsSdk(): Promise<MSTeamsTeamsSdk> {
 }
 
 /**
+ * Create a no-op HTTP server adapter that satisfies the Teams SDK's
+ * IHttpServerAdapter interface without spinning up an Express server.
+ *
+ * OpenClaw manages its own Express server for the Teams webhook endpoint, so
+ * the SDK's built-in HTTP server is unnecessary.  Passing this adapter via the
+ * `httpServerAdapter` option prevents the SDK from creating the default
+ * HttpPlugin (which uses the deprecated `plugins` array and registers an
+ * Express middleware with the pattern `/api*` — invalid in Express 5).
+ *
+ * See: https://github.com/openclaw/openclaw/issues/55161
+ * See: https://github.com/openclaw/openclaw/issues/60732
+ */
+function createNoOpHttpServerAdapter(): IHttpServerAdapter {
+  return {
+    registerRoute() {},
+  };
+}
+
+/**
  * Create a Teams SDK App instance from credentials. The App manages token
  * acquisition, JWT validation, and the HTTP server lifecycle.
  *
  * This replaces the previous CloudAdapter + MsalTokenProvider + authorizeJWT
  * from @microsoft/agents-hosting.
  */
-export function createMSTeamsApp(creds: MSTeamsCredentials, sdk: MSTeamsTeamsSdk): MSTeamsApp {
+export async function createMSTeamsApp(
+  creds: MSTeamsCredentials,
+  sdk: MSTeamsTeamsSdk,
+): Promise<MSTeamsApp> {
   return new sdk.App({
     clientId: creds.appId,
     clientSecret: creds.appPassword,
     tenantId: creds.tenantId,
-  });
+    httpServerAdapter: createNoOpHttpServerAdapter(),
+  } as ConstructorParameters<MSTeamsTeamsSdk["App"]>[0]);
 }
 
 /**
@@ -154,7 +181,7 @@ function createSendContext(params: {
           : {}),
       } as Parameters<
         typeof apiClient.conversations.activities extends (id: string) => {
-          create: (a: infer T) => unknown;
+          create: (a: infer _T) => unknown;
         }
           ? never
           : never
@@ -320,7 +347,7 @@ async function deleteActivityViaRest(params: {
  * Build a CloudAdapter-compatible adapter using the Teams SDK REST client.
  *
  * This replaces the previous CloudAdapter from @microsoft/agents-hosting.
- * For incoming requests: the App's HttpPlugin handles JWT validation.
+ * For incoming requests: the App's HTTP server handles JWT validation.
  * For proactive sends: uses the Bot Framework REST API via
  * @microsoft/teams.api Client.
  */
@@ -379,12 +406,12 @@ export function createMSTeamsAdapter(app: MSTeamsApp, sdk: MSTeamsTeamsSdk): MST
         }
       } catch (err) {
         if (!isInvoke) {
-          response.status(500).send({ error: String(err) });
+          response.status(500).send({ error: formatUnknownError(err) });
         }
       }
     },
 
-    async updateActivity(_context, activity) {
+    async updateActivity(_context, _activity) {
       // No-op: updateActivity is handled via REST in streaming-message.ts
     },
 
@@ -396,36 +423,129 @@ export function createMSTeamsAdapter(app: MSTeamsApp, sdk: MSTeamsTeamsSdk): MST
 
 export async function loadMSTeamsSdkWithAuth(creds: MSTeamsCredentials) {
   const sdk = await loadMSTeamsSdk();
-  const app = createMSTeamsApp(creds, sdk);
+  const app = await createMSTeamsApp(creds, sdk);
   return { sdk, app };
 }
 
 /**
- * Create a Bot Framework JWT validator using the Teams SDK's built-in
- * JwtValidator pre-configured for Bot Framework signing keys.
+ * Bot Framework issuer → JWKS mapping.
+ * During Microsoft's transition, inbound service tokens can be signed by either
+ * the legacy Bot Framework issuer or the Entra issuer. Each gets its own JWKS
+ * endpoint so we verify signatures with the correct key set.
+ */
+const BOT_FRAMEWORK_ISSUERS: ReadonlyArray<{
+  issuer: string | ((tenantId: string) => string);
+  jwksUri: string;
+}> = [
+  {
+    issuer: "https://api.botframework.com",
+    jwksUri: "https://login.botframework.com/v1/.well-known/keys",
+  },
+  {
+    issuer: (tenantId: string) => `https://login.microsoftonline.com/${tenantId}/v2.0`,
+    jwksUri: "https://login.microsoftonline.com/common/discovery/v2.0/keys",
+  },
+  {
+    issuer: "https://sts.windows.net/d6d49420-f39b-4df7-a1dc-d59a935871db/",
+    jwksUri: "https://login.microsoftonline.com/common/discovery/v2.0/keys",
+  },
+];
+
+/**
+ * Create a Bot Framework JWT validator using jsonwebtoken + jwks-rsa directly.
  *
- * Validates: signature (JWKS), audience (appId), issuer (api.botframework.com),
- * and expiration (5-minute clock tolerance).
+ * The @microsoft/teams.apps JwtValidator hardcodes audience to [clientId, api://clientId],
+ * which rejects valid Bot Framework tokens that carry aud: "https://api.botframework.com".
+ * This implementation uses jsonwebtoken directly with the correct audience list, matching
+ * the behavior of the legacy @microsoft/agents-hosting authorizeJWT middleware.
+ *
+ * Security invariants:
+ * - signature verification via issuer-specific JWKS endpoints
+ * - audience validation: appId, api://appId, and https://api.botframework.com
+ * - issuer validation: strict allowlist (Bot Framework + tenant-scoped Entra)
+ * - expiration validation with 5-minute clock tolerance
  */
 export async function createBotFrameworkJwtValidator(creds: MSTeamsCredentials): Promise<{
-  validate: (authHeader: string, serviceUrl?: string) => Promise<boolean>;
+  validate: (authHeader: string) => Promise<boolean>;
 }> {
-  const { createServiceTokenValidator } =
-    await import("@microsoft/teams.apps/dist/middleware/auth/jwt-validator.js");
-  const validator = createServiceTokenValidator(creds.appId, creds.tenantId);
+  const jwt = await import("jsonwebtoken");
+  const { JwksClient } = await import("jwks-rsa");
+
+  const allowedAudiences: [string, ...string[]] = [
+    creds.appId,
+    `api://${creds.appId}`,
+    "https://api.botframework.com",
+  ];
+
+  const allowedIssuers = BOT_FRAMEWORK_ISSUERS.map((entry) =>
+    typeof entry.issuer === "function" ? entry.issuer(creds.tenantId) : entry.issuer,
+  ) as [string, ...string[]];
+
+  // One JWKS client per distinct endpoint, cached for the validator lifetime.
+  const jwksClients = new Map<string, InstanceType<typeof JwksClient>>();
+  function getJwksClient(uri: string): InstanceType<typeof JwksClient> {
+    let client = jwksClients.get(uri);
+    if (!client) {
+      client = new JwksClient({
+        jwksUri: uri,
+        cache: true,
+        cacheMaxAge: 600_000,
+        rateLimit: true,
+      });
+      jwksClients.set(uri, client);
+    }
+    return client;
+  }
+
+  /** Decode the token header without verification to determine the kid. */
+  function decodeHeader(token: string): { kid?: string } | null {
+    const decoded = jwt.decode(token, { complete: true });
+    return decoded && typeof decoded === "object" ? (decoded.header as { kid?: string }) : null;
+  }
+
+  /** Resolve the issuer entry for a token's issuer claim (pre-verification). */
+  function resolveIssuerEntry(issuerClaim: string | undefined) {
+    if (!issuerClaim) {
+      return undefined;
+    }
+    return BOT_FRAMEWORK_ISSUERS.find((entry) => {
+      const expected =
+        typeof entry.issuer === "function" ? entry.issuer(creds.tenantId) : entry.issuer;
+      return expected === issuerClaim;
+    });
+  }
 
   return {
-    async validate(authHeader: string, serviceUrl?: string): Promise<boolean> {
+    async validate(authHeader: string, _serviceUrl?: string): Promise<boolean> {
       const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
       if (!token) {
         return false;
       }
+
+      // Decode without verification to extract issuer and kid for key lookup.
+      const header = decodeHeader(token);
+      const unverifiedPayload = jwt.decode(token) as { iss?: string } | null;
+      if (!header?.kid || !unverifiedPayload?.iss) {
+        return false;
+      }
+
+      // Resolve which JWKS endpoint to use based on the issuer claim.
+      const issuerEntry = resolveIssuerEntry(unverifiedPayload.iss);
+      if (!issuerEntry) {
+        return false;
+      }
+
+      const client = getJwksClient(issuerEntry.jwksUri);
       try {
-        const result = await validator.validateAccessToken(
-          token,
-          serviceUrl ? { validateServiceUrl: { expectedServiceUrl: serviceUrl } } : undefined,
-        );
-        return result != null;
+        const signingKey = await client.getSigningKey(header.kid);
+        const publicKey = signingKey.getPublicKey();
+        jwt.verify(token, publicKey, {
+          audience: allowedAudiences,
+          issuer: allowedIssuers,
+          algorithms: ["RS256"],
+          clockTolerance: 300,
+        });
+        return true;
       } catch {
         return false;
       }
