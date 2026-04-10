@@ -115,6 +115,7 @@ export function createOpenClawTools(
     sessionKey: options?.agentSessionKey,
     config: resolvedConfig,
   });
+  const resolvedAgentId = options?.requesterAgentIdOverride ?? sessionAgentId;
   // Fall back to the session agent workspace so plugin loading stays workspace-stable
   // even when a caller forgets to thread workspaceDir explicitly.
   const inferredWorkspaceDir =
@@ -233,6 +234,7 @@ export function createOpenClawTools(
     }),
     ...(messageTool ? [messageTool] : []),
     createTtsTool({
+      agentId: resolvedAgentId,
       agentChannel: options?.agentChannel,
       config: options?.config,
     }),
