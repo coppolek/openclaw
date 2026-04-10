@@ -977,6 +977,55 @@ describe("thread binding lifecycle", () => {
     expect(hoisted.restPost).not.toHaveBeenCalled();
   });
 
+  it("normalizes explicit channel parentConversationId before creating child thread bindings", async () => {
+    createThreadBindingManager({
+      accountId: "default",
+      persist: false,
+      enableSweeper: false,
+      idleTimeoutMs: 24 * 60 * 60 * 1000,
+      maxAgeMs: 0,
+    });
+
+    hoisted.restGet.mockClear();
+    hoisted.createThreadDiscord.mockClear();
+    hoisted.createThreadDiscord.mockResolvedValueOnce({ id: "thread-created-parent-normalized" });
+
+    const bound = await getSessionBindingService().bind({
+      targetSessionKey: "agent:claude:acp:test-parent-normalized",
+      targetKind: "session",
+      conversation: {
+        channel: "discord",
+        accountId: "default",
+        conversationId: "channel:1491611525914558667",
+        parentConversationId: "channel:1491611525914558667",
+      },
+      placement: "child",
+      metadata: {
+        agentId: "claude",
+        label: "Claude ACP bind test",
+        threadName: "Claude ACP bind test",
+      },
+    });
+
+    expect(bound).toMatchObject({
+      conversation: {
+        channel: "discord",
+        accountId: "default",
+        conversationId: "thread-created-parent-normalized",
+      },
+    });
+    expect(hoisted.createThreadDiscord).toHaveBeenCalledTimes(1);
+    const [createdParentId, createdThreadOpts, createdThreadCtx] = hoisted.createThreadDiscord.mock
+      .calls[0] as [string, { autoArchiveMinutes?: number }, { accountId?: string }];
+    expect(createdParentId).not.toContain("channel:");
+    expect(["1491611525914558667", "parent-1"]).toContain(createdParentId);
+    expect(createdThreadOpts).toEqual(expect.objectContaining({ autoArchiveMinutes: 60 }));
+    expect(createdThreadCtx).toEqual(expect.objectContaining({ accountId: "default" }));
+    for (const call of hoisted.restGet.mock.calls) {
+      expect(JSON.stringify(call)).not.toContain("channel:1491611525914558667");
+    }
+  });
+
   it("keeps overlapping thread ids isolated per account", async () => {
     const a = createThreadBindingManager({
       accountId: "a",
