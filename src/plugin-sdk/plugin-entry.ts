@@ -68,6 +68,7 @@ import type {
   ProviderWrapStreamFnContext,
   SpeechProviderPlugin,
   PluginCommandContext,
+  PluginStatusProvider,
 } from "../plugins/types.js";
 import { createCachedLazyValueGetter } from "./lazy-value.js";
 
@@ -75,6 +76,7 @@ export type {
   AnyAgentTool,
   MediaUnderstandingProviderPlugin,
   OpenClawPluginApi,
+  PluginStatusProvider,
   OpenClawPluginNodeHostCommand,
   OpenClawPluginReloadRegistration,
   OpenClawPluginSecurityAuditCollector,

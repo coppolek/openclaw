@@ -28,6 +28,7 @@ import type {
   PluginDiagnostic,
   PluginFormat,
   PluginHookRegistration as TypedPluginHookRegistration,
+  PluginStatusProvider,
   PluginKind,
   PluginLogger,
   PluginOrigin,
@@ -130,6 +131,11 @@ export type PluginWebSearchProviderRegistration =
   PluginOwnedProviderRegistration<WebSearchProviderPlugin>;
 export type PluginMemoryEmbeddingProviderRegistration =
   PluginOwnedProviderRegistration<MemoryEmbeddingProviderAdapter>;
+
+export type PluginStatusProviderRegistration = {
+  pluginId: string;
+  provider: PluginStatusProvider;
+};
 
 export type PluginHookRegistration = {
   pluginId: string;
@@ -241,6 +247,7 @@ export type PluginRecord = {
 
 export type PluginRegistry = {
   plugins: PluginRecord[];
+  statusProviders: PluginStatusProviderRegistration[];
   tools: PluginToolRegistration[];
   hooks: PluginHookRegistration[];
   typedHooks: TypedPluginHookRegistration[];

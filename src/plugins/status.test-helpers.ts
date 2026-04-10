@@ -115,6 +115,7 @@ export function createPluginLoadResult(
   const { plugins, realtimeTranscriptionProviders, realtimeVoiceProviders, ...rest } = overrides;
   return {
     plugins,
+    statusProviders: [],
     diagnostics: [],
     channels: [],
     channelSetups: [],

@@ -82,6 +82,7 @@ import type {
   OpenClawPluginSecurityAuditCollector,
   MediaUnderstandingProviderPlugin,
   OpenClawPluginService,
+  PluginStatusProvider,
   OpenClawPluginToolContext,
   OpenClawPluginToolFactory,
   PluginDiagnostic,
@@ -163,6 +164,13 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
 
   const pushDiagnostic = (diag: PluginDiagnostic) => {
     registry.diagnostics.push(diag);
+  };
+
+  const registerStatusProvider = (record: PluginRecord, provider: PluginStatusProvider) => {
+    registry.statusProviders.push({
+      pluginId: record.id,
+      provider,
+    });
   };
 
   const registerTool = (
@@ -1039,6 +1047,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
       handlers: {
         ...(registrationMode === "full"
           ? {
+              registerStatusProvider: (provider) => registerStatusProvider(record, provider),
               registerTool: (tool, opts) => registerTool(record, tool, opts),
               registerHook: (events, handler, opts) =>
                 registerHook(record, events, handler, opts, params.config),
