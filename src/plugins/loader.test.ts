@@ -28,6 +28,7 @@ import {
   writePlugin,
 } from "./loader.test-fixtures.js";
 import {
+  getMemoryEmbeddingProvider,
   listMemoryEmbeddingProviders,
   registerMemoryEmbeddingProvider,
 } from "./memory-embedding-providers.js";
@@ -3889,6 +3890,8 @@ export const runtimeValue = helperValue;`,
     const record = registry.plugins.find((entry) => entry.id === "source-runtime-shim");
     expect(record?.status).toBe("loaded");
   });
+
+});
 
 describe("getCompatibleActivePluginRegistry", () => {
   it("reuses the active registry only when the load context cache key matches", () => {

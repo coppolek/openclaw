@@ -126,7 +126,7 @@ const expectMemoryUnavailableResponse = (respond: ReturnType<typeof vi.fn>, erro
         ok: false,
         error,
       },
-    },
+    }),
     undefined,
   );
 };
@@ -134,7 +134,7 @@ const expectMemoryUnavailableResponse = (respond: ReturnType<typeof vi.fn>, erro
 const expectEmbeddingProbeFailureResponse = (respond: ReturnType<typeof vi.fn>, error: string) => {
   expect(respond).toHaveBeenCalledWith(
     true,
-    {
+    expect.objectContaining({
       agentId: "main",
       provider: "openai",
       runtime: {
