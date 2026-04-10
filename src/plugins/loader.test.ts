@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import type { OpenClawConfig } from "../config/config.js";
 import { applyPluginAutoEnable } from "../config/plugin-auto-enable.js";
 import { clearInternalHooks, getRegisteredEventKeys } from "../hooks/internal-hooks.js";
 import { emitDiagnosticEvent } from "../infra/diagnostic-events.js";
@@ -36,6 +37,7 @@ import {
   buildMemoryPromptSection,
   clearMemoryPluginState,
   getMemoryRuntime,
+  listActiveMemoryPublicArtifacts,
   listMemoryCorpusSupplements,
   registerMemoryCorpusSupplement,
   registerMemoryFlushPlanResolver,
@@ -4055,6 +4057,87 @@ describe("resolveRuntimePluginRegistry", () => {
 
     expect(resolveRuntimePluginRegistry(loadOptions)).toBe(registry);
     expect(getMemoryRuntime()).toBeDefined();
+  });
+
+  it("restores memory capability side effects when reusing the active registry", async () => {
+    useNoBundledPlugins();
+    const plugin = writePlugin({
+      id: "runtime-memory-capability",
+      filename: "runtime-memory-capability.cjs",
+      body: `module.exports = {
+  id: "runtime-memory-capability",
+  kind: "memory",
+  register(api) {
+    api.registerMemoryCapability({
+      publicArtifacts: {
+        async listArtifacts() {
+          return [
+            {
+              kind: "notes",
+              workspaceDir: "/tmp/workspace-a",
+              relativePath: "memory/notes.md",
+              absolutePath: "/tmp/workspace-a/memory/notes.md",
+              agentIds: ["main"],
+              contentType: "markdown",
+            },
+          ];
+        },
+      },
+    });
+  },
+};`,
+    });
+    const loadOptions = {
+      workspaceDir: plugin.dir,
+      config: {
+        plugins: {
+          load: { paths: [plugin.file] },
+          allow: ["runtime-memory-capability"],
+          slots: {
+            memory: "runtime-memory-capability",
+          },
+        },
+      },
+    };
+
+    const registry = loadOpenClawPlugins(loadOptions);
+    await expect(
+      listActiveMemoryPublicArtifacts({
+        cfg: loadOptions.config as OpenClawConfig,
+      }),
+    ).resolves.toEqual([
+      {
+        kind: "notes",
+        workspaceDir: "/tmp/workspace-a",
+        relativePath: "memory/notes.md",
+        absolutePath: "/tmp/workspace-a/memory/notes.md",
+        agentIds: ["main"],
+        contentType: "markdown",
+      },
+    ]);
+
+    clearMemoryPluginState();
+    await expect(
+      listActiveMemoryPublicArtifacts({
+        cfg: loadOptions.config as OpenClawConfig,
+      }),
+    ).resolves.toEqual([]);
+
+    expect(resolveRuntimePluginRegistry(loadOptions)).toBe(registry);
+    await expect(
+      listActiveMemoryPublicArtifacts({
+        cfg: loadOptions.config as OpenClawConfig,
+      }),
+    ).resolves.toEqual([
+      {
+        kind: "notes",
+        workspaceDir: "/tmp/workspace-a",
+        relativePath: "memory/notes.md",
+        absolutePath: "/tmp/workspace-a/memory/notes.md",
+        agentIds: ["main"],
+        contentType: "markdown",
+      },
+    ]);
   });
 
   it("falls back to the current active runtime when no explicit load context is provided", () => {
