@@ -153,12 +153,6 @@ describe("loadWorkspaceSkillEntries", () => {
     expect(entries.map((entry) => entry.skill.name)).toContain("fallback-name");
   });
 
-  it("allows managed skill directories that resolve outside the managed root", async () => {
-    const workspaceDir = await createTempWorkspaceDir();
-    const managedDir = path.join(workspaceDir, ".managed");
-    const outsideDir = await createTempWorkspaceDir();
-    const externalSkillDir = path.join(outsideDir, "outside-skill");
-
   it("marks disable-model-invocation skills as hidden in exposure metadata for newly loaded entries", async () => {
     const workspaceDir = await createTempWorkspaceDir();
     await writeSkill({
