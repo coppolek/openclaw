@@ -2,6 +2,7 @@ import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-pay
 import type { OpenClawConfig } from "../../config/config.js";
 import type { PollInput } from "../../polls.js";
 import { normalizePollInput } from "../../polls.js";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import {
   GATEWAY_CLIENT_MODES,
   GATEWAY_CLIENT_NAMES,
@@ -50,6 +51,8 @@ type MessageSendParams = {
   /** Active agent id for per-agent outbound media root scoping. */
   agentId?: string;
   channel?: string;
+  /** Alias of `mediaUrl` (message tool field name). */
+  media?: string;
   mediaUrl?: string;
   mediaUrls?: string[];
   gifPlayback?: boolean;
@@ -222,10 +225,19 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
   const channel = await resolveRequiredChannel({ cfg, channel: params.channel });
   const plugin = resolveRequiredPlugin(channel, cfg);
   const deliveryMode = plugin.outbound?.deliveryMode ?? "direct";
+  const normalizedMediaUrls = Array.isArray(params.mediaUrls)
+    ? params.mediaUrls
+        .map((entry) => normalizeOptionalString(entry))
+        .filter((entry): entry is string => Boolean(entry))
+    : undefined;
+  const hasExplicitMediaUrls = (normalizedMediaUrls?.length ?? 0) > 0;
+  const resolvedMediaUrl =
+    normalizeOptionalString(params.mediaUrl) ??
+    (hasExplicitMediaUrls ? undefined : normalizeOptionalString(params.media));
   const normalizedPayloads = normalizeReplyPayloadsForDelivery([
     {
       text: params.content,
-      mediaUrl: params.mediaUrl,
+      mediaUrl: resolvedMediaUrl,
       mediaUrls: params.mediaUrls,
     },
   ]);
@@ -236,7 +248,7 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
   const mirrorMediaUrls = normalizedPayloads.flatMap(
     (payload) => resolveSendableOutboundReplyParts(payload).mediaUrls,
   );
-  const primaryMediaUrl = mirrorMediaUrls[0] ?? params.mediaUrl ?? null;
+  const primaryMediaUrl = mirrorMediaUrls[0] ?? resolvedMediaUrl ?? null;
 
   if (params.dryRun) {
     return {
@@ -308,7 +320,7 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
     params: {
       to: params.to,
       message: params.content,
-      mediaUrl: params.mediaUrl,
+      mediaUrl: resolvedMediaUrl,
       mediaUrls: mirrorMediaUrls.length ? mirrorMediaUrls : params.mediaUrls,
       gifPlayback: params.gifPlayback,
       accountId: params.accountId,
