@@ -1,5 +1,8 @@
 import type { OpenClawConfig } from "../../config/config.js";
 import { logVerbose } from "../../globals.js";
+import { enqueueSystemEvent } from "../../infra/system-events.js";
+import { formatContextUsageShort, formatTokenCount } from "../status.js";
+import { runLearnForSession } from "./commands-learn.js";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
@@ -92,6 +95,40 @@ export const handleCompactCommand: CommandHandler = async (params) => {
     runtime.abortEmbeddedPiRun(sessionId);
     await runtime.waitForEmbeddedPiRunEnd(sessionId, 15_000);
   }
+
+  const thinkLevel = params.resolvedThinkLevel ?? (await params.resolveDefaultThinkingLevel());
+
+  const learnResult = params.sessionEntry.sessionFile
+    ? await runLearnForSession({
+        sessionId,
+        sessionKey: params.sessionKey,
+        messageChannel: params.command.channel,
+        groupId: params.sessionEntry.groupId,
+        groupChannel: params.sessionEntry.groupChannel,
+        groupSpace: params.sessionEntry.space,
+        spawnedBy: params.sessionEntry.spawnedBy,
+        sessionFile: params.sessionEntry.sessionFile,
+        workspaceDir: params.workspaceDir,
+        agentDir: params.agentDir,
+        config: params.cfg,
+        skillsSnapshot: params.sessionEntry.skillsSnapshot,
+        provider: params.provider,
+        model: params.model,
+        thinkLevel,
+        customFocus: "What insights and lessons should be remembered before context compaction?",
+        senderIsOwner: params.command.senderIsOwner,
+        ownerNumbers: params.command.ownerList.length > 0 ? params.command.ownerList : undefined,
+      })
+    : null;
+
+  if (learnResult?.ok) {
+    logVerbose(`Pre-compaction learning completed for session ${params.sessionKey}`);
+  } else if (learnResult) {
+    logVerbose(
+      `Pre-compaction learning failed for session ${params.sessionKey}: ${learnResult.message ?? "unknown error"}`,
+    );
+  }
+
   const customInstructions = extractCompactInstructions({
     rawBody: params.ctx.CommandBody ?? params.ctx.RawBody ?? params.ctx.Body,
     ctx: params.ctx,
@@ -122,7 +159,7 @@ export const handleCompactCommand: CommandHandler = async (params) => {
     skillsSnapshot: params.sessionEntry.skillsSnapshot,
     provider: params.provider,
     model: params.model,
-    thinkLevel: params.resolvedThinkLevel ?? (await params.resolveDefaultThinkingLevel()),
+    thinkLevel,
     bashElevated: {
       enabled: false,
       allowed: false,
