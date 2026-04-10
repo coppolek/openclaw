@@ -12,6 +12,20 @@ import {
 import { isAbortTrigger } from "./reply/abort-primitives.js";
 import { stripInboundMetadata } from "./reply/strip-inbound-meta.js";
 
+function stripLeadingAddressingPrefixes(text: string): string {
+  let remaining = text.trimStart();
+  while (remaining) {
+    const next = remaining
+      .replace(/^<at\b[^>]*>[^<]*<\/at>\s*/iu, "")
+      .replace(/^@[^/\s]+(?:\s+|(?=\/)|$)/u, "");
+    if (next === remaining) {
+      break;
+    }
+    remaining = next.trimStart();
+  }
+  return remaining;
+}
+
 export function hasControlCommand(
   text?: string,
   cfg?: OpenClawConfig,
@@ -69,7 +83,13 @@ export function isControlCommandMessage(
   if (hasControlCommand(trimmed, cfg, options)) {
     return true;
   }
-  const stripped = stripInboundMetadata(trimmed);
+  const stripped = stripInboundMetadata(stripLeadingAddressingPrefixes(trimmed));
+  if (!stripped) {
+    return false;
+  }
+  if (hasControlCommand(stripped, cfg, options)) {
+    return true;
+  }
   const normalized =
     normalizeOptionalLowercaseString(normalizeCommandBody(stripped, options)) ?? "";
   return isAbortTrigger(normalized);
