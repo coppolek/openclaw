@@ -57,10 +57,6 @@ type SlackAppConstructor = typeof import("@slack/bolt").App;
 type SlackHttpReceiverConstructor = typeof import("@slack/bolt").HTTPReceiver;
 type IsSlackExecApprovalClientEnabled =
   typeof import("./exec-approvals-enabled.runtime.js").isSlackExecApprovalClientEnabled;
-type SlackExecApprovalHandlerCtor =
-  typeof import("./exec-approvals.runtime.js").SlackExecApprovalHandler;
-type SlackExecApprovalHandlerInstance = InstanceType<SlackExecApprovalHandlerCtor>;
-type SlackExecApprovalHandlerParams = ConstructorParameters<SlackExecApprovalHandlerCtor>[0];
 type SlackBoltResolvedExports = {
   App: SlackAppConstructor;
   HTTPReceiver: SlackHttpReceiverConstructor;
@@ -133,13 +129,6 @@ function resolveSlackBoltInterop(params: {
 }
 
 let slackBoltInterop: SlackBoltResolvedExports | undefined;
-
-async function createSlackExecApprovalHandler(
-  params: SlackExecApprovalHandlerParams,
-): Promise<SlackExecApprovalHandlerInstance> {
-  const { SlackExecApprovalHandler } = await import("./exec-approvals.runtime.js");
-  return new SlackExecApprovalHandler(params);
-}
 
 async function isSlackExecApprovalClientEnabledForAccount(
   params: Parameters<IsSlackExecApprovalClientEnabled>[0],
@@ -486,15 +475,6 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
 
   registerSlackMonitorEvents({ ctx, account, handleSlackMessage, trackEvent });
   await registerSlackMonitorSlashCommands({ ctx, account });
-  const execApprovalsHandler = execApprovalsEnabled
-    ? await createSlackExecApprovalHandler({
-        app,
-        accountId: account.accountId,
-        config: slackCfg.execApprovals ?? {},
-        cfg,
-      })
-    : null;
-  await execApprovalsHandler?.start();
   if (slackMode === "http" && slackHttpHandler) {
     unregisterHttpHandler = registerSlackHttpHandler({
       path: slackWebhookPath,
