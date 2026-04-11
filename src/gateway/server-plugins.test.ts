@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
+import { getGlobalPluginRegistry, resetGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import type { PluginRegistry } from "../plugins/registry.js";
 import type { PluginRuntimeGatewayRequestScope } from "../plugins/runtime/gateway-request-scope.js";
 import type { PluginRuntime } from "../plugins/runtime/types.js";
@@ -238,6 +239,7 @@ beforeEach(() => {
 afterEach(() => {
   runtimeModule.clearGatewaySubagentRuntime();
   runtimeRegistryModule.resetPluginRuntimeStateForTest();
+  resetGlobalHookRunner();
 });
 
 describe("loadGatewayPlugins", () => {
@@ -307,6 +309,20 @@ describe("loadGatewayPlugins", () => {
     runtimeRegistryModule.setActivePluginRegistry(replacementRegistry);
 
     expect(runtimeRegistryModule.getActivePluginChannelRegistry()).toBe(startupRegistry);
+  });
+
+  test("pins the initial startup hook registry against later active-registry churn", async () => {
+    const startupRegistry = createRegistry([]);
+    loadOpenClawPlugins.mockReturnValue(startupRegistry);
+
+    loadGatewayStartupPluginsForTest({
+      pluginIds: ["slack"],
+    });
+
+    const replacementRegistry = createRegistry([]);
+    runtimeRegistryModule.setActivePluginRegistry(replacementRegistry);
+
+    expect(runtimeRegistryModule.getActivePluginHookRegistry()).toBe(startupRegistry);
   });
 
   test("keeps the raw activation source when a precomputed startup scope is reused", async () => {
@@ -833,6 +849,31 @@ describe("loadGatewayPlugins", () => {
         onlyPluginIds: ["discord"],
       }),
     );
+  });
+
+  test("refreshes the global hook runner after deferred gateway hook repins", async () => {
+    const { reloadDeferredGatewayPlugins } = serverPluginBootstrapModule;
+    const startupRegistry = createRegistry([]);
+    const deferredRegistry = createRegistry([]);
+    loadOpenClawPlugins.mockReturnValueOnce(startupRegistry).mockReturnValueOnce(deferredRegistry);
+
+    loadGatewayStartupPluginsForTest({
+      pluginIds: ["slack"],
+    });
+    expect(getGlobalPluginRegistry()).toBe(startupRegistry);
+
+    reloadDeferredGatewayPlugins({
+      cfg: {},
+      workspaceDir: "/tmp",
+      log: createTestLog(),
+      coreGatewayHandlers: {},
+      baseMethods: [],
+      pluginIds: ["slack"],
+      logDiagnostics: false,
+    });
+
+    expect(runtimeRegistryModule.getActivePluginHookRegistry()).toBe(deferredRegistry);
+    expect(getGlobalPluginRegistry()).toBe(deferredRegistry);
   });
 
   test("runs registry hook before priming configured bindings", async () => {

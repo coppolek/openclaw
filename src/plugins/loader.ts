@@ -58,6 +58,7 @@ import { isPathInside, safeStatSync } from "./path-safety.js";
 import { createPluginRegistry, type PluginRecord, type PluginRegistry } from "./registry.js";
 import { resolvePluginCacheInputs } from "./roots.js";
 import {
+  getActivePluginHookRegistry,
   getActivePluginRegistry,
   getActivePluginRegistryKey,
   getActivePluginRuntimeSubagentMode,
@@ -1082,7 +1083,11 @@ function activatePluginRegistry(
   workspaceDir?: string,
 ): void {
   setActivePluginRegistry(registry, cacheKey, runtimeSubagentMode, workspaceDir);
-  initializeGlobalHookRunner(registry);
+  // The global hook runner follows the dedicated hook registry surface so gateway
+  // startup can pin it across later default-mode plugin loads without making every
+  // gateway-bindable activation sticky for unrelated runtime helpers.
+  const hookRegistry = getActivePluginHookRegistry() ?? registry;
+  initializeGlobalHookRunner(hookRegistry);
 }
 
 export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegistry {

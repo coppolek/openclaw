@@ -12,7 +12,11 @@ import {
 import { emitDiagnosticEvent } from "../infra/diagnostic-events.js";
 import { withEnv } from "../test-utils/env.js";
 import { clearPluginCommands, getPluginCommandSpecs } from "./command-registry-state.js";
-import { getGlobalHookRunner, resetGlobalHookRunner } from "./hook-runner-global.js";
+import {
+  getGlobalHookRunner,
+  getGlobalPluginRegistry,
+  resetGlobalHookRunner,
+} from "./hook-runner-global.js";
 import { createHookRunner } from "./hooks.js";
 import {
   __testing,
@@ -53,6 +57,7 @@ import {
   getActivePluginRegistry,
   getActivePluginRegistryKey,
   listImportedRuntimePluginIds,
+  pinActivePluginHookRegistry,
   setActivePluginRegistry,
 } from "./runtime.js";
 import type { PluginSdkResolutionPreference } from "./sdk-alias.js";
@@ -2069,6 +2074,123 @@ module.exports = { id: "throws-after-import", register() {} };`,
     },
   ])("$name", ({ setup }) => {
     expectCacheMissThenHit(setup());
+  });
+
+  it("does not pin the hook runner for direct gateway-bindable loads outside gateway startup", () => {
+    useNoBundledPlugins();
+    const gatewayPlugin = writePlugin({
+      id: "gateway-bindable-hooks",
+      filename: "gateway-bindable-hooks.cjs",
+      body: `module.exports = { id: "gateway-bindable-hooks", register(api) { api.registerHook("before_agent_reply", async () => undefined); } };`,
+    });
+    const defaultPlugin = writePlugin({
+      id: "default-hooks",
+      filename: "default-hooks.cjs",
+      body: `module.exports = { id: "default-hooks", register(api) { api.registerHook("before_agent_reply", async () => undefined); } };`,
+    });
+
+    const gatewayRegistry = loadOpenClawPlugins({
+      workspaceDir: gatewayPlugin.dir,
+      config: {
+        plugins: {
+          allow: ["gateway-bindable-hooks"],
+          load: {
+            paths: [gatewayPlugin.file],
+          },
+        },
+      },
+      runtimeOptions: {
+        allowGatewaySubagentBinding: true,
+      },
+    });
+    const gatewayHookRunner = getGlobalHookRunner();
+
+    expect(gatewayHookRunner).not.toBeNull();
+    expect(getGlobalPluginRegistry()).toBe(gatewayRegistry);
+
+    const defaultRegistry = loadOpenClawPlugins({
+      workspaceDir: defaultPlugin.dir,
+      config: {
+        plugins: {
+          allow: ["default-hooks"],
+          load: {
+            paths: [defaultPlugin.file],
+          },
+        },
+      },
+    });
+
+    expect(getGlobalHookRunner()).not.toBe(gatewayHookRunner);
+    expect(getGlobalPluginRegistry()).toBe(defaultRegistry);
+    expect(getGlobalPluginRegistry()).not.toBe(gatewayRegistry);
+  });
+
+  it("preserves an explicitly pinned hook runner across later default activating loads", () => {
+    useNoBundledPlugins();
+    const gatewayPlugin = writePlugin({
+      id: "gateway-bindable-hooks",
+      filename: "gateway-bindable-hooks.cjs",
+      body: `module.exports = { id: "gateway-bindable-hooks", register(api) { api.registerHook("before_agent_reply", async () => undefined); } };`,
+    });
+    const defaultPlugin = writePlugin({
+      id: "default-hooks",
+      filename: "default-hooks.cjs",
+      body: `module.exports = { id: "default-hooks", register(api) { api.registerHook("before_agent_reply", async () => undefined); } };`,
+    });
+
+    const gatewayRegistry = loadOpenClawPlugins({
+      workspaceDir: gatewayPlugin.dir,
+      config: {
+        plugins: {
+          allow: ["gateway-bindable-hooks"],
+          load: {
+            paths: [gatewayPlugin.file],
+          },
+        },
+      },
+      runtimeOptions: {
+        allowGatewaySubagentBinding: true,
+      },
+    });
+    const gatewayHookRunner = getGlobalHookRunner();
+
+    expect(gatewayHookRunner).not.toBeNull();
+    expect(getGlobalPluginRegistry()).toBe(gatewayRegistry);
+
+    // Gateway startup pins the hook surface after the initial activating load.
+    pinActivePluginHookRegistry(gatewayRegistry);
+
+    loadOpenClawPlugins({
+      workspaceDir: defaultPlugin.dir,
+      config: {
+        plugins: {
+          allow: ["default-hooks"],
+          load: {
+            paths: [defaultPlugin.file],
+          },
+        },
+      },
+    });
+
+    expect(getGlobalHookRunner()).toBe(gatewayHookRunner);
+    expect(getGlobalPluginRegistry()).toBe(gatewayRegistry);
+
+    // Repeated default-mode loads may hit the loader cache, but they still must not
+    // replace the hook runner pinned from the earlier gateway startup load.
+    loadOpenClawPlugins({
+      workspaceDir: defaultPlugin.dir,
+      config: {
+        plugins: {
+          allow: ["default-hooks"],
+          load: {
+            paths: [defaultPlugin.file],
+          },
+        },
+      },
+    });
+
+    expect(getGlobalHookRunner()).toBe(gatewayHookRunner);
+    expect(getGlobalPluginRegistry()).toBe(gatewayRegistry);
   });
 
   it("evicts least recently used registries when the loader cache exceeds its cap", () => {
