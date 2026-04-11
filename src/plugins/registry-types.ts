@@ -30,6 +30,7 @@ import type {
   PluginDiagnostic,
   PluginFormat,
   PluginHookRegistration as TypedPluginHookRegistration,
+  PluginStatusProvider,
   PluginKind,
   PluginLogger,
   PluginOrigin,
@@ -150,6 +151,11 @@ export type PluginAgentHarnessRegistration = {
   rootDir?: string;
 };
 
+export type PluginStatusProviderRegistration = {
+  pluginId: string;
+  provider: PluginStatusProvider;
+};
+
 export type PluginHookRegistration = {
   pluginId: string;
   entry: HookEntry;
@@ -261,6 +267,7 @@ export type PluginRecord = {
 
 export type PluginRegistry = {
   plugins: PluginRecord[];
+  statusProviders: PluginStatusProviderRegistration[];
   tools: PluginToolRegistration[];
   hooks: PluginHookRegistration[];
   typedHooks: TypedPluginHookRegistration[];
