@@ -8,6 +8,7 @@ export const GRADIUM_VOICES = [
   { id: "2H4HY2CBNyJHBCrP", name: "Christina" },
   { id: "jtEKaLYNn6iif5PR", name: "Sydney" },
   { id: "KWJiFWu2O9nMPYcR", name: "John" },
+  { id: "3jUdJyOi9pgbxBTK", name: "Arthur" },
 ] as const;
 
 export function normalizeGradiumBaseUrl(baseUrl?: string): string {
