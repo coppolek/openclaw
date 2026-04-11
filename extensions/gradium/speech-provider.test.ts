@@ -50,7 +50,7 @@ describe("gradium speech provider", () => {
 
     expect(fetchMock).toHaveBeenCalledOnce();
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe("http://api.gradium.ai/api/post/speech/tts");
+    expect(url).toBe("https://api.gradium.ai/api/post/speech/tts");
     const headers = new Headers(init.headers);
     expect(headers.get("x-api-key")).toBe("gsk_test123");
     expect(JSON.parse(init.body as string)).toEqual({

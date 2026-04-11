@@ -54,7 +54,7 @@ describe("gradium tts diagnostics", () => {
       gradiumTTS({
         text: "hello",
         apiKey: "bad-key",
-        baseUrl: "http://api.gradium.ai",
+        baseUrl: "https://api.gradium.ai",
         voiceId: "YTpq7expH9539ERJ",
         outputFormat: "wav",
         timeoutMs: 5_000,
@@ -70,7 +70,7 @@ describe("gradium tts diagnostics", () => {
       gradiumTTS({
         text: "hello",
         apiKey: "test-key",
-        baseUrl: "http://api.gradium.ai",
+        baseUrl: "https://api.gradium.ai",
         voiceId: "YTpq7expH9539ERJ",
         outputFormat: "wav",
         timeoutMs: 5_000,
@@ -92,7 +92,7 @@ describe("gradium tts diagnostics", () => {
       gradiumTTS({
         text: "hello",
         apiKey: "test-key",
-        baseUrl: "http://api.gradium.ai",
+        baseUrl: "https://api.gradium.ai",
         voiceId: "YTpq7expH9539ERJ",
         outputFormat: "wav",
         timeoutMs: 5_000,
@@ -110,7 +110,7 @@ describe("gradium tts diagnostics", () => {
     const result = await gradiumTTS({
       text: "Hello world",
       apiKey: "gsk_test123",
-      baseUrl: "http://api.gradium.ai",
+      baseUrl: "https://api.gradium.ai",
       voiceId: "YTpq7expH9539ERJ",
       outputFormat: "wav",
       timeoutMs: 5_000,
@@ -118,7 +118,7 @@ describe("gradium tts diagnostics", () => {
 
     expect(fetchMock).toHaveBeenCalledOnce();
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe("http://api.gradium.ai/api/post/speech/tts");
+    expect(url).toBe("https://api.gradium.ai/api/post/speech/tts");
     expect(init.method).toBe("POST");
     const headers = new Headers(init.headers);
     expect(headers.get("x-api-key")).toBe("gsk_test123");
