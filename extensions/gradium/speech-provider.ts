@@ -77,20 +77,40 @@ export function buildGradiumSpeechProvider(): SpeechProviderPlugin {
       if (!apiKey) {
         throw new Error("Gradium API key missing");
       }
+      const wantsVoiceNote = req.target === "voice-note";
+      const outputFormat = wantsVoiceNote ? "opus" : "wav";
       const audioBuffer = await gradiumTTS({
         text: req.text,
         apiKey,
         baseUrl: config.baseUrl,
         voiceId: trimToUndefined(overrides.voiceId) ?? config.voiceId,
-        outputFormat: "wav",
+        outputFormat,
         timeoutMs: req.timeoutMs,
       });
       return {
         audioBuffer,
-        outputFormat: "wav",
-        fileExtension: ".wav",
-        voiceCompatible: false,
+        outputFormat,
+        fileExtension: wantsVoiceNote ? ".opus" : ".wav",
+        voiceCompatible: wantsVoiceNote,
       };
+    },
+    synthesizeTelephony: async (req) => {
+      const config = readGradiumProviderConfig(req.providerConfig);
+      const apiKey = config.apiKey || process.env.GRADIUM_API_KEY;
+      if (!apiKey) {
+        throw new Error("Gradium API key missing");
+      }
+      const outputFormat = "ulaw_8000";
+      const sampleRate = 8_000;
+      const audioBuffer = await gradiumTTS({
+        text: req.text,
+        apiKey,
+        baseUrl: config.baseUrl,
+        voiceId: config.voiceId,
+        outputFormat,
+        timeoutMs: req.timeoutMs,
+      });
+      return { audioBuffer, outputFormat, sampleRate };
     },
   };
 }

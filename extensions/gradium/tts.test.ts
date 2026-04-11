@@ -128,7 +128,7 @@ describe("gradium tts diagnostics", () => {
       voice_id: "YTpq7expH9539ERJ",
       only_audio: true,
       output_format: "wav",
-      json_config: { padding_bonus: 0 },
+      json_config: '{"padding_bonus":0}',
     });
     expect(result).toEqual(audioData);
   });
