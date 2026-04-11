@@ -7,6 +7,7 @@ import type {
   PluginHookBeforeModelResolveResult,
   PluginHookBeforePromptBuildResult,
 } from "../../plugins/types.js";
+import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
 import type { FailoverReason } from "../pi-embedded-helpers/types.js";
 import type { EmbeddedRunAttemptResult } from "./run/types.js";
 
@@ -145,7 +146,7 @@ export const mockedIsCompactionFailureError = vi.fn(() => false);
 export const mockedIsFailoverAssistantError = vi.fn(() => false);
 export const mockedIsFailoverErrorMessage = vi.fn(() => false);
 export const mockedIsLikelyContextOverflowError = vi.fn((msg?: string) => {
-  const lower = (msg ?? "").toLowerCase();
+  const lower = normalizeLowercaseStringOrEmpty(msg ?? "");
   return (
     lower.includes("request_too_large") ||
     lower.includes("context window exceeded") ||
@@ -273,7 +274,7 @@ export function resetRunOverflowCompactionHarnessMocks(): void {
   mockedIsFailoverErrorMessage.mockReturnValue(false);
   mockedIsLikelyContextOverflowError.mockReset();
   mockedIsLikelyContextOverflowError.mockImplementation((msg?: string) => {
-    const lower = (msg ?? "").toLowerCase();
+    const lower = normalizeLowercaseStringOrEmpty(msg ?? "");
     return (
       lower.includes("request_too_large") ||
       lower.includes("context window exceeded") ||
@@ -398,6 +399,7 @@ export async function loadRunOverflowCompactionHarness(): Promise<{
     isRateLimitAssistantError: mockedIsRateLimitAssistantError,
     isTimeoutErrorMessage: mockedIsTimeoutErrorMessage,
     pickFallbackThinkingLevel: mockedPickFallbackThinkingLevel,
+    sanitizeUserFacingText: vi.fn((text: unknown) => (typeof text === "string" ? text : "")),
   }));
 
   vi.doMock("./run/attempt.js", () => ({
