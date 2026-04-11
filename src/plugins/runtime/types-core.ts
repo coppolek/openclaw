@@ -19,6 +19,29 @@ export type RunHeartbeatOnceOptions = {
   heartbeat?: { target?: string };
 };
 
+// ── Plugin LLM completion types ──────────────────────────────────────
+
+export type PluginLlmCompleteMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export type PluginLlmCompleteParams = {
+  messages: PluginLlmCompleteMessage[];
+  /** Model ref (e.g. "anthropic/claude-sonnet-4-6"); defaults to agent's configured model. */
+  model?: string;
+  maxTokens?: number;
+  systemPrompt?: string;
+  signal?: AbortSignal;
+  /** Agent whose model/credentials to use. Defaults to the config's default agent. */
+  agentId?: string;
+};
+
+export type PluginLlmCompleteResult = {
+  text: string;
+  usage: { inputTokens: number; outputTokens: number };
+};
+
 /** Core runtime helpers exposed to trusted native plugins. */
 export type PluginRuntimeCore = {
   version: string;
@@ -137,5 +160,9 @@ export type PluginRuntimeCore = {
       provider: string;
       cfg?: import("../../config/config.js").OpenClawConfig;
     }) => Promise<import("../../agents/model-auth.js").ResolvedProviderAuth>;
+  };
+  /** Single-shot LLM completion using the agent's auth and model configuration. */
+  llm: {
+    complete: (params: PluginLlmCompleteParams) => Promise<PluginLlmCompleteResult>;
   };
 };
