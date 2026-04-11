@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { resolveOpenClawAgentDir } from "../agents/agent-paths.js";
 import {
   listAgentIds,
@@ -11,6 +12,7 @@ import {
   loadAuthProfileStoreForSecretsRuntime,
   replaceRuntimeAuthProfileStoreSnapshots,
 } from "../agents/auth-profiles.js";
+import { resolveAuthStorePath } from "../agents/auth-profiles/paths.js";
 import {
   clearRuntimeConfigSnapshot,
   setRuntimeConfigSnapshotRefreshHandler,
@@ -33,6 +35,13 @@ export type PreparedSecretsRuntimeSnapshot = {
   sourceConfig: OpenClawConfig;
   config: OpenClawConfig;
   authStores: Array<{ agentDir: string; store: AuthProfileStore }>;
+  authStoreFingerprints?: Record<
+    string,
+    {
+      mtimeNs: string;
+      size: string;
+    } | null
+  >;
   warnings: SecretResolverWarning[];
   webTools: RuntimeWebToolsMetadata;
 };
@@ -84,6 +93,9 @@ function cloneSnapshot(snapshot: PreparedSecretsRuntimeSnapshot): PreparedSecret
       agentDir: entry.agentDir,
       store: structuredClone(entry.store),
     })),
+    authStoreFingerprints: snapshot.authStoreFingerprints
+      ? { ...snapshot.authStoreFingerprints }
+      : undefined,
     warnings: snapshot.warnings.map((warning) => ({ ...warning })),
     webTools: structuredClone(snapshot.webTools),
   };
@@ -212,12 +224,23 @@ export async function prepareSecretsRuntimeSnapshot(params: {
 
   const includeAuthStoreRefs = params.includeAuthStoreRefs ?? true;
   const authStores: Array<{ agentDir: string; store: AuthProfileStore }> = [];
+  const authStoreFingerprints: PreparedSecretsRuntimeSnapshot["authStoreFingerprints"] = {};
   const loadAuthStore = params.loadAuthStore ?? loadAuthProfileStoreForSecretsRuntime;
   const candidateDirs = params.agentDirs?.length
     ? [...new Set(params.agentDirs.map((entry) => resolveUserPath(entry, runtimeEnv)))]
     : collectCandidateAgentDirs(resolvedConfig, runtimeEnv);
   if (includeAuthStoreRefs) {
     for (const agentDir of candidateDirs) {
+      const authPath = resolveAuthStorePath(agentDir);
+      try {
+        const stat = fs.statSync(authPath, { bigint: true });
+        authStoreFingerprints[agentDir] = {
+          mtimeNs: stat.mtimeNs.toString(),
+          size: stat.size.toString(),
+        };
+      } catch {
+        authStoreFingerprints[agentDir] = null;
+      }
       const store = structuredClone(loadAuthStore(agentDir));
       collectAuthStoreAssignments({
         store,
@@ -245,6 +268,7 @@ export async function prepareSecretsRuntimeSnapshot(params: {
     sourceConfig,
     config: resolvedConfig,
     authStores,
+    authStoreFingerprints,
     warnings: context.warnings,
     webTools: await resolveRuntimeWebTools({
       sourceConfig,
@@ -273,7 +297,7 @@ export function activateSecretsRuntimeSnapshot(snapshot: PreparedSecretsRuntimeS
       loadablePluginOrigins: new Map<string, PluginOrigin>(),
     } satisfies SecretsRuntimeRefreshContext);
   setRuntimeConfigSnapshot(next.config, next.sourceConfig);
-  replaceRuntimeAuthProfileStoreSnapshots(next.authStores);
+  replaceRuntimeAuthProfileStoreSnapshots(next.authStores, next.authStoreFingerprints);
   activeSnapshot = next;
   activeRefreshContext = cloneRefreshContext(refreshContext);
   setActiveRuntimeWebToolsMetadata(next.webTools);

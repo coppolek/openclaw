@@ -17,6 +17,7 @@ import {
   calculateAuthProfileCooldownMs,
   ensureAuthProfileStore,
   markAuthProfileFailure,
+  replaceRuntimeAuthProfileStoreSnapshots,
 } from "./auth-profiles.js";
 
 type AuthProfileStore = ReturnType<typeof ensureAuthProfileStore>;
@@ -88,6 +89,13 @@ describe("markAuthProfileFailure", () => {
         },
       };
 
+      replaceRuntimeAuthProfileStoreSnapshots([
+        {
+          agentDir,
+          store: staleRuntimeStore,
+        },
+      ]);
+
       fs.writeFileSync(
         authPath,
         JSON.stringify({
@@ -102,6 +110,13 @@ describe("markAuthProfileFailure", () => {
         }),
       );
 
+      const refreshedRuntimeStore = ensureAuthProfileStore(agentDir);
+      const refreshedCredential = refreshedRuntimeStore.profiles["openai:default"];
+      expect(refreshedCredential?.type).toBe("api_key");
+      expect(
+        refreshedCredential && "key" in refreshedCredential ? refreshedCredential.key : undefined,
+      ).toBe("sk-fresh-new");
+
       const staleCredential = staleRuntimeStore.profiles["openai:default"];
       expect(staleCredential?.type).toBe("api_key");
       expect(staleCredential && "key" in staleCredential ? staleCredential.key : undefined).toBe(
@@ -109,7 +124,7 @@ describe("markAuthProfileFailure", () => {
       );
 
       await markAuthProfileFailure({
-        store: staleRuntimeStore,
+        store: refreshedRuntimeStore,
         profileId: "openai:default",
         reason: "rate_limit",
         agentDir,

@@ -37,6 +37,11 @@ type SaveAuthProfileStoreOptions = {
   syncExternalCli?: boolean;
 };
 
+type AuthStoreFileFingerprint = {
+  mtimeNs: string;
+  size: string;
+};
+
 const runtimeAuthStoreSnapshots = new Map<string, AuthProfileStore>();
 const loadedAuthStoreCache = new Map<
   string,
@@ -47,6 +52,13 @@ const loadedAuthStoreCache = new Map<
     store: AuthProfileStore;
   }
 >();
+const staleRuntimeAuthStoreSnapshotKeys = new Set<string>();
+
+// Map of auth store path -> file fingerprint when the runtime snapshot was loaded.
+// Used to detect if a specific on-disk auth-profiles.json was modified externally
+// (e.g. by `openclaw models auth login` while gateway was stopped) and invalidate
+// stale runtime snapshots on startup.
+const runtimeSnapshotFingerprints = new Map<string, AuthStoreFileFingerprint | null>();
 
 function resolveRuntimeStoreKey(agentDir?: string): string {
   return resolveAuthStorePath(agentDir);
@@ -56,6 +68,18 @@ function cloneAuthProfileStore(store: AuthProfileStore): AuthProfileStore {
   return structuredClone(store);
 }
 
+function invalidateRuntimeAuthProfileStoreSnapshots(): void {
+  runtimeAuthStoreSnapshots.clear();
+  runtimeSnapshotFingerprints.clear();
+  staleRuntimeAuthStoreSnapshotKeys.clear();
+}
+
+function invalidateRuntimeAuthProfileStoreSnapshot(agentDir?: string): void {
+  const key = resolveRuntimeStoreKey(agentDir);
+  runtimeAuthStoreSnapshots.delete(key);
+  staleRuntimeAuthStoreSnapshotKeys.add(key);
+}
+
 function resolveRuntimeAuthProfileStore(agentDir?: string): AuthProfileStore | null {
   if (runtimeAuthStoreSnapshots.size === 0) {
     return null;
@@ -63,6 +87,35 @@ function resolveRuntimeAuthProfileStore(agentDir?: string): AuthProfileStore | n
 
   const mainKey = resolveRuntimeStoreKey(undefined);
   const requestedKey = resolveRuntimeStoreKey(agentDir);
+  const mainAuthPath = resolveAuthStorePath();
+  const requestedAuthPath = resolveAuthStorePath(agentDir);
+
+  // Staleness detection: if the on-disk auth-profiles.json was modified after
+  // the runtime snapshot was loaded (e.g. by `openclaw models auth login` while
+  // gateway was stopped), invalidate the snapshot so callers fall through to a
+  // fresh disk read. This prevents overwriting fresh tokens with stale cached state.
+  // Check main store staleness (always checked).
+  const mainLoadedFingerprint = runtimeSnapshotFingerprints.get(mainKey);
+  if (mainLoadedFingerprint !== undefined) {
+    const mainFingerprint = readAuthStoreFingerprint(mainAuthPath);
+    if (hasAuthStoreFingerprintChanged(mainLoadedFingerprint, mainFingerprint)) {
+      invalidateRuntimeAuthProfileStoreSnapshots();
+      return null;
+    }
+  }
+
+  // Check agent-specific store staleness only when it differs from main.
+  if (requestedKey !== mainKey) {
+    const requestedLoadedFingerprint = runtimeSnapshotFingerprints.get(requestedKey);
+    if (requestedLoadedFingerprint !== undefined) {
+      const requestedFingerprint = readAuthStoreFingerprint(requestedAuthPath);
+      if (hasAuthStoreFingerprintChanged(requestedLoadedFingerprint, requestedFingerprint)) {
+        invalidateRuntimeAuthProfileStoreSnapshot(agentDir);
+        return null;
+      }
+    }
+  }
+
   const mainStore = runtimeAuthStoreSnapshots.get(mainKey);
   const requestedStore = runtimeAuthStoreSnapshots.get(requestedKey);
 
@@ -82,6 +135,9 @@ function resolveRuntimeAuthProfileStore(agentDir?: string): AuthProfileStore | n
   if (requestedStore) {
     return cloneAuthProfileStore(requestedStore);
   }
+  if (staleRuntimeAuthStoreSnapshotKeys.has(requestedKey)) {
+    return null;
+  }
   if (mainStore) {
     return cloneAuthProfileStore(mainStore);
   }
@@ -99,18 +155,34 @@ function hasStoredAuthProfileFiles(agentDir?: string): boolean {
 
 export function replaceRuntimeAuthProfileStoreSnapshots(
   entries: Array<{ agentDir?: string; store: AuthProfileStore }>,
+  snapshotFingerprints?: Record<string, AuthStoreFileFingerprint | null>,
 ): void {
+  // Clear stale mtime keys from prior activations before populating fresh ones.
+  // This prevents removed agent paths from causing false-positive staleness detection.
+  runtimeSnapshotFingerprints.clear();
+  staleRuntimeAuthStoreSnapshotKeys.clear();
+
+  // Capture a stable file fingerprint for each auth store file represented by entries.
+  // Use prepare-time fingerprints when available to close the race window between
+  // prepareSecretsRuntimeSnapshot reading the store and this function capturing metadata.
+  for (const entry of entries) {
+    const authPath = resolveAuthStorePath(entry.agentDir);
+    const key = resolveRuntimeStoreKey(entry.agentDir);
+    const agentDirKey = entry.agentDir ?? "";
+    const fingerprint = snapshotFingerprints?.[agentDirKey] ?? readAuthStoreFingerprint(authPath);
+    runtimeSnapshotFingerprints.set(key, fingerprint);
+  }
+
   runtimeAuthStoreSnapshots.clear();
   for (const entry of entries) {
-    runtimeAuthStoreSnapshots.set(
-      resolveRuntimeStoreKey(entry.agentDir),
-      cloneAuthProfileStore(entry.store),
-    );
+    const key = resolveRuntimeStoreKey(entry.agentDir);
+    staleRuntimeAuthStoreSnapshotKeys.delete(key);
+    runtimeAuthStoreSnapshots.set(key, cloneAuthProfileStore(entry.store));
   }
 }
 
 export function clearRuntimeAuthProfileStoreSnapshots(): void {
-  runtimeAuthStoreSnapshots.clear();
+  invalidateRuntimeAuthProfileStoreSnapshots();
   loadedAuthStoreCache.clear();
 }
 
@@ -120,6 +192,28 @@ function readAuthStoreMtimeMs(authPath: string): number | null {
   } catch {
     return null;
   }
+}
+
+function readAuthStoreFingerprint(authPath: string): AuthStoreFileFingerprint | null {
+  try {
+    const stat = fs.statSync(authPath, { bigint: true });
+    return {
+      mtimeNs: stat.mtimeNs.toString(),
+      size: stat.size.toString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function hasAuthStoreFingerprintChanged(
+  expected: AuthStoreFileFingerprint | null,
+  actual: AuthStoreFileFingerprint | null,
+): boolean {
+  if (expected === null || actual === null) {
+    return expected !== actual;
+  }
+  return expected.mtimeNs !== actual.mtimeNs || expected.size !== actual.size;
 }
 
 function readCachedAuthProfileStore(params: {
@@ -434,13 +528,17 @@ export function saveAuthProfileStore(
   if (shouldSyncExternalCliCredentials(options)) {
     syncExternalCliCredentialsTimed(runtimeStore, { log: false });
   }
+  const authMtimeMs = readAuthStoreMtimeMs(authPath);
+  const stateMtimeMs = readAuthStoreMtimeMs(statePath);
   writeCachedAuthProfileStore({
     authPath,
-    authMtimeMs: readAuthStoreMtimeMs(authPath),
-    stateMtimeMs: readAuthStoreMtimeMs(statePath),
+    authMtimeMs,
+    stateMtimeMs,
     store: runtimeStore,
   });
+  runtimeSnapshotFingerprints.set(runtimeKey, readAuthStoreFingerprint(authPath));
   if (runtimeAuthStoreSnapshots.has(runtimeKey)) {
+    staleRuntimeAuthStoreSnapshotKeys.delete(runtimeKey);
     runtimeAuthStoreSnapshots.set(runtimeKey, cloneAuthProfileStore(runtimeStore));
   }
 }
