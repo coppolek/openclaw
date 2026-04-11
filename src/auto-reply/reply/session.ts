@@ -631,6 +631,7 @@ export async function initSessionState(params: {
     sessionsDir: path.dirname(storePath),
     fallbackSessionFile,
     activeSessionKey: sessionKey,
+    forceFreshSessionFile: resetTriggered,
   });
   sessionEntry = resolvedSessionFile.sessionEntry;
   if (isNewSession) {
