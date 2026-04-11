@@ -216,6 +216,27 @@ function isInvalidStreamingEventOrderError(raw: string): boolean {
   );
 }
 
+function isJsonSyntaxError(raw: string): boolean {
+  if (!raw) {
+    return false;
+  }
+  // Matches JSON.parse SyntaxError messages that are unambiguous indicators of
+  // stream truncation (i.e. the JSON was cut off mid-way through a tool call
+  // argument). We deliberately avoid "Unexpected token …" because that fires at
+  // position 0 for completely malformed payloads (e.g. corrupted session history)
+  // which deserve different diagnostics.
+  //
+  // Patterns:
+  //   V8/Node.js  – "Expected ',' or ']' after array element in JSON at position 900"
+  //   V8/Node.js  – "Unexpected end of JSON input"
+  //   JSC/Safari  – "JSON Parse error: Unexpected EOF"
+  return (
+    /^Expected .+ in JSON at position \d+/i.test(raw) ||
+    /^Unexpected end of JSON input$/i.test(raw) ||
+    /^JSON Parse error:/i.test(raw)
+  );
+}
+
 function hasRateLimitTpmHint(raw: string): boolean {
   const lower = normalizeLowercaseStringOrEmpty(raw);
   return /\btpm\b/i.test(lower) || lower.includes("tokens per minute");
@@ -1191,6 +1212,13 @@ export function formatAssistantErrorText(
 
   if (isInvalidStreamingEventOrderError(raw)) {
     return "LLM request failed: provider returned an invalid streaming response. Please try again.";
+  }
+
+  // JSON SyntaxErrors from truncated streaming (e.g. tool call arguments cut off mid-stream).
+  // These are infrastructure errors — the text content was already delivered successfully,
+  // so surfacing the raw parse error to the user is confusing and unhelpful.
+  if (isJsonSyntaxError(raw)) {
+    return "LLM request failed: response was truncated mid-stream. Please try again.";
   }
 
   // Catch role ordering errors - including JSON-wrapped and "400" prefix variants
