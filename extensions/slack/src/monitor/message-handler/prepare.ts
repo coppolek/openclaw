@@ -59,6 +59,27 @@ import type { PreparedSlackMessage } from "./types.js";
 
 const mentionRegexCache = new WeakMap<SlackMonitorContext, Map<string, RegExp[]>>();
 
+const resolveAckReactionScope = (
+  value: unknown,
+): "all" | "direct" | "group-all" | "group-mentions" | "off" | "none" | undefined => {
+  switch (normalizeOptionalString(value)) {
+    case "all":
+      return "all";
+    case "direct":
+      return "direct";
+    case "group-all":
+      return "group-all";
+    case "group-mentions":
+      return "group-mentions";
+    case "off":
+      return "off";
+    case "none":
+      return "none";
+    default:
+      return undefined;
+  }
+};
+
 function resolveCachedMentionRegexes(
   ctx: SlackMonitorContext,
   agentId: string | undefined,
@@ -565,12 +586,13 @@ export async function prepareSlackMessage(params: {
     accountId: account.accountId,
   });
   const ackReactionValue = ackReaction ?? "";
+  const ackReactionScope = resolveAckReactionScope(ctx.ackReactionScope);
 
   const shouldAckReaction = () =>
     Boolean(
       ackReaction &&
       shouldAckReactionGate({
-        scope: ctx.ackReactionScope,
+        scope: ackReactionScope,
         isDirect: isDirectMessage,
         isGroup: isRoomish,
         isMentionableGroup: isRoom,
