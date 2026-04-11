@@ -735,7 +735,12 @@ export function renderApp(state: AppViewState) {
     };
   };
   const applyDreamingEnabled = (enabled: boolean) => {
-    if (state.dreamingModeSaving || state.dreamingRestartConfirmLoading || dreamingOn === enabled) {
+    if (
+      state.dreamingModeSaving ||
+      state.dreamingRestartConfirmLoading ||
+      state.dreamingRestartConfirmOpen ||
+      dreamingOn === enabled
+    ) {
       return;
     }
     state.dreamingPendingEnabled = enabled;
@@ -748,6 +753,7 @@ export function renderApp(state: AppViewState) {
     }
     state.dreamingRestartConfirmOpen = false;
     state.dreamingPendingEnabled = null;
+    state.dreamingStatusError = null;
   };
   const confirmDreamingRestart = () => {
     const enabled = state.dreamingPendingEnabled;
@@ -760,6 +766,9 @@ export function renderApp(state: AppViewState) {
       try {
         const updated = await updateDreamingEnabled(state, enabled);
         if (!updated) {
+          if (!state.dreamingStatusError) {
+            state.dreamingStatusError = t("dreaming.restartConfirmation.failed");
+          }
           return;
         }
         await loadConfig(state);
@@ -2433,7 +2442,7 @@ export function renderApp(state: AppViewState) {
         loading: state.dreamingRestartConfirmLoading,
         onConfirm: confirmDreamingRestart,
         onCancel: cancelDreamingRestart,
-        error: state.dreamingStatusError,
+        hasError: Boolean(state.dreamingStatusError),
       })}
       ${nothing}
     </div>
