@@ -284,6 +284,18 @@ async function saveSessionStoreUnlocked(
     const shouldWarnOnly = maintenance.mode === "warn";
     const beforeCount = Object.keys(store).length;
 
+    // Collect directories from all sessions *before* prune/cap so that
+    // directories belonging to about-to-be-removed entries are still included
+    // in the archive cleanup scan (fixes leaked archives for pruned sessions
+    // with legacy external paths).
+    const allSessionDirs = new Set<string>();
+    for (const entry of Object.values(store)) {
+      const sf = entry?.sessionFile?.trim();
+      if (sf) {
+        allSessionDirs.add(path.dirname(path.resolve(sf)));
+      }
+    }
+
     if (shouldWarnOnly) {
       const activeSessionKey = opts?.activeSessionKey?.trim();
       if (activeSessionKey) {
@@ -333,7 +345,7 @@ async function saveSessionStoreUnlocked(
           rememberRemovedSessionFile(removedSessionFiles, entry);
         },
       });
-      const archivedDirs = new Set<string>();
+      const archivedDirs = new Set<string>(allSessionDirs);
       const referencedSessionIds = new Set(
         Object.values(store)
           .map((entry) => entry?.sessionId)
@@ -367,6 +379,13 @@ async function saveSessionStoreUnlocked(
         }
       }
 
+      // Eagerly clean up compaction archives for pruned/capped sessions.
+      // Once a session is removed from the store its directory is no longer
+      // tracked, so future retention sweeps would never find its archives.
+      // Deleting them now (regardless of age) avoids the need to persist
+      // removed-session directories across saves.
+      await cleanupCompactionArchivesForRemovedSessions(removedSessionFiles, referencedSessionIds);
+
       // Rotate the on-disk file if it exceeds the size threshold.
       await rotateSessionFile(storePath, maintenance.rotateBytes);
 
@@ -385,6 +404,22 @@ async function saveSessionStoreUnlocked(
         pruned,
         capped,
         diskBudget,
+      });
+    }
+
+    // Compaction archive cleanup runs regardless of mode — warn mode skips
+    // prune/cap but still needs to sweep expired .compaction.* files.
+    if (maintenance.compactionArchiveRetentionMs != null) {
+      const compactionDirs = new Set<string>(allSessionDirs);
+      // In enforce mode the store may have shrunk, but allSessionDirs was
+      // captured before pruning so it already covers removed entries.
+      // Also include the store directory itself as a fallback.
+      compactionDirs.add(path.dirname(path.resolve(storePath)));
+      const { cleanupArchivedSessionTranscripts } = await loadSessionArchiveRuntime();
+      await cleanupArchivedSessionTranscripts({
+        directories: [...compactionDirs],
+        olderThanMs: maintenance.compactionArchiveRetentionMs,
+        reason: "compaction",
       });
     }
   }
@@ -495,6 +530,44 @@ function rememberRemovedSessionFile(
 ): void {
   if (!removedSessionFiles.has(entry.sessionId) || entry.sessionFile) {
     removedSessionFiles.set(entry.sessionId, entry.sessionFile);
+  }
+}
+
+/**
+ * Eagerly delete `.compaction.*` archive files for sessions that have been
+ * pruned or capped out of the store.  Once a session entry is gone, its
+ * directory is no longer visited by the periodic retention sweep, so any
+ * compaction archives younger than retention would leak indefinitely.
+ * Cleaning them up at prune time sidesteps the problem entirely.
+ */
+async function cleanupCompactionArchivesForRemovedSessions(
+  removedSessionFiles: ReadonlyMap<string, string | undefined>,
+  referencedSessionIds: ReadonlySet<string>,
+): Promise<void> {
+  for (const [sessionId, sessionFile] of removedSessionFiles) {
+    if (!sessionFile || referencedSessionIds.has(sessionId)) {
+      continue;
+    }
+    const resolvedFile = path.resolve(sessionFile);
+    const dir = path.dirname(resolvedFile);
+    const baseName = path.basename(resolvedFile);
+    const prefix = `${baseName}.compaction.`;
+    let entries: string[];
+    try {
+      entries = await fs.promises.readdir(dir);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.startsWith(prefix)) {
+        continue;
+      }
+      try {
+        await fs.promises.rm(path.join(dir, entry));
+      } catch {
+        // Best-effort: the file may already have been removed.
+      }
+    }
   }
 }
 
