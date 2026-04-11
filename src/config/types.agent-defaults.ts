@@ -325,6 +325,8 @@ export type AgentDefaultsConfig = {
   };
   /** Max concurrent agent runs across all conversations. Default: 1 (sequential). */
   maxConcurrent?: number;
+  /** Max concurrent nested agent runs (inter-agent sessions_send). Default: 8. */
+  nestedMaxConcurrent?: number;
   /** Sub-agent defaults (spawned via sessions_spawn). */
   subagents?: {
     /** Default allowlist of target agent ids for sessions_spawn. Use "*" to allow any. */
