@@ -30,6 +30,7 @@ import { createRuntimeMedia } from "./runtime-media.js";
 import { createRuntimeSystem } from "./runtime-system.js";
 import { createRuntimeTaskFlow } from "./runtime-taskflow.js";
 import { createRuntimeTasks } from "./runtime-tasks.js";
+import { createRuntimeUsage } from "./runtime-usage.js";
 import type { PluginRuntime } from "./types.js";
 
 const loadTtsRuntime = createLazyRuntimeModule(() => import("../../tts/tts.js"));
@@ -228,6 +229,7 @@ export function createPluginRuntime(_options: CreatePluginRuntimeOptions = {}): 
     channel: createRuntimeChannel(),
     events: createRuntimeEvents(),
     logging: createRuntimeLogging(),
+    usage: createRuntimeUsage(),
     state: { resolveStateDir },
     tasks,
     taskFlow,
