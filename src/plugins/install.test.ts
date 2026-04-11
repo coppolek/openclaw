@@ -1115,7 +1115,7 @@ describe("installPluginFromArchive", () => {
   );
 
   it.runIf(process.platform !== "win32")(
-    "does not block package installs when node_modules symlink targets an allowed scoped package path",
+    "fails package installs when node_modules symlink targets a path outside the staged install root",
     async () => {
       const { pluginDir, extensionsDir } = setupPluginInstallDirs();
 
