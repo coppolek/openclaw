@@ -1,5 +1,11 @@
 import type { OpenClawConfig } from "../../config/config.js";
-import { isSubagentSessionKey, resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
+import {
+  buildAgentMainSessionKey,
+  isSubagentSessionKey,
+  normalizeAgentId,
+  parseAgentSessionKey,
+  resolveAgentIdFromSessionKey,
+} from "../../routing/session-key.js";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
@@ -37,25 +43,39 @@ export function resolveSessionToolsVisibility(cfg: OpenClawConfig): SessionTools
 export function resolveEffectiveSessionToolsVisibility(params: {
   cfg: OpenClawConfig;
   sandboxed: boolean;
+  agentId?: string;
 }): SessionToolsVisibility {
   const visibility = resolveSessionToolsVisibility(params.cfg);
   if (!params.sandboxed) {
     return visibility;
   }
-  const sandboxClamp = params.cfg.agents?.defaults?.sandbox?.sessionToolsVisibility ?? "spawned";
+  const sandboxClamp = resolveSandboxSessionToolsVisibility(params.cfg, params.agentId);
   if (sandboxClamp === "spawned" && visibility !== "tree") {
     return "tree";
   }
   return visibility;
 }
 
-export function resolveSandboxSessionToolsVisibility(cfg: OpenClawConfig): "spawned" | "all" {
+export function resolveSandboxSessionToolsVisibility(
+  cfg: OpenClawConfig,
+  agentId?: string,
+): "spawned" | "all" {
+  if (agentId) {
+    const normalizedAgentId = normalizeAgentId(agentId);
+    const override = cfg.agents?.list?.find(
+      (entry) => normalizeAgentId(entry.id) === normalizedAgentId,
+    )?.sandbox?.sessionToolsVisibility;
+    if (override === "spawned" || override === "all") {
+      return override;
+    }
+  }
   return cfg.agents?.defaults?.sandbox?.sessionToolsVisibility ?? "spawned";
 }
 
 export function resolveSandboxedSessionToolContext(params: {
   cfg: OpenClawConfig;
   agentSessionKey?: string;
+  agentId?: string;
   sandboxed?: boolean;
 }): {
   mainKey: string;
@@ -66,7 +86,13 @@ export function resolveSandboxedSessionToolContext(params: {
   restrictToSpawned: boolean;
 } {
   const { mainKey, alias } = resolveMainSessionAlias(params.cfg);
-  const visibility = resolveSandboxSessionToolsVisibility(params.cfg);
+  const requesterAgentId =
+    params.agentId ??
+    (() => {
+      const requesterSessionKey = normalizeOptionalString(params.agentSessionKey);
+      return requesterSessionKey ? resolveAgentIdFromSessionKey(requesterSessionKey) : undefined;
+    })();
+  const visibility = resolveSandboxSessionToolsVisibility(params.cfg, requesterAgentId);
   const requesterSessionKey = normalizeOptionalString(params.agentSessionKey);
   const requesterInternalKey = requesterSessionKey
     ? resolveInternalSessionKey({
@@ -192,15 +218,38 @@ function treeVisibilityMessage(action: SessionAccessAction): string {
 export async function createSessionVisibilityGuard(params: {
   action: SessionAccessAction;
   requesterSessionKey: string;
+  /** Canonical main session suffix from config (`session.mainKey`); required when synthesizing `agent:<id>:<mainKey>` for override flows. */
+  mainKey: string;
+  requesterAgentId?: string;
   visibility: SessionToolsVisibility;
   a2aPolicy: AgentToAgentPolicy;
 }): Promise<{
   check: (targetSessionKey: string) => SessionAccessResult;
 }> {
-  const requesterAgentId = resolveAgentIdFromSessionKey(params.requesterSessionKey);
+  const requesterSessionKey = params.requesterSessionKey.trim();
+  const requesterAgentIdFromSessionKey = resolveAgentIdFromSessionKey(requesterSessionKey);
+  const requesterAgentId =
+    params.requesterAgentId && params.requesterAgentId.trim()
+      ? normalizeAgentId(params.requesterAgentId)
+      : requesterAgentIdFromSessionKey;
+  const effectiveRequesterVisibilitySessionKey =
+    requesterAgentId === requesterAgentIdFromSessionKey
+      ? requesterSessionKey
+      : (() => {
+          const parsed = parseAgentSessionKey(requesterSessionKey);
+          if (parsed) {
+            return `agent:${requesterAgentId}:${parsed.rest}`;
+          }
+          return buildAgentMainSessionKey({
+            agentId: requesterAgentId,
+            mainKey: params.mainKey,
+          });
+        })();
   const spawnedKeys =
     params.visibility === "tree"
-      ? await listSpawnedSessionKeys({ requesterSessionKey: params.requesterSessionKey })
+      ? await listSpawnedSessionKeys({
+          requesterSessionKey: effectiveRequesterVisibilitySessionKey,
+        })
       : null;
 
   const check = (targetSessionKey: string): SessionAccessResult => {
@@ -231,7 +280,10 @@ export async function createSessionVisibilityGuard(params: {
       return { allowed: true };
     }
 
-    if (params.visibility === "self" && targetSessionKey !== params.requesterSessionKey) {
+    if (
+      params.visibility === "self" &&
+      targetSessionKey !== effectiveRequesterVisibilitySessionKey
+    ) {
       return {
         allowed: false,
         status: "forbidden",
@@ -241,7 +293,7 @@ export async function createSessionVisibilityGuard(params: {
 
     if (
       params.visibility === "tree" &&
-      targetSessionKey !== params.requesterSessionKey &&
+      targetSessionKey !== effectiveRequesterVisibilitySessionKey &&
       !spawnedKeys?.has(targetSessionKey)
     ) {
       return {

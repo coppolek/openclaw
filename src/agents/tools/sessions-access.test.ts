@@ -45,11 +45,75 @@ describe("resolveEffectiveSessionToolsVisibility", () => {
     } as unknown as OpenClawConfig;
     expect(resolveEffectiveSessionToolsVisibility({ cfg, sandboxed: true })).toBe("all");
   });
+
+  it("uses per-agent sandbox clamp override when provided", () => {
+    const cfg = {
+      tools: { sessions: { visibility: "all" } },
+      agents: {
+        defaults: { sandbox: { sessionToolsVisibility: "spawned" } },
+        list: [{ id: "tony", sandbox: { sessionToolsVisibility: "all" } }],
+      },
+    } as unknown as OpenClawConfig;
+    expect(
+      resolveEffectiveSessionToolsVisibility({
+        cfg,
+        sandboxed: true,
+        agentId: "tony",
+      }),
+    ).toBe("all");
+  });
+
+  it("falls back to default sandbox clamp when agentId is not found in agents.list", () => {
+    const cfg = {
+      tools: { sessions: { visibility: "all" } },
+      agents: {
+        defaults: { sandbox: { sessionToolsVisibility: "spawned" } },
+        list: [{ id: "tony", sandbox: { sessionToolsVisibility: "all" } }],
+      },
+    } as unknown as OpenClawConfig;
+    expect(
+      resolveEffectiveSessionToolsVisibility({
+        cfg,
+        sandboxed: true,
+        agentId: "ghost",
+      }),
+    ).toBe("tree");
+  });
 });
 
 describe("sandbox session-tools context", () => {
   it("defaults sandbox visibility clamp to spawned", () => {
     expect(resolveSandboxSessionToolsVisibility({} as unknown as OpenClawConfig)).toBe("spawned");
+  });
+
+  it("prefers per-agent sandbox visibility override over defaults", () => {
+    const cfg = {
+      agents: {
+        defaults: { sandbox: { sessionToolsVisibility: "spawned" } },
+        list: [{ id: "tony", sandbox: { sessionToolsVisibility: "all" } }],
+      },
+    } as unknown as OpenClawConfig;
+    expect(resolveSandboxSessionToolsVisibility(cfg, "tony")).toBe("all");
+  });
+
+  it("matches per-agent overrides case-insensitively", () => {
+    const cfg = {
+      agents: {
+        defaults: { sandbox: { sessionToolsVisibility: "spawned" } },
+        list: [{ id: "Tony", sandbox: { sessionToolsVisibility: "all" } }],
+      },
+    } as unknown as OpenClawConfig;
+    expect(resolveSandboxSessionToolsVisibility(cfg, "tony")).toBe("all");
+  });
+
+  it("falls back to default when agentId is not found in agents.list", () => {
+    const cfg = {
+      agents: {
+        defaults: { sandbox: { sessionToolsVisibility: "spawned" } },
+        list: [{ id: "tony", sandbox: { sessionToolsVisibility: "all" } }],
+      },
+    } as unknown as OpenClawConfig;
+    expect(resolveSandboxSessionToolsVisibility(cfg, "unknown-agent")).toBe("spawned");
   });
 
   it("restricts non-subagent sandboxed sessions to spawned visibility", () => {
@@ -132,6 +196,7 @@ describe("createSessionVisibilityGuard", () => {
     const guard = await createSessionVisibilityGuard({
       action: "history",
       requesterSessionKey: "agent:main:main",
+      mainKey: "main",
       visibility: "tree",
       a2aPolicy: createAgentToAgentPolicy({} as unknown as OpenClawConfig),
     });
@@ -145,6 +210,7 @@ describe("createSessionVisibilityGuard", () => {
     const guard = await createSessionVisibilityGuard({
       action: "send",
       requesterSessionKey: "agent:main:main",
+      mainKey: "main",
       visibility: "all",
       a2aPolicy: createAgentToAgentPolicy({} as unknown as OpenClawConfig),
     });
@@ -161,6 +227,7 @@ describe("createSessionVisibilityGuard", () => {
     const guard = await createSessionVisibilityGuard({
       action: "history",
       requesterSessionKey: "agent:main:main",
+      mainKey: "main",
       visibility: "self",
       a2aPolicy: createAgentToAgentPolicy({} as unknown as OpenClawConfig),
     });
@@ -172,5 +239,117 @@ describe("createSessionVisibilityGuard", () => {
       error:
         "Session history visibility is restricted to the current session (tools.sessions.visibility=self).",
     });
+  });
+
+  it("uses requesterAgentId override when evaluating self visibility", async () => {
+    const guard = await createSessionVisibilityGuard({
+      action: "history",
+      requesterSessionKey: "global",
+      mainKey: "main",
+      requesterAgentId: "tony",
+      visibility: "self",
+      a2aPolicy: createAgentToAgentPolicy({} as unknown as OpenClawConfig),
+    });
+
+    expect(guard.check("agent:tony:main")).toEqual({ allowed: true });
+    expect(guard.check("agent:tony:subagent:worker-1")).toEqual({
+      allowed: false,
+      status: "forbidden",
+      error:
+        "Session history visibility is restricted to the current session (tools.sessions.visibility=self).",
+    });
+  });
+
+  it("roots tree visibility checks to requesterAgentId override", async () => {
+    const callGatewayMock = vi.fn(
+      async (request: { method?: string; params?: { spawnedBy?: string } }) => {
+        if (request.method === "sessions.list") {
+          return request.params?.spawnedBy === "agent:tony:main"
+            ? { sessions: [{ key: "agent:tony:subagent:worker-1" }] }
+            : { sessions: [] };
+        }
+        return {};
+      },
+    );
+    sessionsResolutionTesting.setDepsForTest({
+      callGateway: callGatewayMock as never,
+    });
+
+    const guard = await createSessionVisibilityGuard({
+      action: "list",
+      requesterSessionKey: "global",
+      mainKey: "main",
+      requesterAgentId: "tony",
+      visibility: "tree",
+      a2aPolicy: createAgentToAgentPolicy({} as unknown as OpenClawConfig),
+    });
+
+    expect(guard.check("agent:tony:subagent:worker-1")).toEqual({ allowed: true });
+    expect(callGatewayMock).toHaveBeenCalledWith({
+      method: "sessions.list",
+      params: {
+        includeGlobal: false,
+        includeUnknown: false,
+        spawnedBy: "agent:tony:main",
+      },
+    });
+
+    sessionsResolutionTesting.setDepsForTest();
+  });
+
+  it("uses configured session.mainKey when synthesizing override root for self visibility", async () => {
+    const guard = await createSessionVisibilityGuard({
+      action: "history",
+      requesterSessionKey: "global",
+      mainKey: "inbox",
+      requesterAgentId: "tony",
+      visibility: "self",
+      a2aPolicy: createAgentToAgentPolicy({} as unknown as OpenClawConfig),
+    });
+
+    expect(guard.check("agent:tony:inbox")).toEqual({ allowed: true });
+    expect(guard.check("agent:tony:main")).toEqual({
+      allowed: false,
+      status: "forbidden",
+      error:
+        "Session history visibility is restricted to the current session (tools.sessions.visibility=self).",
+    });
+  });
+
+  it("uses configured session.mainKey when synthesizing override root for tree visibility", async () => {
+    const callGatewayMock = vi.fn(
+      async (request: { method?: string; params?: { spawnedBy?: string } }) => {
+        if (request.method === "sessions.list") {
+          return request.params?.spawnedBy === "agent:tony:inbox"
+            ? { sessions: [{ key: "agent:tony:subagent:worker-1" }] }
+            : { sessions: [] };
+        }
+        return {};
+      },
+    );
+    sessionsResolutionTesting.setDepsForTest({
+      callGateway: callGatewayMock as never,
+    });
+
+    const guard = await createSessionVisibilityGuard({
+      action: "list",
+      requesterSessionKey: "global",
+      mainKey: "inbox",
+      requesterAgentId: "tony",
+      visibility: "tree",
+      a2aPolicy: createAgentToAgentPolicy({} as unknown as OpenClawConfig),
+    });
+
+    expect(guard.check("agent:tony:subagent:worker-1")).toEqual({ allowed: true });
+    expect(callGatewayMock).toHaveBeenCalledWith({
+      method: "sessions.list",
+      params: {
+        includeGlobal: false,
+        includeUnknown: false,
+        spawnedBy: "agent:tony:inbox",
+      },
+    });
+
+    sessionsResolutionTesting.setDepsForTest();
   });
 });
