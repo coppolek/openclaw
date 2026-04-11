@@ -24,6 +24,7 @@ import {
   resolveClientIp,
 } from "./net.js";
 import { checkBrowserOrigin } from "./origin-check.js";
+import { GATEWAY_CLIENT_MODES, type GatewayClientMode } from "./protocol/client-info.js";
 import { withSerializedRateLimitAttempt } from "./rate-limit-attempt-serialization.js";
 
 export type ResolvedGatewayAuthMode = "none" | "token" | "password" | "trusted-proxy";
@@ -99,6 +100,12 @@ export type AuthorizeGatewayConnectParams = {
     allowedOrigins?: string[];
     allowHostHeaderOriginFallback?: boolean;
   };
+  /**
+   * Client mode from the WS connect payload. Used to exempt internal backend
+   * and probe clients from the trusted-proxy loopback rejection — these
+   * subsystems connect back to their own gateway and authenticate via token.
+   */
+  clientMode?: GatewayClientMode;
 };
 
 type TailscaleUser = {
@@ -388,20 +395,39 @@ function authorizeTrustedProxy(params: {
     return { reason: "trusted_proxy_untrusted_source" };
   }
   if (isLoopbackAddress(remoteAddr)) {
-    return { reason: "trusted_proxy_loopback_source" };
-  }
-
-  const requiredHeaders = trustedProxyConfig.requiredHeaders ?? [];
-  for (const header of requiredHeaders) {
-    const value = headerValue(req.headers[normalizeLowercaseStringOrEmpty(header)]);
-    if (!value || value.trim() === "") {
-      return { reason: `trusted_proxy_missing_header_${header}` };
+    if (!trustedProxyConfig.allowLoopback) {
+      return { reason: "trusted_proxy_loopback_source" };
     }
   }
 
-  const userHeaderValue = headerValue(
+  const requiredHeaders = trustedProxyConfig.requiredHeaders ?? [];
+  // Skip required header checks for internal loopback connections that will
+  // use loopbackUser — these never pass through the reverse proxy.
+  const isInternalLoopback =
+    isLoopbackAddress(remoteAddr) &&
+    trustedProxyConfig.allowLoopback &&
+    trustedProxyConfig.loopbackUser;
+  if (!isInternalLoopback) {
+    for (const h of requiredHeaders) {
+      if (!headerValue(req.headers[normalizeLowercaseStringOrEmpty(h)])) {
+        return { reason: "trusted_proxy_required_header_missing" };
+      }
+    }
+  }
+
+  let userHeaderValue = headerValue(
     req.headers[normalizeLowercaseStringOrEmpty(trustedProxyConfig.userHeader)],
   );
+  // Internal loopback connections (browser tool, sub-agents, CLI) don't carry
+  // proxy headers. Use the configured loopbackUser identity when available.
+  if (
+    (!userHeaderValue || userHeaderValue.trim() === "") &&
+    isLoopbackAddress(remoteAddr) &&
+    trustedProxyConfig.allowLoopback &&
+    trustedProxyConfig.loopbackUser
+  ) {
+    userHeaderValue = trustedProxyConfig.loopbackUser;
+  }
   if (!userHeaderValue || userHeaderValue.trim() === "") {
     return { reason: "trusted_proxy_user_missing" };
   }
@@ -535,23 +561,36 @@ async function authorizeGatewayConnectCore(
       return { ok: false, reason: "trusted_proxy_no_proxies_configured" };
     }
 
-    const result = authorizeTrustedProxy({
-      req,
-      trustedProxies,
-      trustedProxyConfig: auth.trustedProxy,
-    });
+    // Exempt internal backend/probe subsystems connecting back to their own
+    // gateway (browser tool, sub-agents, exec approvals). They originate on
+    // loopback but authenticate via gateway token, not proxy headers.
+    const remoteAddr = req?.socket?.remoteAddress;
+    const isInternalBackend =
+      (params.clientMode === GATEWAY_CLIENT_MODES.BACKEND ||
+        params.clientMode === GATEWAY_CLIENT_MODES.PROBE) &&
+      remoteAddr != null &&
+      isLoopbackAddress(remoteAddr);
 
-    if ("user" in result) {
-      const originResult = authorizeTrustedProxyBrowserOrigin({
-        authSurface,
-        browserOriginPolicy: params.browserOriginPolicy,
+    if (!isInternalBackend) {
+      const result = authorizeTrustedProxy({
+        req,
+        trustedProxies,
+        trustedProxyConfig: auth.trustedProxy,
       });
-      if (originResult) {
-        return originResult;
+
+      if ("user" in result) {
+        const originResult = authorizeTrustedProxyBrowserOrigin({
+          authSurface,
+          browserOriginPolicy: params.browserOriginPolicy,
+        });
+        if (originResult) {
+          return originResult;
+        }
+        return { ok: true, method: "trusted-proxy", user: result.user };
       }
-      return { ok: true, method: "trusted-proxy", user: result.user };
+      return { ok: false, reason: result.reason };
     }
-    return { ok: false, reason: result.reason };
+    // Internal backend on loopback: fall through to token auth below.
   }
 
   if (auth.mode === "none") {
