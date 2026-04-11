@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import type { RuntimeEnv } from "../runtime.js";
 import type { WizardPrompter } from "../wizard/prompts.js";
@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   buildWorkspaceSkillStatus: vi.fn(),
   installSkill: vi.fn(),
   detectBinary: vi.fn(),
+  detectContainerEnvironment: vi.fn(),
   resolveNodeManagerOptions: vi.fn(() => [
     { value: "npm", label: "npm" },
     { value: "pnpm", label: "pnpm" },
@@ -20,6 +21,9 @@ vi.mock("../agents/skills-status.js", () => ({
 }));
 vi.mock("../agents/skills-install.js", () => ({
   installSkill: mocks.installSkill,
+}));
+vi.mock("../daemon/container-context.js", () => ({
+  detectContainerEnvironment: mocks.detectContainerEnvironment,
 }));
 vi.mock("./onboard-helpers.js", () => ({
   detectBinary: mocks.detectBinary,
@@ -134,6 +138,32 @@ const runtime: RuntimeEnv = {
 };
 
 describe("setupSkills", () => {
+  afterEach(() => {
+    mocks.detectContainerEnvironment.mockReturnValue(false);
+  });
+
+  it.skipIf(process.platform !== "linux")(
+    "hides brew-only installs in Linux containers when brew is missing",
+    async () => {
+      mockMissingBrewStatus([
+        createBundledSkill({
+          name: "video-frames",
+          description: "ffmpeg",
+          bins: ["ffmpeg"],
+          installLabel: "Install ffmpeg (brew)",
+        }),
+      ]);
+      mocks.detectContainerEnvironment.mockReturnValue(true);
+
+      const { prompter, notes } = createPrompter({});
+      await setupSkills({} as OpenClawConfig, "/tmp/ws", runtime, prompter);
+
+      expect(prompter.multiselect).not.toHaveBeenCalled();
+      expect(notes.find((n) => n.title === "Container skill installs")).toBeDefined();
+      expect(notes.find((n) => n.title === "Homebrew recommended")).toBeUndefined();
+    },
+  );
+
   it("does not recommend Homebrew when user skips installing brew-backed deps", async () => {
     if (process.platform === "win32") {
       return;
@@ -155,6 +185,7 @@ describe("setupSkills", () => {
       }),
     ]);
 
+    mocks.detectContainerEnvironment.mockReturnValue(false);
     const { prompter, notes } = createPrompter({ multiselect: ["__skip__"] });
     await setupSkills({} as OpenClawConfig, "/tmp/ws", runtime, prompter);
 
@@ -180,6 +211,7 @@ describe("setupSkills", () => {
       }),
     ]);
 
+    mocks.detectContainerEnvironment.mockReturnValue(false);
     const { prompter, notes } = createPrompter({ multiselect: ["video-frames"] });
     await setupSkills({} as OpenClawConfig, "/tmp/ws", runtime, prompter);
 
