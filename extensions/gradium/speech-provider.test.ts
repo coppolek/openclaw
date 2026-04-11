@@ -13,7 +13,7 @@ describe("gradium speech provider", () => {
     const original = process.env.GRADIUM_API_KEY;
     try {
       process.env.GRADIUM_API_KEY = "gsk_test";
-      expect(provider.isConfigured({ providerConfig: {} })).toBe(true);
+      expect(provider.isConfigured({ providerConfig: {}, timeoutMs: 5_000 })).toBe(true);
     } finally {
       if (original === undefined) {
         delete process.env.GRADIUM_API_KEY;
@@ -27,7 +27,7 @@ describe("gradium speech provider", () => {
     const original = process.env.GRADIUM_API_KEY;
     try {
       delete process.env.GRADIUM_API_KEY;
-      expect(provider.isConfigured({ providerConfig: {} })).toBe(false);
+      expect(provider.isConfigured({ providerConfig: {}, timeoutMs: 5_000 })).toBe(false);
     } finally {
       if (original !== undefined) {
         process.env.GRADIUM_API_KEY = original;
@@ -49,7 +49,7 @@ describe("gradium speech provider", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledOnce();
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("http://api.gradium.ai/api/post/speech/tts");
     const headers = new Headers(init.headers);
     expect(headers.get("x-api-key")).toBe("gsk_test123");
@@ -79,7 +79,7 @@ describe("gradium speech provider", () => {
       timeoutMs: 30_000,
     });
 
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(JSON.parse(init.body as string).output_format).toBe("opus");
     expect(result.outputFormat).toBe("opus");
     expect(result.fileExtension).toBe(".opus");
@@ -99,7 +99,7 @@ describe("gradium speech provider", () => {
       timeoutMs: 30_000,
     });
 
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(JSON.parse(init.body as string).output_format).toBe("ulaw_8000");
     expect(result.outputFormat).toBe("ulaw_8000");
     expect(result.sampleRate).toBe(8_000);

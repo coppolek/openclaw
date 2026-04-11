@@ -117,7 +117,7 @@ describe("gradium tts diagnostics", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledOnce();
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("http://api.gradium.ai/api/post/speech/tts");
     expect(init.method).toBe("POST");
     const headers = new Headers(init.headers);
