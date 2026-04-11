@@ -180,9 +180,22 @@ export async function getStatusSummary(
   const buildSessionRows = (
     store: Record<string, SessionEntry | undefined>,
     opts: { agentIdOverride?: string } = {},
-  ) =>
-    Object.entries(store)
-      .filter(([key]) => key !== "global" && key !== "unknown")
+  ) => {
+    const seenSessionIds = new Set<string>();
+    return Object.entries(store)
+      .filter(([key, entry]) => {
+        if (key === "global" || key === "unknown") {
+          return false;
+        }
+        const sessionId = entry?.sessionId;
+        if (sessionId) {
+          if (seenSessionIds.has(sessionId)) {
+            return false;
+          }
+          seenSessionIds.add(sessionId);
+        }
+        return true;
+      })
       .map(([key, entry]) => {
         const updatedAt = entry?.updatedAt ?? null;
         const age = updatedAt ? now - updatedAt : null;
@@ -238,6 +251,7 @@ export async function getStatusSummary(
         } satisfies SessionStatus;
       })
       .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+  };
 
   const paths = new Set<string>();
   const byAgent = agentList.agents.map((agent) => {
