@@ -40,8 +40,12 @@ async function loadMaintenanceModule(params: {
   vi.doMock("../acp/runtime/session-meta.js", () => ({
     readAcpSessionEntry: () =>
       acpEntry !== undefined
-        ? { entry: acpEntry, storeReadFailed: false }
-        : { entry: undefined, storeReadFailed: false },
+        ? {
+            entry: acpEntry,
+            acp: (acpEntry as { acp?: unknown }).acp ?? acpEntry,
+            storeReadFailed: false,
+          }
+        : { entry: undefined, acp: undefined, storeReadFailed: false },
   }));
 
   vi.doMock("../config/sessions.js", () => ({
@@ -154,6 +158,56 @@ describe("task-registry maintenance issue #60299", () => {
 
     expect(await mod.runTaskRegistryMaintenance()).toMatchObject({ reconciled: 1 });
     expect(currentTasks.get(task.taskId)).toMatchObject({ status: "lost" });
+  });
+
+  it("marks stale ACP tasks lost when metadata still says running but the transcript file is gone", async () => {
+    const childSessionKey = "agent:codex:acp:zombie-session";
+    const now = Date.now();
+    const task = makeStaleTask({
+      runtime: "acp",
+      childSessionKey,
+      createdAt: now - GRACE_EXPIRED_MS - 8 * 24 * 60 * 60_000,
+      startedAt: now - GRACE_EXPIRED_MS - 8 * 24 * 60 * 60_000,
+      lastEventAt: now - GRACE_EXPIRED_MS - 8 * 24 * 60 * 60_000,
+    });
+
+    const { mod, currentTasks } = await loadMaintenanceModule({
+      tasks: [task],
+      acpEntry: {
+        updatedAt: now - 8 * 24 * 60 * 60_000,
+        sessionFile: undefined,
+        state: "running",
+        lastActivityAt: now - 8 * 24 * 60 * 60_000,
+      },
+    });
+
+    expect(await mod.runTaskRegistryMaintenance()).toMatchObject({ reconciled: 1 });
+    expect(currentTasks.get(task.taskId)).toMatchObject({ status: "lost" });
+  });
+
+  it("keeps stale ACP tasks live when the running session still has a transcript file", async () => {
+    const childSessionKey = "agent:codex:acp:live-session";
+    const now = Date.now();
+    const task = makeStaleTask({
+      runtime: "acp",
+      childSessionKey,
+      createdAt: now - GRACE_EXPIRED_MS - 8 * 24 * 60 * 60_000,
+      startedAt: now - GRACE_EXPIRED_MS - 8 * 24 * 60 * 60_000,
+      lastEventAt: now - GRACE_EXPIRED_MS - 8 * 24 * 60 * 60_000,
+    });
+
+    const { mod, currentTasks } = await loadMaintenanceModule({
+      tasks: [task],
+      acpEntry: {
+        updatedAt: now - 8 * 24 * 60 * 60_000,
+        sessionFile: "/tmp/live-session.jsonl",
+        state: "running",
+        lastActivityAt: now - 8 * 24 * 60 * 60_000,
+      },
+    });
+
+    expect(await mod.runTaskRegistryMaintenance()).toMatchObject({ reconciled: 0 });
+    expect(currentTasks.get(task.taskId)).toMatchObject({ status: "running" });
   });
 
   it("keeps chat-backed cli tasks live while the owning run context is still active", async () => {
