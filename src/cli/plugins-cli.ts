@@ -1,6 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import type { Command } from "commander";
+import { redactSecrets } from "../commands/status-all/format.js";
 import { loadConfig, readConfigFileSnapshot, replaceConfigFile } from "../config/config.js";
 import { resolveStateDir } from "../config/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -13,6 +14,7 @@ import {
   buildPluginDiagnosticsReport,
   buildPluginCompatibilityNotices,
   buildPluginInspectReport,
+  buildPluginSmokeReport,
   buildPluginSnapshotReport,
   formatPluginCompatibilityNotice,
 } from "../plugins/status.js";
@@ -22,7 +24,9 @@ import {
   uninstallPlugin,
 } from "../plugins/uninstall.js";
 import { defaultRuntime } from "../runtime.js";
+import { redactSensitiveUrlLikeString } from "../shared/net/redact-sensitive-url.js";
 import { formatDocsLink } from "../terminal/links.js";
+import { sanitizeTerminalText } from "../terminal/safe-text.js";
 import { getTerminalTableWidth, renderTable } from "../terminal/table.js";
 import { theme } from "../terminal/theme.js";
 import { shortenHomeInString, shortenHomePath } from "../utils.js";
@@ -47,6 +51,10 @@ export type PluginsListOptions = {
 export type PluginInspectOptions = {
   json?: boolean;
   all?: boolean;
+};
+
+export type PluginSmokeOptions = {
+  json?: boolean;
 };
 
 export type PluginUpdateOptions = {
@@ -125,6 +133,63 @@ function formatInstallLines(install: PluginInstallRecord | undefined): string[] 
     lines.push(`Installed at: ${install.installedAt}`);
   }
   return lines;
+}
+
+function redactPathLikeText(value: string): string {
+  return value
+    .replace(/\bfile:\/\/\/(?:[^\s"'`<>\r\n]+)/gi, "file:///<REDACTED_PATH>")
+    .replace(/(?:^|[\s("'`])\/(?:[^/\s"'`)<>\r\n]+\/)*[^/\s"'`)<>\r\n]*/g, (match) =>
+      match.replace(/\/(?:[^/\s"'`)<>\r\n]+\/)*[^/\s"'`)<>\r\n]*/g, "/<REDACTED_PATH>"),
+    )
+    .replace(/([=:])\/(?:[^/\s"'`)<>\r\n]+\/)*[^/\s"'`)<>\r\n]*/g, "$1/<REDACTED_PATH>")
+    .replace(/(?:^|[\s("'`])[A-Za-z]:\\(?:[^\\\s"'`)<>\r\n]+\\)*[^\\\s"'`)<>\r\n]*/g, (match) =>
+      match.replace(/[A-Za-z]:\\(?:[^\\\s"'`)<>\r\n]+\\)*[^\\\s"'`)<>\r\n]*/g, "<REDACTED_PATH>"),
+    );
+}
+
+function sanitizePluginSmokeJsonText(value: string | undefined): string | undefined {
+  if (!value) {
+    return value;
+  }
+  const redactedSecrets = redactSensitiveUrlLikeString(redactSecrets(value))
+    .replace(
+      /((?:^|[\s"'`])(?:[A-Z0-9_]*?(?:TOKEN|SECRET|PASSWORD|API_KEY|ACCESS_KEY|REFRESH_TOKEN))\s*[=:]\s*)[^\s\r\n"'`]+/gm,
+      "$1<REDACTED>",
+    )
+    .replace(/\b(Authorization)\s*:\s*[^\r\n]+/gi, "$1: <REDACTED>")
+    .replace(/\b(Set-Cookie|Cookie)\s*:\s*[^\r\n]+/gi, "$1: <REDACTED>")
+    .replace(/\b(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g, "<REDACTED>")
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "<REDACTED>");
+  const redactedUrls = redactedSecrets.replace(/\bhttps?:\/\/[^/\s"'`]+/gi, (match) =>
+    match.replace(/\/\/[^/\s"'`]+@/, "//***:***@"),
+  );
+  return sanitizeTerminalText(redactPathLikeText(redactedUrls));
+}
+
+function buildSafePluginSmokeJsonReport(report: ReturnType<typeof buildPluginSmokeReport>) {
+  return {
+    scenarioId: report.scenarioId,
+    classification: report.classification,
+    summary: report.summary,
+    entries: report.entries.map((entry) => ({
+      pluginId: sanitizePluginSmokeJsonText(entry.pluginId) ?? entry.pluginId,
+      pluginName: sanitizePluginSmokeJsonText(entry.pluginName),
+      status: entry.status,
+      failurePhase: sanitizePluginSmokeJsonText(entry.failurePhase),
+      classification: entry.classification,
+      summary: sanitizePluginSmokeJsonText(entry.summary) ?? "",
+      diagnostics: entry.diagnostics.map((diagnostic) => ({
+        ...diagnostic,
+        source: undefined,
+        message: sanitizePluginSmokeJsonText(diagnostic.message) ?? "",
+      })),
+    })),
+    diagnostics: report.diagnostics.map((diagnostic) => ({
+      ...diagnostic,
+      source: undefined,
+      message: sanitizePluginSmokeJsonText(diagnostic.message) ?? "",
+    })),
+  };
 }
 
 export function registerPluginsCli(program: Command) {
@@ -462,6 +527,68 @@ export function registerPluginsCli(program: Command) {
         lines.push("", `${theme.error("Error:")} ${inspect.plugin.error}`);
       }
       defaultRuntime.log(lines.join("\n"));
+    });
+
+  plugins
+    .command("smoke")
+    .description("Run structured plugin bootstrap smoke checks")
+    .option("--json", "Print JSON")
+    .action((opts: PluginSmokeOptions) => {
+      const report = buildPluginSmokeReport();
+      const hasFailures = report.classification !== "ok";
+
+      if (opts.json) {
+        defaultRuntime.writeJson(buildSafePluginSmokeJsonReport(report));
+        if (hasFailures) {
+          process.exitCode = 1;
+        }
+        return;
+      }
+
+      defaultRuntime.log(
+        `${theme.heading("Plugin Smoke")} ${theme.muted(`(${report.classification})`)}`,
+      );
+      defaultRuntime.log(
+        theme.muted(
+          `${report.summary.loadedCount} loaded, ${report.summary.errorCount} errored, ${report.summary.disabledCount} disabled`,
+        ),
+      );
+
+      const failures = report.entries.filter((entry) => entry.classification !== "ok");
+      if (failures.length === 0) {
+        defaultRuntime.log(theme.success("No plugin smoke failures detected."));
+        return;
+      }
+
+      defaultRuntime.log("");
+      for (const entry of failures) {
+        const rawLabel =
+          entry.pluginId === "__global__"
+            ? "global diagnostics"
+            : entry.pluginName && entry.pluginName !== entry.pluginId
+              ? `${entry.pluginName} (${entry.pluginId})`
+              : entry.pluginId;
+        const label = sanitizePluginSmokeJsonText(rawLabel) ?? sanitizeTerminalText(rawLabel);
+        const summary =
+          sanitizePluginSmokeJsonText(entry.summary) ?? sanitizeTerminalText(entry.summary);
+        defaultRuntime.log(
+          `${theme.command(label)} ${theme.error(entry.classification)} ${theme.muted(`- ${summary}`)}`,
+        );
+        if (entry.failurePhase) {
+          defaultRuntime.log(
+            `  phase: ${sanitizePluginSmokeJsonText(entry.failurePhase) ?? sanitizeTerminalText(entry.failurePhase)}`,
+          );
+        }
+        for (const diagnostic of entry.diagnostics.slice(0, 3)) {
+          defaultRuntime.log(
+            `  ${theme.muted(`[${diagnostic.level}]`)} ${
+              sanitizePluginSmokeJsonText(diagnostic.message) ??
+              sanitizeTerminalText(diagnostic.message)
+            }`,
+          );
+        }
+      }
+      defaultRuntime.exit(1);
     });
 
   plugins

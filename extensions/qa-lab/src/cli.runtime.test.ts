@@ -14,6 +14,10 @@ const {
   writeQaDockerHarnessFiles,
   buildQaDockerHarnessImage,
   runQaDockerUp,
+  runQaReleaseCompare,
+  runQaReleaseSmoke,
+  toPersistedCompareResult,
+  toPersistedSmokeResult,
 } = vi.hoisted(() => ({
   runQaManualLane: vi.fn(),
   runQaSuiteFromRuntime: vi.fn(),
@@ -25,6 +29,10 @@ const {
   writeQaDockerHarnessFiles: vi.fn(),
   buildQaDockerHarnessImage: vi.fn(),
   runQaDockerUp: vi.fn(),
+  runQaReleaseCompare: vi.fn(),
+  runQaReleaseSmoke: vi.fn(),
+  toPersistedCompareResult: vi.fn((result) => result),
+  toPersistedSmokeResult: vi.fn((result) => result),
 }));
 
 vi.mock("./manual-lane.runtime.js", () => ({
@@ -64,6 +72,13 @@ vi.mock("./docker-up.runtime.js", () => ({
   runQaDockerUp,
 }));
 
+vi.mock("./release-compare.js", () => ({
+  runQaReleaseCompare,
+  runQaReleaseSmoke,
+  toPersistedCompareResult,
+  toPersistedSmokeResult,
+}));
+
 import { resolveRepoRelativeOutputDir } from "./cli-paths.js";
 import {
   runQaLabSelfCheckCommand,
@@ -72,6 +87,8 @@ import {
   runQaDockerUpCommand,
   runQaCharacterEvalCommand,
   runQaManualLaneCommand,
+  runQaReleaseCompareCommand,
+  runQaReleaseSmokeCommand,
   runQaParityReportCommand,
   runQaSuiteCommand,
 } from "./cli.runtime.js";
@@ -93,6 +110,10 @@ describe("qa cli runtime", () => {
     writeQaDockerHarnessFiles.mockReset();
     buildQaDockerHarnessImage.mockReset();
     runQaDockerUp.mockReset();
+    runQaReleaseCompare.mockReset();
+    runQaReleaseSmoke.mockReset();
+    toPersistedCompareResult.mockClear();
+    toPersistedSmokeResult.mockClear();
     runQaSuiteFromRuntime.mockResolvedValue({
       watchUrl: "http://127.0.0.1:43124",
       reportPath: "/tmp/report.md",
@@ -151,10 +172,56 @@ describe("qa cli runtime", () => {
       gatewayUrl: "http://127.0.0.1:18789/",
       stopCommand: "docker compose down",
     });
+    runQaReleaseCompare.mockResolvedValue({
+      outputDir: "/tmp/openclaw-repo/.artifacts/qa-release-compare",
+      reportPath: "/tmp/openclaw-repo/.artifacts/qa-release-compare/report.md",
+      summaryPath: "/tmp/openclaw-repo/.artifacts/qa-release-compare/summary.json",
+      scenarioId: "bundled-channels",
+      oldInstall: {
+        label: "old",
+        requestedRef: "2026.4.7",
+        installRef: "openclaw@2026.4.7",
+        versionText: "OpenClaw 2026.4.7",
+        prefixDir: "/tmp/old-prefix",
+        homeDir: "/tmp/old-home",
+        binPath: "/tmp/old-prefix/bin/openclaw",
+        commandResults: [],
+      },
+      newInstall: {
+        label: "new",
+        requestedRef: "2026.4.8",
+        installRef: "openclaw@2026.4.8",
+        versionText: "OpenClaw 2026.4.8",
+        prefixDir: "/tmp/new-prefix",
+        homeDir: "/tmp/new-home",
+        binPath: "/tmp/new-prefix/bin/openclaw",
+        commandResults: [],
+      },
+      diff: [],
+    });
+    runQaReleaseSmoke.mockResolvedValue({
+      outputDir: "/tmp/openclaw-repo/.artifacts/qa-release-smoke",
+      reportPath: "/tmp/openclaw-repo/.artifacts/qa-release-smoke/report.md",
+      summaryPath: "/tmp/openclaw-repo/.artifacts/qa-release-smoke/summary.json",
+      scenarioId: "bundled-channels",
+      classification: "ok",
+      install: {
+        label: "new",
+        requestedRef: "2026.4.8",
+        installRef: "openclaw@2026.4.8",
+        versionText: "OpenClaw 2026.4.8",
+        prefixDir: "/tmp/new-prefix",
+        homeDir: "/tmp/new-home",
+        binPath: "/tmp/new-prefix/bin/openclaw",
+        commandResults: [],
+      },
+    });
+    process.exitCode = undefined;
   });
 
   afterEach(() => {
     stdoutWrite.mockRestore();
+    process.exitCode = undefined;
     vi.clearAllMocks();
   });
 
@@ -682,6 +749,30 @@ describe("qa cli runtime", () => {
     });
   });
 
+  it("rejects absolute docker scaffold output dirs outside the repo root", async () => {
+    await expect(
+      runQaDockerScaffoldCommand({
+        repoRoot: "/tmp/openclaw-repo",
+        outputDir: "/tmp/outside",
+      }),
+    ).rejects.toThrow("--output-dir must be a relative path inside the repo root.");
+  });
+
+  it("rejects docker scaffold output dirs that traverse repo symlinks", async () => {
+    const repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "qa-docker-symlink-"));
+    try {
+      await fs.symlink("/tmp", path.join(repoRoot, "linked"));
+      await expect(
+        runQaDockerScaffoldCommand({
+          repoRoot,
+          outputDir: "linked/scaffold",
+        }),
+      ).rejects.toThrow("--output-dir cannot traverse symlinked paths.");
+    } finally {
+      await fs.rm(repoRoot, { recursive: true, force: true });
+    }
+  });
+
   it("passes the explicit repo root into docker image builds", async () => {
     await runQaDockerBuildImageCommand({
       repoRoot: "/tmp/openclaw-repo",
@@ -692,6 +783,201 @@ describe("qa cli runtime", () => {
       repoRoot: path.resolve("/tmp/openclaw-repo"),
       imageName: "openclaw:qa-local-prebaked",
     });
+  });
+
+  it("resolves release compare paths relative to the explicit repo root", async () => {
+    await runQaReleaseCompareCommand({
+      repoRoot: "/tmp/openclaw-repo",
+      outputDir: ".artifacts/qa-release-compare",
+      scenario: "bundled-channels",
+      keepTemp: true,
+      timeoutSeconds: 45,
+      oldRef: "2026.4.7",
+      newRef: "2026.4.8",
+    });
+
+    expect(runQaReleaseCompare).toHaveBeenCalledWith({
+      repoRoot: path.resolve("/tmp/openclaw-repo"),
+      outputDir: path.resolve("/tmp/openclaw-repo", ".artifacts/qa-release-compare"),
+      scenarioId: "bundled-channels",
+      keepTemp: true,
+      allowUnsafeInstallRef: undefined,
+      timeoutMs: 45_000,
+      oldRef: "2026.4.7",
+      newRef: "2026.4.8",
+    });
+    expect(stdoutWrite).toHaveBeenCalledWith(
+      "QA release compare report: /tmp/openclaw-repo/.artifacts/qa-release-compare/report.md\n",
+    );
+    expect(stdoutWrite).toHaveBeenCalledWith(
+      "QA release compare summary: /tmp/openclaw-repo/.artifacts/qa-release-compare/summary.json\n",
+    );
+  });
+
+  it("prints release compare JSON when requested", async () => {
+    runQaReleaseCompare.mockResolvedValueOnce({
+      outputDir: "/tmp/openclaw-repo/.artifacts/qa-release-compare",
+      reportPath: "/tmp/openclaw-repo/.artifacts/qa-release-compare/report.md",
+      summaryPath: "/tmp/openclaw-repo/.artifacts/qa-release-compare/summary.json",
+      scenarioId: "bundled-channels",
+      oldInstall: {
+        label: "old",
+        requestedRef: "2026.4.9-beta.1",
+        installRef: "openclaw@2026.4.9-beta.1",
+        versionText: "OpenClaw 2026.4.9-beta.1",
+        prefixDir: "/tmp/old-prefix",
+        homeDir: "/tmp/old-home",
+        binPath: "/tmp/old-prefix/bin/openclaw",
+        commandResults: [
+          {
+            id: "doctor",
+            argv: ["doctor"],
+            exitCode: 1,
+            timedOut: false,
+            stdout: "secret-stdout",
+            stderr: "secret-stderr",
+            classification: "error",
+            summary: "command failed",
+          },
+        ],
+      },
+      newInstall: {
+        label: "new",
+        requestedRef: "2026.4.9",
+        installRef: "openclaw@2026.4.9",
+        versionText: "OpenClaw 2026.4.9",
+        prefixDir: "/tmp/new-prefix",
+        homeDir: "/tmp/new-home",
+        binPath: "/tmp/new-prefix/bin/openclaw",
+        commandResults: [],
+      },
+      diff: [],
+    });
+    toPersistedCompareResult.mockImplementationOnce((result) => ({
+      ...result,
+      oldInstall: {
+        ...result.oldInstall,
+        commandResults: result.oldInstall.commandResults.map(
+          (commandResult: { stdout?: string; stderr?: string }) => {
+            const { stdout: _stdout, stderr: _stderr, ...rest } = commandResult;
+            return rest;
+          },
+        ),
+      },
+    }));
+
+    await runQaReleaseCompareCommand({
+      repoRoot: "/tmp/openclaw-repo",
+      oldRef: "2026.4.9-beta.1",
+      newRef: "2026.4.9",
+      json: true,
+    });
+
+    expect(runQaReleaseCompare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repoRoot: path.resolve("/tmp/openclaw-repo"),
+        oldRef: "2026.4.9-beta.1",
+        newRef: "2026.4.9",
+      }),
+    );
+    expect(stdoutWrite).toHaveBeenCalledWith(
+      expect.stringContaining('"scenarioId": "bundled-channels"'),
+    );
+    expect(stdoutWrite).not.toHaveBeenCalledWith(expect.stringContaining("secret-stdout"));
+    expect(stdoutWrite).not.toHaveBeenCalledWith(expect.stringContaining("secret-stderr"));
+  });
+
+  it("resolves release smoke paths relative to the explicit repo root", async () => {
+    await runQaReleaseSmokeCommand({
+      repoRoot: "/tmp/openclaw-repo",
+      outputDir: ".artifacts/qa-release-smoke",
+      scenario: "bundled-channels",
+      keepTemp: true,
+      timeoutSeconds: 15,
+      ref: "2026.4.8",
+    });
+
+    expect(runQaReleaseSmoke).toHaveBeenCalledWith({
+      repoRoot: path.resolve("/tmp/openclaw-repo"),
+      outputDir: path.resolve("/tmp/openclaw-repo", ".artifacts/qa-release-smoke"),
+      scenarioId: "bundled-channels",
+      keepTemp: true,
+      allowUnsafeInstallRef: undefined,
+      timeoutMs: 15_000,
+      ref: "2026.4.8",
+    });
+    expect(stdoutWrite).toHaveBeenCalledWith(
+      "QA release smoke report: /tmp/openclaw-repo/.artifacts/qa-release-smoke/report.md\n",
+    );
+    expect(stdoutWrite).toHaveBeenCalledWith(
+      "QA release smoke summary: /tmp/openclaw-repo/.artifacts/qa-release-smoke/summary.json\n",
+    );
+  });
+
+  it("sets a failing exit code when release smoke finds failures", async () => {
+    runQaReleaseSmoke.mockResolvedValueOnce({
+      outputDir: "/tmp/openclaw-repo/.artifacts/qa-release-smoke",
+      reportPath: "/tmp/openclaw-repo/.artifacts/qa-release-smoke/report.md",
+      summaryPath: "/tmp/openclaw-repo/.artifacts/qa-release-smoke/summary.json",
+      scenarioId: "bundled-channels",
+      classification: "plugin_validation_error",
+      install: {
+        label: "new",
+        requestedRef: "2026.4.8",
+        installRef: "openclaw@2026.4.8",
+        versionText: "OpenClaw 2026.4.8",
+        prefixDir: "/tmp/new-prefix",
+        homeDir: "/tmp/new-home",
+        binPath: "/tmp/new-prefix/bin/openclaw",
+        commandResults: [],
+      },
+    });
+
+    await runQaReleaseSmokeCommand({
+      repoRoot: "/tmp/openclaw-repo",
+      ref: "2026.4.8",
+    });
+
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("passes unsafe install ref opt-in through to qa release commands", async () => {
+    await runQaReleaseCompareCommand({
+      repoRoot: "/tmp/openclaw-repo",
+      oldRef: "./dist/openclaw-old.tgz",
+      newRef: "./dist/openclaw-new.tgz",
+      allowUnsafeInstallRef: true,
+    });
+    await runQaReleaseSmokeCommand({
+      repoRoot: "/tmp/openclaw-repo",
+      ref: "./dist/openclaw-new.tgz",
+      allowUnsafeInstallRef: true,
+    });
+
+    expect(runQaReleaseCompare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowUnsafeInstallRef: true,
+      }),
+    );
+    expect(runQaReleaseSmoke).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowUnsafeInstallRef: true,
+      }),
+    );
+  });
+
+  it("passes repo-contained absolute release output dirs through unchanged", async () => {
+    await runQaReleaseSmokeCommand({
+      repoRoot: "/tmp/openclaw-repo",
+      outputDir: "/tmp/openclaw-repo/.artifacts/qa-release-smoke",
+      ref: "2026.4.8",
+    });
+
+    expect(runQaReleaseSmoke).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outputDir: "/tmp/openclaw-repo/.artifacts/qa-release-smoke",
+      }),
+    );
   });
 
   it("resolves docker up paths relative to the explicit repo root", async () => {

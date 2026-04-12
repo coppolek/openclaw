@@ -18,6 +18,12 @@ import { runQaMultipass } from "./multipass.runtime.js";
 import { normalizeQaThinkingLevel, type QaThinkingLevel } from "./qa-gateway-config.js";
 import { normalizeQaTransportId } from "./qa-transport-registry.js";
 import {
+  runQaReleaseCompare,
+  runQaReleaseSmoke,
+  toPersistedCompareResult,
+  toPersistedSmokeResult,
+} from "./release-compare.js";
+import {
   defaultQaModelForMode,
   normalizeQaProviderMode,
   type QaProviderMode,
@@ -29,6 +35,31 @@ type InterruptibleServer = {
   baseUrl: string;
   stop(): Promise<void>;
 };
+
+async function assertNoSymlinkPathComponents(repoRoot: string, outputDir: string) {
+  const resolvedRepoRoot = path.resolve(repoRoot);
+  const resolvedOutputDir = path.resolve(outputDir);
+  const relative = path.relative(resolvedRepoRoot, resolvedOutputDir);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("--output-dir must stay within the repo root.");
+  }
+  let current = resolvedRepoRoot;
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    try {
+      const stat = await fs.lstat(current);
+      if (stat.isSymbolicLink()) {
+        throw new Error("--output-dir cannot traverse symlinked paths.");
+      }
+    } catch (error) {
+      const nodeError = error as NodeJS.ErrnoException;
+      if (nodeError.code === "ENOENT") {
+        continue;
+      }
+      throw error;
+    }
+  }
+}
 
 function resolveQaManualLaneModels(opts: {
   providerMode: QaProviderMode;
@@ -458,6 +489,7 @@ export async function runQaDockerScaffoldCommand(opts: {
   if (!outputDir) {
     throw new Error("--output-dir is required.");
   }
+  await assertNoSymlinkPathComponents(repoRoot, outputDir);
   const result = await writeQaDockerHarnessFiles({
     outputDir,
     repoRoot,
@@ -515,6 +547,91 @@ export async function runQaMockOpenAiCommand(opts: { host?: string; port?: numbe
     port: Number.isFinite(opts.port) ? opts.port : undefined,
   });
   await runInterruptibleServer("QA mock OpenAI", server);
+}
+
+function terminateOneShotQaCommandIfNeeded() {
+  if (process.env.VITEST) {
+    return;
+  }
+  // Let Node flush stdout/stderr naturally for machine-readable consumers.
+}
+
+export async function runQaReleaseCompareCommand(opts: {
+  repoRoot?: string;
+  outputDir?: string;
+  scenario?: "bundled-channels";
+  keepTemp?: boolean;
+  allowUnsafeInstallRef?: boolean;
+  json?: boolean;
+  timeoutSeconds?: number;
+  oldRef: string;
+  newRef: string;
+}) {
+  const repoRoot = path.resolve(opts.repoRoot ?? process.cwd());
+  const outputDir =
+    opts.outputDir && path.isAbsolute(opts.outputDir)
+      ? opts.outputDir
+      : resolveRepoRelativeOutputDir(repoRoot, opts.outputDir);
+  const result = await runQaReleaseCompare({
+    repoRoot,
+    oldRef: opts.oldRef,
+    newRef: opts.newRef,
+    scenarioId: opts.scenario ?? "bundled-channels",
+    outputDir,
+    keepTemp: opts.keepTemp,
+    allowUnsafeInstallRef: opts.allowUnsafeInstallRef,
+    timeoutMs:
+      Number.isFinite(opts.timeoutSeconds) && (opts.timeoutSeconds ?? 0) > 0
+        ? Math.floor((opts.timeoutSeconds ?? 0) * 1000)
+        : undefined,
+  });
+  if (opts.json) {
+    process.stdout.write(`${JSON.stringify(toPersistedCompareResult(result), null, 2)}\n`);
+    terminateOneShotQaCommandIfNeeded();
+    return;
+  }
+  process.stdout.write(`QA release compare report: ${result.reportPath}\n`);
+  process.stdout.write(`QA release compare summary: ${result.summaryPath}\n`);
+  terminateOneShotQaCommandIfNeeded();
+}
+
+export async function runQaReleaseSmokeCommand(opts: {
+  repoRoot?: string;
+  outputDir?: string;
+  scenario?: "bundled-channels";
+  keepTemp?: boolean;
+  allowUnsafeInstallRef?: boolean;
+  json?: boolean;
+  timeoutSeconds?: number;
+  ref: string;
+}) {
+  const repoRoot = path.resolve(opts.repoRoot ?? process.cwd());
+  const outputDir =
+    opts.outputDir && path.isAbsolute(opts.outputDir)
+      ? opts.outputDir
+      : resolveRepoRelativeOutputDir(repoRoot, opts.outputDir);
+  const result = await runQaReleaseSmoke({
+    repoRoot,
+    ref: opts.ref,
+    scenarioId: opts.scenario ?? "bundled-channels",
+    outputDir,
+    keepTemp: opts.keepTemp,
+    allowUnsafeInstallRef: opts.allowUnsafeInstallRef,
+    timeoutMs:
+      Number.isFinite(opts.timeoutSeconds) && (opts.timeoutSeconds ?? 0) > 0
+        ? Math.floor((opts.timeoutSeconds ?? 0) * 1000)
+        : undefined,
+  });
+  if (opts.json) {
+    process.stdout.write(`${JSON.stringify(toPersistedSmokeResult(result), null, 2)}\n`);
+  } else {
+    process.stdout.write(`QA release smoke report: ${result.reportPath}\n`);
+    process.stdout.write(`QA release smoke summary: ${result.summaryPath}\n`);
+  }
+  if (result.classification !== "ok") {
+    process.exitCode = 1;
+  }
+  terminateOneShotQaCommandIfNeeded();
 }
 
 export const __testing = {
