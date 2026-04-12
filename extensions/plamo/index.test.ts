@@ -1340,6 +1340,78 @@ describe("plamo provider plugin", () => {
     expect(doneMessage).toMatchObject({ stopReason: "toolUse" });
   });
 
+  it("treats toolUse and functionCall blocks as prior tool history on the native transport path", async () => {
+    const { provider, catalog } = await loadPlamoCatalog();
+    let capturedPayload: Record<string, unknown> | undefined;
+    fetchWithSsrFGuardMock.mockImplementation(async (paramsUnknown: unknown) => {
+      const params = paramsUnknown as {
+        init?: RequestInit;
+      };
+      const requestBody = params.init?.body;
+      if (typeof requestBody !== "string") {
+        throw new Error("expected native PLaMo transport to send a string request body");
+      }
+      capturedPayload = JSON.parse(requestBody) as Record<string, unknown>;
+      return {
+        response: new Response(
+          [
+            `data: ${JSON.stringify({
+              id: "chatcmpl-tool-history",
+              choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+              usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+            })}`,
+            "",
+            "data: [DONE]",
+            "",
+          ].join("\n"),
+          {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          },
+        ),
+        release: async () => {},
+      };
+    });
+
+    const [model] = catalog.provider.models;
+    const wrapped = createWrappedPlamoStream(provider);
+    const stream = await wrapped(
+      {
+        ...model,
+        provider: "plamo",
+        api: "openai-completions",
+        baseUrl: "https://api.platform.preferredai.jp/v1",
+      } as never,
+      {
+        systemPrompt: "system prompt",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              { type: "toolUse", id: "call_1", name: "read", input: { path: "README.md" } },
+              { type: "functionCall", id: "call_2", name: "exec", arguments: { cmd: "pwd" } },
+            ],
+          },
+        ],
+      } as never,
+      {
+        apiKey: "test-key",
+      } as never,
+    );
+
+    for await (const _event of stream) {
+      // Drain the stream so the request completes.
+    }
+    await stream.result();
+
+    expect(capturedPayload).toMatchObject({
+      model: "plamo-3.0-prime-beta",
+      stream: true,
+      max_tokens: 20_000,
+      tools: [],
+    });
+  });
+
   it("parses tool calls from every tool_requests wrapper in assistant text", () => {
     const firstToolMarkup =
       "<|plamo:begin_tool_requests:plamo|>" +

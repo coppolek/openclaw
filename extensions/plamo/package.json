@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/plamo-provider",
-  "version": "2026.3.23",
+  "version": "2026.4.11",
   "private": true,
   "description": "OpenClaw PLaMo provider plugin",
   "type": "module",

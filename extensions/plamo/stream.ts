@@ -348,12 +348,7 @@ function hasToolHistory(messages: AgentMessage[]): boolean {
     if (message.role === "toolResult") {
       return true;
     }
-    if (
-      message.role === "assistant" &&
-      message.content.some(
-        (block) => block && typeof block === "object" && block.type === "toolCall",
-      )
-    ) {
+    if (message.role === "assistant" && hasToolCallBlock(message.content)) {
       return true;
     }
   }
