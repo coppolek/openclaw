@@ -28,6 +28,17 @@ const PLAMO_END_TOOL_NAME = "<|plamo:end_tool_name:plamo|>";
 const PLAMO_BEGIN_TOOL_ARGUMENTS = "<|plamo:begin_tool_arguments:plamo|>";
 const PLAMO_END_TOOL_ARGUMENTS = "<|plamo:end_tool_arguments:plamo|>";
 const PLAMO_MSG = "<|plamo:msg|>";
+const PLAMO_TAG_TOKENS = [
+  PLAMO_BEGIN_TOOL_REQUEST,
+  PLAMO_END_TOOL_REQUEST,
+  PLAMO_BEGIN_TOOL_REQUESTS,
+  PLAMO_END_TOOL_REQUESTS,
+  PLAMO_BEGIN_TOOL_NAME,
+  PLAMO_END_TOOL_NAME,
+  PLAMO_BEGIN_TOOL_ARGUMENTS,
+  PLAMO_END_TOOL_ARGUMENTS,
+  PLAMO_MSG,
+] as const;
 
 const PLAMO_TOOL_REQUEST_BLOCK_RE = new RegExp(
   `${escapeRegExp(PLAMO_BEGIN_TOOL_REQUEST)}(.*?)${escapeRegExp(PLAMO_END_TOOL_REQUEST)}`,
@@ -55,6 +66,20 @@ type RuntimeContext = Parameters<StreamFn>[1];
 type RuntimeOptions = Parameters<StreamFn>[2];
 type ResolvedPlamoCompat = Required<OpenAICompletionsCompat>;
 type TextRange = readonly [start: number, end: number];
+type ReplayToolCallBlock = {
+  type?: unknown;
+  id?: unknown;
+  name?: unknown;
+  input?: unknown;
+  arguments?: unknown;
+  thoughtSignature?: unknown;
+};
+type StreamingTextBlock = {
+  type: "text";
+  text: string;
+  rawText?: string;
+  streamStarted?: boolean;
+};
 
 const PLAMO_PAYLOAD_DUMP_PATH = process.env.OPENCLAW_PLAMO_PAYLOAD_DUMP_PATH?.trim() || "";
 
@@ -164,6 +189,71 @@ function dropPlamoThinkingBlocks(messages: AgentMessage[]): AgentMessage[] {
   return touched ? out : messages;
 }
 
+function isReplayToolCallBlock(block: unknown): block is ReplayToolCallBlock {
+  if (!block || typeof block !== "object") {
+    return false;
+  }
+  const type = (block as { type?: unknown }).type;
+  return type === "toolCall" || type === "toolUse" || type === "functionCall";
+}
+
+function resolveReplayToolCallArguments(
+  block: ReplayToolCallBlock,
+): Record<string, unknown> | null {
+  const args = block.arguments ?? block.input;
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    return null;
+  }
+  return args as Record<string, unknown>;
+}
+
+function normalizePlamoReplayToolHistory(messages: AgentMessage[]): AgentMessage[] {
+  let touched = false;
+  const normalizedMessages: AgentMessage[] = [];
+  for (const message of messages) {
+    if (!isAssistantMessageWithContent(message)) {
+      normalizedMessages.push(message);
+      continue;
+    }
+
+    let changed = false;
+    const nextContent = message.content.map((block) => {
+      if (!isReplayToolCallBlock(block) || block.type === "toolCall") {
+        return block;
+      }
+      const toolBlock = block as ReplayToolCallBlock;
+      if (typeof toolBlock.id !== "string" || typeof toolBlock.name !== "string") {
+        return block;
+      }
+      const argumentsObject = resolveReplayToolCallArguments(toolBlock);
+      if (!argumentsObject) {
+        return block;
+      }
+      changed = true;
+      touched = true;
+      return {
+        type: "toolCall",
+        id: toolBlock.id,
+        name: toolBlock.name,
+        arguments: argumentsObject,
+        ...(typeof toolBlock.thoughtSignature === "string"
+          ? { thoughtSignature: toolBlock.thoughtSignature }
+          : {}),
+      } as AssistantContentBlock;
+    });
+
+    if (!changed) {
+      normalizedMessages.push(message);
+      continue;
+    }
+    normalizedMessages.push({
+      ...message,
+      content: nextContent,
+    });
+  }
+  return touched ? normalizedMessages : messages;
+}
+
 function sanitizePlamoReplayMessages(context: RuntimeContext): RuntimeContext {
   const messages = (context as { messages?: unknown } | null | undefined)?.messages;
   if (!Array.isArray(messages)) {
@@ -172,7 +262,9 @@ function sanitizePlamoReplayMessages(context: RuntimeContext): RuntimeContext {
 
   // PLaMo always emits `reasoning_content`, but replaying prior reasoning into
   // follow-up turns can cause the API to stop the visible answer mid-sentence.
-  const sanitized = dropPlamoThinkingBlocks(messages as AgentMessage[]);
+  const sanitized = normalizePlamoReplayToolHistory(
+    dropPlamoThinkingBlocks(messages as AgentMessage[]),
+  );
   if (sanitized === messages) {
     return context;
   }
@@ -259,6 +351,10 @@ function parseToolArguments(raw: string): Record<string, unknown> | null {
   }
 }
 
+function resolveStreamingTextBlockRawText(block: StreamingTextBlock): string {
+  return typeof block.rawText === "string" ? block.rawText : block.text;
+}
+
 function isTextBlock(
   block: unknown,
 ): block is MessageContentBlock & { type: "text"; text: string } {
@@ -268,6 +364,69 @@ function isTextBlock(
     (block as { type?: unknown }).type === "text" &&
     typeof (block as { text?: unknown }).text === "string"
   );
+}
+
+function isIndexWithinRanges(index: number, ranges: readonly TextRange[]): boolean {
+  return ranges.some(([start, end]) => index >= start && index < end);
+}
+
+function resolveTrailingPlamoTagPrefixLength(text: string): number {
+  let longestPrefix = 0;
+  for (const token of PLAMO_TAG_TOKENS) {
+    const maxPrefixLength = Math.min(text.length, token.length - 1);
+    for (let prefixLength = maxPrefixLength; prefixLength > longestPrefix; prefixLength -= 1) {
+      if (token.startsWith(text.slice(-prefixLength))) {
+        longestPrefix = prefixLength;
+        break;
+      }
+    }
+  }
+  return longestPrefix;
+}
+
+function findFirstIncompletePlamoMarkupStart(
+  text: string,
+  completeRanges: readonly TextRange[],
+): number | null {
+  let earliestStart: number | null = null;
+  for (const token of [PLAMO_BEGIN_TOOL_REQUESTS, PLAMO_BEGIN_TOOL_REQUEST] as const) {
+    let searchStart = 0;
+    while (searchStart < text.length) {
+      const index = text.indexOf(token, searchStart);
+      if (index === -1) {
+        break;
+      }
+      if (!isIndexWithinRanges(index, completeRanges)) {
+        earliestStart = earliestStart === null ? index : Math.min(earliestStart, index);
+        break;
+      }
+      searchStart = index + token.length;
+    }
+  }
+
+  const trailingPrefixLength = resolveTrailingPlamoTagPrefixLength(text);
+  if (trailingPrefixLength > 0) {
+    const trailingPrefixStart = text.length - trailingPrefixLength;
+    earliestStart =
+      earliestStart === null ? trailingPrefixStart : Math.min(earliestStart, trailingPrefixStart);
+  }
+
+  return earliestStart;
+}
+
+function resolveStreamingVisiblePlamoText(rawText: string): string {
+  if (!rawText) {
+    return "";
+  }
+
+  const parsedToolCalls = parsePlamoToolCalls(rawText);
+  const markupRanges = collectSafePlamoToolMarkupRanges(rawText, parsedToolCalls);
+  const incompleteMarkupStart = findFirstIncompletePlamoMarkupStart(rawText, markupRanges);
+  const visibleCutoff = incompleteMarkupStart ?? rawText.length;
+  const visibleMarkupRanges = markupRanges
+    .filter(([start]) => start < visibleCutoff)
+    .map(([start, end]) => [start, Math.min(end, visibleCutoff)] as const);
+  return removePlamoToolMarkupRanges(rawText.slice(0, visibleCutoff), 0, visibleMarkupRanges);
 }
 
 function hasToolCallBlock(content: unknown[]): boolean {
@@ -769,7 +928,7 @@ function createNativePlamoStream(
       stream.push({ type: "start", partial: output });
 
       let currentBlock:
-        | { type: "text"; text: string }
+        | StreamingTextBlock
         | { type: "thinking"; thinking: string; thinkingSignature?: string }
         | StreamingToolCallBlock
         | null = null;
@@ -796,12 +955,17 @@ function createNativePlamoStream(
           return;
         }
         if (currentBlock.type === "text") {
-          stream.push({
-            type: "text_end",
-            contentIndex: blockIndex(),
-            content: currentBlock.text,
-            partial: output,
-          });
+          currentBlock.text = resolveStreamingVisiblePlamoText(
+            resolveStreamingTextBlockRawText(currentBlock),
+          );
+          if (currentBlock.streamStarted) {
+            stream.push({
+              type: "text_end",
+              contentIndex: blockIndex(),
+              content: currentBlock.text,
+              partial: output,
+            });
+          }
         } else if (currentBlock.type === "thinking") {
           stream.push({
             type: "thinking_end",
@@ -862,17 +1026,30 @@ function createNativePlamoStream(
           finishOpenToolCallBlocks();
           if (!currentBlock || currentBlock.type !== "text") {
             finishCurrentBlock();
-            currentBlock = { type: "text", text: "" };
+            currentBlock = { type: "text", text: "", rawText: "", streamStarted: false };
             output.content.push(currentBlock);
+          }
+          const previousVisibleText = currentBlock.text;
+          currentBlock.rawText = `${resolveStreamingTextBlockRawText(currentBlock)}${textDelta}`;
+          const nextVisibleText = resolveStreamingVisiblePlamoText(currentBlock.rawText);
+          const stableVisibleText =
+            nextVisibleText.length >= previousVisibleText.length
+              ? nextVisibleText
+              : previousVisibleText;
+          currentBlock.text = stableVisibleText;
+          if (!currentBlock.streamStarted && stableVisibleText.length > 0) {
+            currentBlock.streamStarted = true;
             stream.push({ type: "text_start", contentIndex: blockIndex(), partial: output });
           }
-          currentBlock.text += textDelta;
-          stream.push({
-            type: "text_delta",
-            contentIndex: blockIndex(),
-            delta: textDelta,
-            partial: output,
-          });
+          const visibleDelta = stableVisibleText.slice(previousVisibleText.length);
+          if (visibleDelta) {
+            stream.push({
+              type: "text_delta",
+              contentIndex: blockIndex(),
+              delta: visibleDelta,
+              partial: output,
+            });
+          }
         }
 
         const reasoningDelta = extractStreamingReasoning(delta);
@@ -981,6 +1158,7 @@ function createNativePlamoStream(
       finishOpenToolCallBlocks();
       finishCurrentBlock();
       normalizePlamoToolMarkupInMessage(output);
+      stripPlamoStreamingInternalsInMessage(output);
 
       if (options?.signal?.aborted) {
         throw new Error("Request was aborted");
@@ -1167,7 +1345,11 @@ export function normalizePlamoToolMarkupInMessage(message: unknown): void {
     return;
   }
 
-  const combinedText = textBlocks.map((block) => block.text).join("");
+  const combinedText = textBlocks
+    .map((block) =>
+      resolveStreamingTextBlockRawText(block as MessageContentBlock & StreamingTextBlock),
+    )
+    .join("");
   if (
     !combinedText.includes(PLAMO_BEGIN_TOOL_REQUEST) &&
     !combinedText.includes(PLAMO_BEGIN_TOOL_REQUESTS)
@@ -1200,12 +1382,20 @@ export function normalizePlamoToolMarkupInMessage(message: unknown): void {
       nextContent.push(block);
       continue;
     }
+    const rawText = resolveStreamingTextBlockRawText(
+      block as MessageContentBlock & StreamingTextBlock,
+    );
     const blockStart = textOffset;
-    const blockEnd = blockStart + block.text.length;
-    let cleanedText = removePlamoToolMarkupRanges(block.text, blockStart, markupRanges);
+    const blockEnd = blockStart + rawText.length;
+    let cleanedText = removePlamoToolMarkupRanges(rawText, blockStart, markupRanges);
     textOffset = blockEnd;
-    if (cleanedText === block.text) {
-      nextContent.push(block);
+    const {
+      rawText: _rawText,
+      streamStarted: _streamStarted,
+      ...stableBlock
+    } = block as MessageContentBlock & StreamingTextBlock;
+    if (cleanedText === rawText) {
+      nextContent.push(stableBlock);
       continue;
     }
     const shouldTrimStart = markupRanges.some(
@@ -1221,7 +1411,7 @@ export function normalizePlamoToolMarkupInMessage(message: unknown): void {
       cleanedText = cleanedText.trimEnd();
     }
     if (cleanedText) {
-      nextContent.push({ ...block, text: cleanedText });
+      nextContent.push({ ...stableBlock, text: cleanedText });
     }
   }
 
@@ -1245,6 +1435,24 @@ export function normalizePlamoToolMarkupInMessage(message: unknown): void {
     !hasToolCallBlock(nextContent)
   ) {
     (message as { stopReason?: unknown }).stopReason = "stop";
+  }
+}
+
+function stripPlamoStreamingInternalsInMessage(message: unknown): void {
+  if (!message || typeof message !== "object") {
+    return;
+  }
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return;
+  }
+
+  for (const block of content) {
+    if (!isTextBlock(block)) {
+      continue;
+    }
+    delete (block as { rawText?: unknown }).rawText;
+    delete (block as { streamStarted?: unknown }).streamStarted;
   }
 }
 
@@ -1274,6 +1482,7 @@ function wrapStreamNormalizePlamoToolMarkup(
   stream.result = async () => {
     const message = await originalResult();
     normalizePlamoToolMarkupInMessage(message);
+    stripPlamoStreamingInternalsInMessage(message);
     return message;
   };
 
@@ -1290,6 +1499,7 @@ function wrapStreamNormalizePlamoToolMarkup(
               normalizePlamoToolMarkupInMessage(event.partial);
             }
             normalizePlamoToolMarkupInMessage(event.message);
+            stripPlamoStreamingInternalsInMessage(event.message);
             syncDoneEventReasonWithMessageStopReason(event);
           }
           return result;

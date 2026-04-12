@@ -1166,6 +1166,7 @@ describe("plamo provider plugin", () => {
       "<|plamo:end_tool_arguments:plamo|>" +
       "<|plamo:end_tool_request:plamo|>" +
       "<|plamo:end_tool_requests:plamo|>";
+    const splitToolMarkupIndex = 5;
 
     const server = createServer((req, res) => {
       req.resume();
@@ -1173,7 +1174,23 @@ describe("plamo provider plugin", () => {
       res.write(
         `data: ${JSON.stringify({
           id: "chatcmpl-tool-midstream",
-          choices: [{ index: 0, delta: { content: `Checking...${toolMarkup}` } }],
+          choices: [
+            {
+              index: 0,
+              delta: { content: `Checking...${toolMarkup.slice(0, splitToolMarkupIndex)}` },
+            },
+          ],
+        })}\n\n`,
+      );
+      res.write(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-tool-midstream",
+          choices: [
+            {
+              index: 0,
+              delta: { content: toolMarkup.slice(splitToolMarkupIndex) },
+            },
+          ],
         })}\n\n`,
       );
       res.write(
@@ -1218,16 +1235,21 @@ describe("plamo provider plugin", () => {
       } as never,
     );
 
+    const textDeltas: string[] = [];
     let result: Awaited<ReturnType<typeof stream.result>> | undefined;
     try {
-      for await (const _event of stream) {
-        // Drain the stream so the final message is assembled.
+      for await (const event of stream) {
+        if (event.type === "text_delta") {
+          textDeltas.push(event.delta);
+        }
       }
       result = await stream.result();
     } finally {
       server.close();
     }
 
+    expect(textDeltas.join("")).toBe("Checking... Done.");
+    expect(textDeltas.some((delta) => delta.includes("<|plamo:"))).toBe(false);
     expect(result).toMatchObject({
       stopReason: "toolUse",
       content: [
@@ -1546,6 +1568,130 @@ describe("plamo provider plugin", () => {
       model: "plamo-3.0-prime-beta",
       stream: true,
       max_tokens: 20_000,
+      tools: [],
+      messages: [
+        { role: "system", content: "system prompt" },
+        {
+          role: "assistant",
+          tool_calls: [
+            {
+              id: "call_1",
+              type: "function",
+              function: {
+                name: "read",
+                arguments: '{"path":"README.md"}',
+              },
+            },
+            {
+              id: "call_2",
+              type: "function",
+              function: {
+                name: "exec",
+                arguments: '{"cmd":"pwd"}',
+              },
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("keeps replayed assistant tool calls ahead of tool results on the native transport path", async () => {
+    const { provider, catalog } = await loadPlamoCatalog();
+    let capturedPayload: Record<string, unknown> | undefined;
+    fetchWithSsrFGuardMock.mockImplementation(async (paramsUnknown: unknown) => {
+      const params = paramsUnknown as {
+        init?: RequestInit;
+      };
+      const requestBody = params.init?.body;
+      if (typeof requestBody !== "string") {
+        throw new Error("expected native PLaMo transport to send a string request body");
+      }
+      capturedPayload = JSON.parse(requestBody) as Record<string, unknown>;
+      return {
+        response: new Response(
+          [
+            `data: ${JSON.stringify({
+              id: "chatcmpl-tool-result-history",
+              choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+              usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+            })}`,
+            "",
+            "data: [DONE]",
+            "",
+          ].join("\n"),
+          {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          },
+        ),
+        release: async () => {},
+      };
+    });
+
+    const [model] = catalog.provider.models;
+    const wrapped = createWrappedPlamoStream(provider);
+    const stream = await wrapped(
+      {
+        ...model,
+        provider: "plamo",
+        api: "openai-completions",
+        baseUrl: "https://api.platform.preferredai.jp/v1",
+      } as never,
+      {
+        systemPrompt: "system prompt",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              { type: "toolUse", id: "call_1", name: "read", input: { path: "README.md" } },
+            ],
+          },
+          {
+            role: "toolResult",
+            toolCallId: "call_1",
+            toolName: "read",
+            content: [{ type: "text", text: "README contents here" }],
+          },
+          { role: "user", content: "Continue from the tool result in one sentence." },
+        ],
+      } as never,
+      {
+        apiKey: "test-key",
+      } as never,
+    );
+
+    for await (const _event of stream) {
+      // Drain the stream so the request completes.
+    }
+    await stream.result();
+
+    expect(capturedPayload).toMatchObject({
+      messages: [
+        { role: "system", content: "system prompt" },
+        {
+          role: "assistant",
+          tool_calls: [
+            {
+              id: "call_1",
+              type: "function",
+              function: {
+                name: "read",
+                arguments: '{"path":"README.md"}',
+              },
+            },
+          ],
+        },
+        {
+          role: "tool",
+          tool_call_id: "call_1",
+          content: "README contents here",
+        },
+        {
+          role: "user",
+          content: "Continue from the tool result in one sentence.",
+        },
+      ],
       tools: [],
     });
   });
