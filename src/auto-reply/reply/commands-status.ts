@@ -63,7 +63,7 @@ type CommandsStatusSubagentsModule = {
   ) => Array<{ childSessionKey: string; endedAt?: number | null }>;
 };
 
-const STATUS_RUNTIME_SPEC = ["../status.runtime", ".js"] as const;
+const STATUS_RUNTIME_SPEC = ["./status.runtime", ".js"] as const;
 const COMMANDS_STATUS_DEPS_RUNTIME_SPEC = ["./commands-status-deps.runtime", ".js"] as const;
 
 let statusRuntimePromise: Promise<StatusRuntimeModule> | null = null;
