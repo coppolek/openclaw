@@ -16,8 +16,8 @@ import {
   type Usage,
 } from "@mariozechner/pi-ai";
 import { convertMessages } from "@mariozechner/pi-ai/openai-completions";
+import { buildGuardedModelFetch } from "openclaw/plugin-sdk/provider-http";
 import { normalizeOpenAICompatibleToolParameters } from "openclaw/plugin-sdk/provider-tools";
-import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 
 const PLAMO_BEGIN_TOOL_REQUEST = "<|plamo:begin_tool_request:plamo|>";
 const PLAMO_END_TOOL_REQUEST = "<|plamo:end_tool_request:plamo|>";
@@ -896,24 +896,20 @@ function createNativePlamoStream(
 
   void (async () => {
     let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-    let releaseResponse: (() => Promise<void>) | null = null;
     let sawFinishReason = false;
     try {
       const payload = await resolvePlamoStreamingPayload(model, context, options);
       dumpPlamoPayload("streaming", payload);
       const apiKey = resolvePlamoApiKey(model, options);
-      const guardedFetch = await fetchWithSsrFGuard({
-        url: buildChatCompletionsUrl(model.baseUrl),
-        init: {
-          method: "POST",
-          headers: buildRequestHeaders(model, apiKey, options),
-          body: JSON.stringify(payload),
-          signal: options?.signal,
-        },
+      const fetchWithModelTransport = buildGuardedModelFetch(model as never, {
         auditContext: "plamo-stream",
       });
-      const response = guardedFetch.response;
-      releaseResponse = guardedFetch.release;
+      const response = await fetchWithModelTransport(buildChatCompletionsUrl(model.baseUrl), {
+        method: "POST",
+        headers: buildRequestHeaders(model, apiKey, options),
+        body: JSON.stringify(payload),
+        signal: options?.signal,
+      });
 
       if (!response.ok) {
         throw new Error(
@@ -1191,7 +1187,6 @@ function createNativePlamoStream(
       } catch {
         // ignore reader cleanup failures
       }
-      await releaseResponse?.().catch(() => undefined);
     }
   })();
 

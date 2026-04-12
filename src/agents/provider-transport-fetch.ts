@@ -87,7 +87,10 @@ function resolveModelRequestPolicy(model: Model<Api>) {
   });
 }
 
-export function buildGuardedModelFetch(model: Model<Api>): typeof fetch {
+export function buildGuardedModelFetch(
+  model: Model<Api>,
+  options?: { auditContext?: string },
+): typeof fetch {
   const requestConfig = resolveModelRequestPolicy(model);
   const dispatcherPolicy = buildProviderRequestDispatcherPolicy(requestConfig);
   return async (input, init) => {
@@ -121,6 +124,7 @@ export function buildGuardedModelFetch(model: Model<Api>): typeof fetch {
           model: model.id,
         },
       },
+      ...(options?.auditContext ? { auditContext: options.auditContext } : {}),
       dispatcherPolicy,
       // Provider transport intentionally keeps the secure default and never
       // replays unsafe request bodies across cross-origin redirects.

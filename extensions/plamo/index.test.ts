@@ -13,9 +13,44 @@ import { createPlamoToolCallWrapper, normalizePlamoToolMarkupInMessage } from ".
 
 const fetchWithSsrFGuardMock = vi.hoisted(() => vi.fn());
 
-vi.mock("openclaw/plugin-sdk/ssrf-runtime", () => ({
-  fetchWithSsrFGuard: (params: unknown) => fetchWithSsrFGuardMock(params),
-}));
+vi.mock("openclaw/plugin-sdk/provider-http", async () => {
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/provider-http")>(
+    "openclaw/plugin-sdk/provider-http",
+  );
+  return {
+    ...actual,
+    buildGuardedModelFetch:
+      (_model: unknown, options?: { auditContext?: string }) =>
+      async (input: Request | URL | string, init?: RequestInit) => {
+        const request = input instanceof Request ? new Request(input, init) : undefined;
+        const url =
+          request?.url ??
+          (input instanceof URL
+            ? input.toString()
+            : typeof input === "string"
+              ? input
+              : (() => {
+                  throw new Error("unsupported fetch input for PLaMo transport test");
+                })());
+        const requestInit =
+          request &&
+          ({
+            method: request.method,
+            headers: request.headers,
+            body: request.body ?? undefined,
+            redirect: request.redirect,
+            signal: request.signal,
+            ...(request.body ? ({ duplex: "half" } as const) : {}),
+          } satisfies RequestInit & { duplex?: "half" });
+        const result = await fetchWithSsrFGuardMock({
+          url,
+          init: requestInit ?? init,
+          ...(options?.auditContext ? { auditContext: options.auditContext } : {}),
+        });
+        return result.response as Response;
+      },
+  };
+});
 
 type FakeWrappedStream = {
   result: () => Promise<unknown>;

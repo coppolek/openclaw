@@ -93,4 +93,28 @@ describe("buildGuardedModelFetch", () => {
       proxy: undefined,
     });
   });
+
+  it("forwards optional auditContext into the shared guarded fetch seam", async () => {
+    const { buildGuardedModelFetch } = await import("./provider-transport-fetch.js");
+    const model = {
+      id: "plamo-3.0-prime-beta",
+      provider: "plamo",
+      api: "openai-completions",
+      baseUrl: "https://api.platform.preferredai.jp/v1",
+    } as unknown as Model<"openai-completions">;
+
+    const fetcher = buildGuardedModelFetch(model, { auditContext: "plamo-stream" });
+    await fetcher("https://api.platform.preferredai.jp/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: '{"messages":[]}',
+    });
+
+    expect(fetchWithSsrFGuardMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://api.platform.preferredai.jp/v1/chat/completions",
+        auditContext: "plamo-stream",
+      }),
+    );
+  });
 });
