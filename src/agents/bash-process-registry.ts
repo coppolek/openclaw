@@ -34,6 +34,7 @@ export interface ProcessSession {
   notifyDeliveryContext?: DeliveryContext;
   notifyOnExit?: boolean;
   notifyOnExitEmptySuccess?: boolean;
+  explicitOnComplete?: boolean;
   exitNotified?: boolean;
   child?: ChildProcessWithoutNullStreams;
   stdin?: SessionStdin;
