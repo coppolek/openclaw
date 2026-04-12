@@ -558,6 +558,41 @@ describe("QmdMemoryManager", () => {
     await manager?.close();
   });
 
+  it("prefers --mask when adding collections with a custom pattern", async () => {
+    cfg = {
+      ...cfg,
+      memory: {
+        backend: "qmd",
+        qmd: {
+          includeDefaultMemory: false,
+          update: { interval: "0s", debounceMs: 60_000, onBoot: false },
+          paths: [{ path: workspaceDir, pattern: "*.jsonl", name: "transcripts" }],
+        },
+      },
+    } as OpenClawConfig;
+
+    spawnMock.mockImplementation((_cmd: string, args: string[]) => {
+      if (args[0] === "collection" && args[1] === "list") {
+        const child = createMockChild({ autoClose: false });
+        emitAndClose(child, "stdout", "[]");
+        return child;
+      }
+      return createMockChild();
+    });
+
+    const { manager } = await createManager({ mode: "full" });
+    await manager.close();
+
+    const addCall = spawnMock.mock.calls
+      .map((call: unknown[]) => call[1] as string[])
+      .find((args) => args[0] === "collection" && args[1] === "add" && args.includes("*.jsonl"));
+
+    expect(addCall).toBeDefined();
+    expect(addCall).toContain("--mask");
+    expect(addCall).not.toContain("--glob");
+    expect(addCall).toContain("*.jsonl");
+  });
+
   it("rebinds sessions collection when existing collection path targets another agent", async () => {
     const devAgentId = "dev";
     const devWorkspaceDir = path.join(tmpRoot, "workspace-dev");
