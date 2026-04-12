@@ -16,6 +16,7 @@ import {
   type Usage,
 } from "@mariozechner/pi-ai";
 import { convertMessages } from "@mariozechner/pi-ai/openai-completions";
+import { normalizeOpenAICompatibleToolParameters } from "openclaw/plugin-sdk/provider-tools";
 import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 
 const PLAMO_BEGIN_TOOL_REQUEST = "<|plamo:begin_tool_request:plamo|>";
@@ -361,7 +362,7 @@ function convertTools(tools: Tool[], compat: ResolvedPlamoCompat): Array<Record<
     function: {
       name: tool.name,
       description: tool.description,
-      parameters: tool.parameters,
+      parameters: normalizeOpenAICompatibleToolParameters(tool.parameters),
       ...(compat.supportsStrictMode ? { strict: false } : {}),
     },
   }));

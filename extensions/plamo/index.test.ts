@@ -1,6 +1,11 @@
 import { once } from "node:events";
 import { createServer } from "node:http";
 import { streamSimple } from "@mariozechner/pi-ai";
+import type { ModelRegistry } from "@mariozechner/pi-coding-agent";
+import type {
+  ProviderResolveDynamicModelContext,
+  ProviderRuntimeModel,
+} from "openclaw/plugin-sdk/plugin-entry";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveProviderPluginChoice } from "../../src/plugins/provider-wizard.js";
 import { registerSingleProviderPlugin } from "../../test/helpers/plugins/plugin-registration.js";
@@ -75,6 +80,27 @@ function createWrappedPlamoStream(
   return wrapped;
 }
 
+function createDynamicContext(params: {
+  provider: string;
+  modelId: string;
+  models: ProviderRuntimeModel[];
+}): ProviderResolveDynamicModelContext {
+  return {
+    provider: params.provider,
+    modelId: params.modelId,
+    modelRegistry: {
+      find(providerId: string, modelId: string) {
+        return (
+          params.models.find(
+            (model) =>
+              model.provider === providerId && model.id.toLowerCase() === modelId.toLowerCase(),
+          ) ?? null
+        );
+      },
+    } as ModelRegistry,
+  };
+}
+
 beforeEach(() => {
   fetchWithSsrFGuardMock.mockReset();
   fetchWithSsrFGuardMock.mockImplementation(async (paramsUnknown: unknown) => {
@@ -133,6 +159,35 @@ describe("plamo provider plugin", () => {
         },
       },
     ]);
+  });
+
+  it("resolves forward-compat PLaMo model ids even when the local catalog has no template row", async () => {
+    const provider = await registerSingleProviderPlugin(plamoPlugin);
+    const resolved = provider.resolveDynamicModel?.(
+      createDynamicContext({
+        provider: "plamo",
+        modelId: "plamo-next-preview",
+        models: [],
+      }),
+    );
+
+    expect(resolved).toMatchObject({
+      provider: "plamo",
+      id: "plamo-next-preview",
+      api: "openai-completions",
+      baseUrl: "https://api.platform.preferredai.jp/v1",
+      reasoning: false,
+      input: ["text"],
+      contextWindow: 65_536,
+      maxTokens: 20_000,
+      compat: {
+        maxTokensField: "max_tokens",
+        supportsDeveloperRole: false,
+        supportsReasoningEffort: false,
+        supportsStore: false,
+        supportsStrictMode: false,
+      },
+    });
   });
 
   it("drops replayed assistant thinking blocks before sending follow-up turns", async () => {
@@ -376,6 +431,102 @@ describe("plamo provider plugin", () => {
     expect(
       (request.body.tools as Array<{ function?: { strict?: unknown } }> | undefined)?.[0]?.function,
     ).not.toHaveProperty("strict");
+  });
+
+  it("normalizes zero-argument tool schemas on the native transport path", async () => {
+    const { provider, catalog } = await loadPlamoCatalog();
+
+    let resolveRequest: ((value: { body: Record<string, unknown> }) => void) | null = null;
+    const requestSeen = new Promise<{
+      body: Record<string, unknown>;
+    }>((resolve) => {
+      resolveRequest = resolve;
+    });
+
+    const server = createServer((req, res) => {
+      const chunks: string[] = [];
+      req.setEncoding("utf8");
+      req.on("data", (chunk) => chunks.push(chunk));
+      req.on("end", () => {
+        resolveRequest?.({
+          body: JSON.parse(chunks.join("")) as Record<string, unknown>,
+        });
+        res.writeHead(200, { "Content-Type": "text/event-stream" });
+        res.write(
+          `data: ${JSON.stringify({
+            id: "chatcmpl-stream-test",
+            choices: [{ index: 0, delta: { content: "ok" } }],
+          })}\n\n`,
+        );
+        res.write(
+          `data: ${JSON.stringify({
+            id: "chatcmpl-stream-test",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          })}\n\n`,
+        );
+        res.end("data: [DONE]\n\n");
+      });
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      server.close();
+      throw new Error("expected tcp server address");
+    }
+
+    const [model] = catalog.provider.models;
+    const wrapped = createWrappedPlamoStream(provider);
+    const stream = await wrapped(
+      {
+        ...model,
+        provider: "plamo",
+        api: "openai-completions",
+        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+      } as never,
+      {
+        systemPrompt: "system prompt",
+        messages: [{ role: "user", content: "こんにちは" }],
+        tools: [
+          {
+            name: "ping",
+            description: "No-arg tool",
+            parameters: {},
+          },
+        ],
+      } as never,
+      {
+        apiKey: "test-key",
+      } as never,
+    );
+
+    try {
+      for await (const _event of stream) {
+        // Drain the stream so the request completes.
+      }
+      await stream.result();
+    } finally {
+      server.close();
+    }
+
+    const request = await requestSeen;
+    expect(request.body.tools).toEqual([
+      {
+        type: "function",
+        function: {
+          name: "ping",
+          description: "No-arg tool",
+          parameters: {
+            type: "object",
+            properties: {},
+            required: [],
+            additionalProperties: false,
+          },
+        },
+      },
+    ]);
   });
 
   it("uses PLaMo-safe compat defaults for uncataloged models without explicit compat", async () => {

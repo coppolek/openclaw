@@ -1,9 +1,58 @@
+import type { ProviderResolveDynamicModelContext } from "openclaw/plugin-sdk/plugin-entry";
 import { defineSingleProviderPluginEntry } from "openclaw/plugin-sdk/provider-entry";
+import {
+  cloneFirstTemplateModel,
+  normalizeModelCompat,
+} from "openclaw/plugin-sdk/provider-model-shared";
+import { normalizeOpenAICompatibleToolParameters } from "openclaw/plugin-sdk/provider-tools";
+import {
+  PLAMO_BASE_URL,
+  PLAMO_DEFAULT_CONTEXT_WINDOW,
+  PLAMO_DEFAULT_MAX_TOKENS,
+  PLAMO_DEFAULT_MODEL_ID,
+  PLAMO_MODEL_INPUT,
+  PLAMO_OPENAI_COMPAT,
+} from "./model-definitions.js";
 import { applyPlamoConfig, PLAMO_DEFAULT_MODEL_REF } from "./onboard.js";
 import { buildPlamoProvider } from "./provider-catalog.js";
 import { createPlamoToolCallWrapper } from "./stream.js";
 
 const PROVIDER_ID = "plamo";
+
+function resolvePlamoDynamicModel(ctx: ProviderResolveDynamicModelContext) {
+  const modelId = ctx.modelId.trim();
+  if (!modelId || !modelId.startsWith("plamo-")) {
+    return undefined;
+  }
+
+  return (
+    cloneFirstTemplateModel({
+      providerId: PROVIDER_ID,
+      modelId,
+      templateIds: [PLAMO_DEFAULT_MODEL_ID],
+      ctx,
+      patch: {
+        provider: PROVIDER_ID,
+        api: "openai-completions",
+        baseUrl: PLAMO_BASE_URL,
+        reasoning: false,
+      },
+    }) ??
+    normalizeModelCompat({
+      id: modelId,
+      name: modelId,
+      provider: PROVIDER_ID,
+      api: "openai-completions",
+      baseUrl: PLAMO_BASE_URL,
+      reasoning: false,
+      input: [...PLAMO_MODEL_INPUT],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: PLAMO_DEFAULT_CONTEXT_WINDOW,
+      maxTokens: PLAMO_DEFAULT_MAX_TOKENS,
+      compat: { ...PLAMO_OPENAI_COMPAT },
+    })
+  );
+}
 
 export default defineSingleProviderPluginEntry({
   id: PROVIDER_ID,
@@ -36,6 +85,12 @@ export default defineSingleProviderPluginEntry({
       buildProvider: buildPlamoProvider,
       allowExplicitBaseUrl: true,
     },
+    normalizeToolSchemas: ({ tools }) =>
+      tools.map((tool) => ({
+        ...tool,
+        parameters: normalizeOpenAICompatibleToolParameters(tool.parameters),
+      })),
+    resolveDynamicModel: (ctx) => resolvePlamoDynamicModel(ctx),
     capabilities: {
       dropThinkingBlockModelHints: ["plamo"],
     },

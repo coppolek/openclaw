@@ -7,8 +7,9 @@ export const PLAMO_DEFAULT_CONTEXT_WINDOW = 65_536;
 export const PLAMO_DEFAULT_MAX_TOKENS = 20_000;
 export const PLAMO_PRICE_USD_PER_1M_INPUT = 0.375;
 export const PLAMO_PRICE_USD_PER_1M_OUTPUT = 1.5625;
+export const PLAMO_MODEL_INPUT = ["text"] as const;
 
-const PLAMO_OPENAI_COMPAT = {
+export const PLAMO_OPENAI_COMPAT = {
   // PLaMo's Chat Completions reference documents only `system`/`user`/`assistant`
   // roles, `max_tokens`, and the legacy tool schema without `strict`/`store`.
   maxTokensField: "max_tokens",
@@ -16,7 +17,7 @@ const PLAMO_OPENAI_COMPAT = {
   supportsReasoningEffort: false,
   supportsStore: false,
   supportsStrictMode: false,
-} as const;
+} as const satisfies NonNullable<ModelDefinitionConfig["compat"]>;
 
 const PLAMO_MODEL_CATALOG = [
   {
@@ -28,7 +29,7 @@ const PLAMO_MODEL_CATALOG = [
     // false and treat the streamed reasoning payload as an always-on side
     // channel instead.
     reasoning: false,
-    input: ["text"],
+    input: [...PLAMO_MODEL_INPUT],
     // Converted from JPY pricing using a fixed 1 USD = 160 JPY assumption.
     cost: {
       input: PLAMO_PRICE_USD_PER_1M_INPUT,
