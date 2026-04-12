@@ -1,0 +1,15 @@
+{
+  "id": "inference-guard",
+  "enabledByDefault": false,
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "heartbeatMinIntervalMs": {
+        "type": "integer",
+        "default": 30000,
+        "description": "Minimum interval between heartbeat runs in milliseconds. Heartbeats arriving sooner are dropped."
+      }
+    }
+  }
+}
