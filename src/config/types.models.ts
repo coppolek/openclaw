@@ -80,6 +80,8 @@ export type ModelProviderConfig = {
   injectNumCtxForOpenAICompat?: boolean;
   headers?: Record<string, SecretInput>;
   authHeader?: boolean;
+  /** Per-provider stream timeout in seconds. Overrides the global default (30 min). */
+  timeoutSeconds?: number;
   request?: ConfiguredModelProviderRequest;
   models: ModelDefinitionConfig[];
 };
