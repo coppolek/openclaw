@@ -1,6 +1,5 @@
 import { once } from "node:events";
 import { createServer } from "node:http";
-import { streamSimple } from "@mariozechner/pi-ai";
 import type { ModelRegistry } from "@mariozechner/pi-coding-agent";
 import type {
   ProviderResolveDynamicModelContext,
@@ -10,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveProviderPluginChoice } from "../../src/plugins/provider-wizard.js";
 import { registerSingleProviderPlugin } from "../../test/helpers/plugins/plugin-registration.js";
 import plamoPlugin from "./index.js";
-import { normalizePlamoToolMarkupInMessage } from "./stream.js";
+import { createPlamoToolCallWrapper, normalizePlamoToolMarkupInMessage } from "./stream.js";
 
 const fetchWithSsrFGuardMock = vi.hoisted(() => vi.fn());
 
@@ -64,15 +63,19 @@ async function loadPlamoCatalog() {
 function createWrappedPlamoStream(
   provider: Awaited<ReturnType<typeof registerSingleProviderPlugin>>,
   options?: {
-    extraParams?: Record<string, unknown>;
     modelId?: string;
   },
 ) {
-  const wrapped = provider.wrapStreamFn?.({
+  const modelId = options?.modelId ?? "plamo-3.0-prime-beta";
+  const wrapped = provider.createStreamFn?.({
+    config: {},
     provider: "plamo",
-    modelId: options?.modelId ?? "plamo-3.0-prime-beta",
-    streamFn: streamSimple as never,
-    extraParams: options?.extraParams ?? {},
+    modelId,
+    model: {
+      api: "openai-completions",
+      provider: "plamo",
+      id: modelId,
+    } as never,
   } as never);
   if (!wrapped) {
     throw new Error("expected wrapped stream function");
@@ -127,6 +130,8 @@ describe("plamo provider plugin", () => {
     expect(provider.label).toBe("PLaMo");
     expect(provider.envVars).toEqual(["PLAMO_API_KEY"]);
     expect(provider.auth).toHaveLength(1);
+    expect(provider.createStreamFn).toBeTypeOf("function");
+    expect(provider.wrapStreamFn).toBeUndefined();
     expect(provider.capabilities).toMatchObject({
       dropThinkingBlockModelHints: ["plamo"],
     });
@@ -1349,7 +1354,6 @@ describe("plamo provider plugin", () => {
   });
 
   it("defaults to native streaming and normalizes inline PLaMo tool markup into tool calls", async () => {
-    const provider = await registerSingleProviderPlugin(plamoPlugin);
     const toolMarkup =
       "<|plamo:begin_tool_requests:plamo|>" +
       "<|plamo:begin_tool_request:plamo|>" +
@@ -1378,15 +1382,7 @@ describe("plamo provider plugin", () => {
       }),
     );
 
-    const wrapped = provider.wrapStreamFn?.({
-      provider: "plamo",
-      modelId: "plamo-3.0-prime-beta",
-      streamFn: baseFn as never,
-      extraParams: {},
-    } as never);
-    if (!wrapped) {
-      throw new Error("expected wrapped stream function");
-    }
+    const wrapped = createPlamoToolCallWrapper(baseFn as never);
 
     const stream = await wrapped(
       {
@@ -1421,7 +1417,6 @@ describe("plamo provider plugin", () => {
   });
 
   it("keeps done reason synchronized with normalized tool-use stopReason on wrapped streams", async () => {
-    const provider = await registerSingleProviderPlugin(plamoPlugin);
     const toolMarkup =
       "<|plamo:begin_tool_requests:plamo|>" +
       "<|plamo:begin_tool_request:plamo|>" +
@@ -1443,15 +1438,7 @@ describe("plamo provider plugin", () => {
       }),
     );
 
-    const wrapped = provider.wrapStreamFn?.({
-      provider: "plamo",
-      modelId: "plamo-3.0-prime-beta",
-      streamFn: baseFn as never,
-      extraParams: {},
-    } as never);
-    if (!wrapped) {
-      throw new Error("expected wrapped stream function");
-    }
+    const wrapped = createPlamoToolCallWrapper(baseFn as never);
 
     const stream = await wrapped(
       {
