@@ -1,10 +1,13 @@
 import type { SessionEntry } from "../../config/sessions.js";
 import { buildAgentMainSessionKey } from "../../routing/session-key.js";
-import { parseAgentSessionKey } from "../../sessions/session-key-utils.js";
+import {
+  isDirectSessionKey,
+  isMainSessionKey,
+  parseAgentSessionKey,
+} from "../../sessions/session-key-utils.js";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
-  normalizeOptionalString,
 } from "../../shared/string-coerce.js";
 import {
   deliveryContextFromSession,
@@ -35,62 +38,14 @@ function resolveSessionKeyChannelHint(sessionKey?: string): string | undefined {
   return normalizeMessageChannel(head);
 }
 
-function isMainSessionKey(sessionKey?: string): boolean {
-  const parsed = parseAgentSessionKey(sessionKey);
-  if (!parsed) {
-    return normalizeLowercaseStringOrEmpty(sessionKey) === "main";
-  }
-  return normalizeLowercaseStringOrEmpty(parsed.rest) === "main";
-}
-
-const DIRECT_SESSION_MARKERS = new Set(["direct", "dm"]);
-const THREAD_SESSION_MARKERS = new Set(["thread", "topic"]);
-
-function hasStrictDirectSessionTail(parts: string[], markerIndex: number): boolean {
-  const peerId = normalizeOptionalString(parts[markerIndex + 1]);
-  if (!peerId) {
-    return false;
-  }
-  const tail = parts.slice(markerIndex + 2);
-  if (tail.length === 0) {
-    return true;
-  }
-  return (
-    tail.length === 2 &&
-    THREAD_SESSION_MARKERS.has(tail[0] ?? "") &&
-    Boolean(normalizeOptionalString(tail[1]))
-  );
-}
-
-function isDirectSessionKey(sessionKey?: string): boolean {
-  const raw = normalizeLowercaseStringOrEmpty(sessionKey);
-  if (!raw) {
-    return false;
-  }
-  const scoped = parseAgentSessionKey(raw)?.rest ?? raw;
-  const parts = scoped.split(":").filter(Boolean);
-  if (parts.length < 2) {
-    return false;
-  }
-  if (DIRECT_SESSION_MARKERS.has(parts[0] ?? "")) {
-    return hasStrictDirectSessionTail(parts, 0);
-  }
-  const channel = normalizeMessageChannel(parts[0]);
-  if (!channel || !isDeliverableMessageChannel(channel)) {
-    return false;
-  }
-  if (DIRECT_SESSION_MARKERS.has(parts[1] ?? "")) {
-    return hasStrictDirectSessionTail(parts, 1);
-  }
-  return Boolean(normalizeOptionalString(parts[1])) && DIRECT_SESSION_MARKERS.has(parts[2] ?? "")
-    ? hasStrictDirectSessionTail(parts, 2)
-    : false;
-}
-
 function isExternalRoutingChannel(channel?: string): channel is string {
   return Boolean(
     channel && channel !== INTERNAL_MESSAGE_CHANNEL && isDeliverableMessageChannel(channel),
   );
+}
+
+function isHeartbeatPlaceholderTo(raw?: string): boolean {
+  return normalizeLowercaseStringOrEmpty(raw) === "heartbeat";
 }
 
 export function resolveLastChannelRaw(params: {
@@ -150,6 +105,18 @@ export function resolveLastToRaw(params: {
   const originatingChannel = normalizeMessageChannel(params.originatingChannelRaw);
   const persistedChannel = normalizeMessageChannel(params.persistedLastChannel);
   const sessionKeyChannelHint = resolveSessionKeyChannelHint(params.sessionKey);
+  const incomingToRaw = params.originatingToRaw || params.toRaw;
+  // Preserve the persisted destination on main/direct sessions when an internal
+  // placeholder target (for example, heartbeat sender fallback) would overwrite
+  // a real route.
+  if (
+    params.persistedLastTo &&
+    originatingChannel === INTERNAL_MESSAGE_CHANNEL &&
+    isHeartbeatPlaceholderTo(incomingToRaw) &&
+    (isMainSessionKey(params.sessionKey) || isDirectSessionKey(params.sessionKey))
+  ) {
+    return params.persistedLastTo;
+  }
   const hasEstablishedExternalRouteForTo =
     isExternalRoutingChannel(persistedChannel) || isExternalRoutingChannel(sessionKeyChannelHint);
   // Inter-session messages must not replace a persisted external `to` with
@@ -177,7 +144,7 @@ export function resolveLastToRaw(params: {
     }
   }
 
-  return params.originatingToRaw || params.toRaw || params.persistedLastTo;
+  return incomingToRaw || params.persistedLastTo;
 }
 
 export function maybeRetireLegacyMainDeliveryRoute(params: {

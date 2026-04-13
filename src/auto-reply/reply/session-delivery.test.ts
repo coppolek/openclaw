@@ -135,4 +135,16 @@ describe("session delivery direct-session routing overrides", () => {
       }),
     ).toBe("group:12345");
   });
+
+  it("preserves persisted lastTo on main sessions when heartbeat placeholder target is provided", () => {
+    expect(
+      resolveLastToRaw({
+        originatingChannelRaw: "webchat",
+        toRaw: "heartbeat",
+        persistedLastTo: "webchat:user-123",
+        persistedLastChannel: "webchat",
+        sessionKey: "agent:main:main",
+      }),
+    ).toBe("webchat:user-123");
+  });
 });

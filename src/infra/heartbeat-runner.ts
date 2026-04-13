@@ -49,16 +49,21 @@ import { CommandLane } from "../process/lanes.js";
 import {
   isSubagentSessionKey,
   normalizeAgentId,
-  parseAgentSessionKey,
   resolveAgentIdFromSessionKey,
   toAgentStoreSessionKey,
 } from "../routing/session-key.js";
 import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
 import {
+  isDirectSessionKey,
+  isMainSessionKey,
+  parseAgentSessionKey,
+} from "../sessions/session-key-utils.js";
+import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
 } from "../shared/string-coerce.js";
 import { escapeRegExp } from "../utils.js";
+import { INTERNAL_MESSAGE_CHANNEL } from "../utils/message-channel.js";
 import { loadOrCreateDeviceIdentity } from "./device-identity.js";
 import { formatErrorMessage, hasErrnoCode } from "./errors.js";
 import { isWithinActiveHours } from "./heartbeat-active-hours.js";
@@ -596,6 +601,53 @@ type HeartbeatPromptResolution = {
   hasCronEvents: boolean;
 };
 
+function isRelayableInternalRouteTarget(raw?: string): boolean {
+  const target = normalizeOptionalString(raw);
+  if (!target) {
+    return false;
+  }
+  return normalizeLowercaseStringOrEmpty(target) !== "heartbeat";
+}
+
+// `target: "none"` suppresses outbound delivery, but direct webchat sessions still
+// need user-facing exec/cron prompts so the active operator can relay the result.
+function canRelayHeartbeatPromptsToUser(params: {
+  delivery: ReturnType<typeof resolveHeartbeatDeliveryTarget>;
+  visibility: { showAlerts: boolean };
+  sessionKey: string;
+  sessionEntry?: {
+    chatType?: string;
+    lastChannel?: string;
+    lastTo?: string;
+    deliveryContext?: { channel?: string; to?: string };
+  };
+}): boolean {
+  if (params.delivery.channel !== "none" && params.delivery.to && params.visibility.showAlerts) {
+    return true;
+  }
+  if (
+    !params.visibility.showAlerts ||
+    (!isMainSessionKey(params.sessionKey) && !isDirectSessionKey(params.sessionKey))
+  ) {
+    return false;
+  }
+
+  const sessionRouteChannel = normalizeLowercaseStringOrEmpty(
+    params.sessionEntry?.deliveryContext?.channel ?? params.sessionEntry?.lastChannel,
+  );
+  if (sessionRouteChannel !== INTERNAL_MESSAGE_CHANNEL) {
+    return false;
+  }
+  const sessionRouteTo = normalizeOptionalString(
+    params.sessionEntry?.deliveryContext?.to ?? params.sessionEntry?.lastTo,
+  );
+  if (!isRelayableInternalRouteTarget(sessionRouteTo)) {
+    return false;
+  }
+  const chatType = normalizeLowercaseStringOrEmpty(params.sessionEntry?.chatType);
+  return isMainSessionKey(params.sessionKey) ? chatType === "direct" : true;
+}
+
 function appendHeartbeatWorkspacePathHint(prompt: string, workspaceDir: string): string {
   if (!/heartbeat\.md/i.test(prompt)) {
     return prompt;
@@ -789,9 +841,12 @@ export async function runHeartbeatOnce(opts: {
     accountId: delivery.accountId,
   }).responsePrefix;
 
-  const canRelayToUser = Boolean(
-    delivery.channel !== "none" && delivery.to && visibility.showAlerts,
-  );
+  const canRelayToUser = canRelayHeartbeatPromptsToUser({
+    delivery,
+    visibility,
+    sessionKey,
+    sessionEntry: entry,
+  });
   const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
   const { prompt, hasExecCompletion, hasCronEvents } = resolveHeartbeatRunPrompt({
     cfg,
