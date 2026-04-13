@@ -847,9 +847,7 @@ function resolveWorkspaceSkillPromptState(
   // Budget checks and final render both use this same representation so the
   // tier decision is based on the exact strings that end up in the prompt.
   // resolvedSkills keeps canonical paths for snapshot / runtime consumers.
-  const promptSkills = compactSkillPaths(resolvedSkills)
-    .slice()
-    .sort((a, b) => a.name.localeCompare(b.name, "en"));
+  const promptSkills = compactSkillPaths(resolvedSkills);
   const { skillsForPrompt, truncated, compact } = applySkillsPromptLimits({
     skills: promptSkills,
     config: opts?.config,

@@ -1,4 +1,4 @@
-import type { OpenClawConfig } from "../../config/config.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { normalizeStringEntries } from "../../shared/string-normalization.js";
 import { matchesSkillFilter } from "./filter.js";
 import type { SkillSnapshot } from "./types.js";

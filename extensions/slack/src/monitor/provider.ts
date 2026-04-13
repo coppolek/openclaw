@@ -455,6 +455,10 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
     : undefined;
 
   const handleSlackMessage = createSlackMessageHandler({ ctx, account, trackEvent });
+  // Register event handlers before any async runtime checks so tests and startup
+  // observers can see the Bolt wiring as soon as monitor initialization begins.
+  registerSlackMonitorEvents({ ctx, account, handleSlackMessage, trackEvent });
+
   const execApprovalsEnabled = await isSlackExecApprovalClientEnabledForAccount({
     cfg,
     accountId: account.accountId,
@@ -472,8 +476,6 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
       abortSignal: opts.abortSignal,
     });
   }
-
-  registerSlackMonitorEvents({ ctx, account, handleSlackMessage, trackEvent });
   await registerSlackMonitorSlashCommands({ ctx, account });
   if (slackMode === "http" && slackHttpHandler) {
     unregisterHttpHandler = registerSlackHttpHandler({
