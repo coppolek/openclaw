@@ -1586,6 +1586,10 @@ describe("runHeartbeatOnce", () => {
       routeTarget: "heartbeat",
     },
     {
+      name: "legacy web placeholder",
+      routeTarget: "web",
+    },
+    {
       name: "internal session lane",
       routeTarget: "session:dashboard",
     },

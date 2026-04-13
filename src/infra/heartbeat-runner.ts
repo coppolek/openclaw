@@ -610,7 +610,7 @@ function isRelayableInternalRouteTarget(raw?: string): boolean {
   if (!normalized) {
     return false;
   }
-  return normalized !== "heartbeat" && !normalized.startsWith("session:");
+  return normalized !== "heartbeat" && normalized !== "web" && !normalized.startsWith("session:");
 }
 
 // `target: "none"` suppresses outbound delivery, but direct webchat sessions still
