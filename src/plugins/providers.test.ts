@@ -598,7 +598,7 @@ describe("resolvePluginProviders", () => {
     });
   });
 
-  it("does not keep trusted but disabled workspace provider plugins eligible in setup discovery", () => {
+  it("keeps trusted but disabled workspace provider plugins eligible in setup discovery", () => {
     resolvePluginProviders({
       config: {
         plugins: {
@@ -613,7 +613,7 @@ describe("resolvePluginProviders", () => {
     });
 
     expectLastSetupRegistryLoad({
-      onlyPluginIds: ["google", "kilocode", "moonshot"],
+      onlyPluginIds: ["google", "kilocode", "moonshot", "workspace-provider"],
     });
   });
 
@@ -1070,7 +1070,7 @@ describe("resolvePluginProviders", () => {
     );
   });
 
-  it("does not keep explicitly trusted disabled workspace setup owners discoverable", () => {
+  it("keeps explicitly trusted disabled workspace setup owners discoverable", () => {
     setManifestPlugins([
       createManifestProviderPlugin({
         id: "workspace-activation-owner",
@@ -1096,7 +1096,7 @@ describe("resolvePluginProviders", () => {
         },
         includeUntrustedWorkspacePlugins: false,
       }),
-    ).toEqual([]);
+    ).toEqual(["workspace-activation-owner"]);
   });
 
   it("does not auto-activate explicitly disabled trusted workspace runtime owners", () => {
