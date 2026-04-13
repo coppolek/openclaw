@@ -1580,60 +1580,76 @@ describe("runHeartbeatOnce", () => {
     }
   });
 
-  it("keeps exec prompts internal-only when the stored internal route is the heartbeat placeholder", async () => {
-    const tmpDir = await createCaseDir("hb-exec-target-none-heartbeat-placeholder");
-    const storePath = path.join(tmpDir, "sessions.json");
-    const cfg: OpenClawConfig = {
-      agents: {
-        defaults: {
-          workspace: tmpDir,
-          heartbeat: { every: "5m", target: "none" },
+  it.each([
+    {
+      name: "heartbeat placeholder",
+      routeTarget: "heartbeat",
+    },
+    {
+      name: "internal session lane",
+      routeTarget: "session:dashboard",
+    },
+  ])(
+    "keeps exec prompts internal-only when the stored internal route is $name",
+    async ({ routeTarget }) => {
+      const tmpDir = await createCaseDir("hb-exec-target-none-nonrelayable-internal");
+      const storePath = path.join(tmpDir, "sessions.json");
+      const cfg: OpenClawConfig = {
+        agents: {
+          defaults: {
+            workspace: tmpDir,
+            heartbeat: { every: "5m", target: "none" },
+          },
         },
-      },
-      channels: { whatsapp: { allowFrom: ["*"] } },
-      session: { store: storePath },
-    };
-    const sessionKey = resolveMainSessionKey(cfg);
-    await fs.writeFile(
-      storePath,
-      JSON.stringify({
-        [sessionKey]: {
-          sessionId: "sid",
-          updatedAt: Date.now(),
-          chatType: "direct",
-          lastChannel: "webchat",
-          lastTo: "heartbeat",
-        },
-      }),
-    );
-    enqueueSystemEvent("exec finished: backup completed", {
-      sessionKey,
-      contextKey: "exec:backup",
-    });
-
-    const replySpy = vi.fn();
-    replySpy.mockResolvedValue({ text: "Handled internally" });
-    const sendWhatsApp = vi
-      .fn<
-        (to: string, text: string, opts?: unknown) => Promise<{ messageId: string; toJid: string }>
-      >()
-      .mockResolvedValue({ messageId: "m1", toJid: "jid" });
-
-    try {
-      const res = await runHeartbeatOnce({
-        cfg,
-        reason: "exec-event",
-        deps: createHeartbeatDeps(sendWhatsApp, { getReplyFromConfig: replySpy }),
+        channels: { whatsapp: { allowFrom: ["*"] } },
+        session: { store: storePath },
+      };
+      const sessionKey = resolveMainSessionKey(cfg);
+      await fs.writeFile(
+        storePath,
+        JSON.stringify({
+          [sessionKey]: {
+            sessionId: "sid",
+            updatedAt: Date.now(),
+            chatType: "direct",
+            lastChannel: "webchat",
+            lastTo: routeTarget,
+          },
+        }),
+      );
+      enqueueSystemEvent("exec finished: backup completed", {
+        sessionKey,
+        contextKey: "exec:backup",
       });
-      expect(res.status).toBe("ran");
-      expect(sendWhatsApp).toHaveBeenCalledTimes(0);
-      const calledCtx = replySpy.mock.calls[0]?.[0] as { Body?: string };
-      expect(calledCtx.Body).toContain("Handle the result internally");
-      expect(calledCtx.Body).not.toContain("Please relay the command output to the user");
-    } finally {
-      replySpy.mockReset();
-    }
-  });
+
+      const replySpy = vi.fn();
+      replySpy.mockResolvedValue({ text: "Handled internally" });
+      const sendWhatsApp = vi
+        .fn<
+          (
+            to: string,
+            text: string,
+            opts?: unknown,
+          ) => Promise<{ messageId: string; toJid: string }>
+        >()
+        .mockResolvedValue({ messageId: "m1", toJid: "jid" });
+
+      try {
+        const res = await runHeartbeatOnce({
+          cfg,
+          reason: "exec-event",
+          deps: createHeartbeatDeps(sendWhatsApp, { getReplyFromConfig: replySpy }),
+        });
+        expect(res.status).toBe("ran");
+        expect(sendWhatsApp).toHaveBeenCalledTimes(0);
+        const calledCtx = replySpy.mock.calls[0]?.[0] as { Body?: string };
+        expect(calledCtx.Body).toContain("Handle the result internally");
+        expect(calledCtx.Body).not.toContain("Please relay the command output to the user");
+      } finally {
+        replySpy.mockReset();
+      }
+    },
+  );
 
   it("uses a user-relay cron prompt for direct internal main sessions even when target is none", async () => {
     const tmpDir = await createCaseDir("hb-cron-target-none-direct-internal");
