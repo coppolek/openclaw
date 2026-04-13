@@ -32,12 +32,15 @@ import {
 import { SILENT_REPLY_TOKEN } from "../tokens.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import { applySessionHints } from "./body.js";
+import { buildChatShapingNote } from "./chat-shaping.js";
 import type { buildCommandContext } from "./commands.js";
+import { buildDeicticResolutionNote } from "./deictic-context.js";
 import type { InlineDirectives } from "./directive-handling.js";
 import { shouldUseReplyFastTestRuntime } from "./get-reply-fast-path.js";
 import { resolvePreparedReplyQueueState } from "./get-reply-run-queue.js";
 import { buildGroupChatContext, buildGroupIntro } from "./groups.js";
 import { buildInboundMetaSystemPrompt, buildInboundUserContextPrefix } from "./inbound-meta.js";
+import { sanitizeInboundSystemTags } from "./inbound-text.js";
 import type { createModelSelectionState } from "./model-selection.js";
 import { resolveOriginMessageProvider } from "./origin-routing.js";
 import { buildReplyPromptBodies } from "./prompt-prelude.js";
@@ -392,11 +395,32 @@ export async function runPreparedReply(
   const prefixedBodyCore = prefixedBodyBase;
   const threadStarterBody = normalizeOptionalString(ctx.ThreadStarterBody);
   const threadHistoryBody = normalizeOptionalString(ctx.ThreadHistoryBody);
-  const threadContextNote = threadHistoryBody
-    ? `[Thread history - for context]\n${threadHistoryBody}`
-    : threadStarterBody
-      ? `[Thread starter - for context]\n${threadStarterBody}`
-      : undefined;
+  const replyToBodyRaw = normalizeOptionalString(ctx.ReplyToBody);
+  const replyToBody = replyToBodyRaw ? sanitizeInboundSystemTags(replyToBodyRaw) : undefined;
+  const deicticResolutionNote = buildDeicticResolutionNote({
+    userText: rawBodyTrimmed,
+    replyToBody,
+    threadHistoryBody,
+    threadStarterBody,
+  });
+  const chatShapingNote = buildChatShapingNote({
+    userText: rawBodyTrimmed,
+    replyToBody,
+    threadHistoryBody,
+    threadStarterBody,
+    isGroupChat,
+  });
+  const threadContextNote = [
+    deicticResolutionNote,
+    chatShapingNote,
+    threadHistoryBody
+      ? `[Thread history - for context]\n${threadHistoryBody}`
+      : threadStarterBody
+        ? `[Thread starter - for context]\n${threadStarterBody}`
+        : undefined,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   const drainedSystemEventBlocks: string[] = [];
   let forceSenderIsOwnerFalseFromSystemEvents = false;
   const rebuildPromptBodies = async (): Promise<{
