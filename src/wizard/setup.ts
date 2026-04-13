@@ -500,6 +500,10 @@ export async function runSetupWizard(
     });
   }
 
+  if (authChoice === undefined) {
+    throw new Error("Auth choice is required for local setup.");
+  }
+
   if (authChoice === "custom-api-key") {
     const { promptCustomApiConfig } = await import("../commands/onboard-custom.js");
     const customResult = await promptCustomApiConfig({
