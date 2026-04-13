@@ -3,13 +3,27 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withEnv } from "../../test-utils/env.js";
 import { createFixtureSuite } from "../../test-utils/fixture-suite.js";
 import { writeSkill } from "../skills.e2e-test-helpers.js";
+import { restoreMockSkillsHomeEnv, setMockSkillsHomeEnv } from "./home-env.test-support.js";
 import { canReuseSkillSnapshot } from "./snapshot-cache.js";
 import { buildWorkspaceSkillSnapshot } from "./workspace.js";
 
 const fixtureSuite = createFixtureSuite("openclaw-skills-workspace-suite-");
 
-function withWorkspaceHome<T>(workspaceDir: string, cb: () => T): T {
-  return withEnv({ HOME: workspaceDir, PATH: "" }, cb);
+async function withWorkspaceHome<T>(workspaceDir: string, cb: () => T): Promise<T> {
+  const envSnapshot = setMockSkillsHomeEnv(workspaceDir);
+  try {
+    return withEnv(
+      {
+        HOME: workspaceDir,
+        OPENCLAW_HOME: workspaceDir,
+        USERPROFILE: workspaceDir,
+        PATH: "",
+      },
+      cb,
+    );
+  } finally {
+    await restoreMockSkillsHomeEnv(envSnapshot);
+  }
 }
 
 function extractPromptSkillNames(prompt: string): string[] {
@@ -39,7 +53,7 @@ describe("skills workspace snapshot behavior", () => {
       metadata: '{"openclaw":{"skillKey":"wechat-reader"}}',
     });
 
-    const snapshot = withWorkspaceHome(workspaceDir, () =>
+    const snapshot = await withWorkspaceHome(workspaceDir, () =>
       buildWorkspaceSkillSnapshot(workspaceDir, {
         config: {
           skills: {
@@ -72,7 +86,7 @@ describe("skills workspace snapshot behavior", () => {
       metadata: '{"openclaw":{"skillKey":"wechat-reader"}}',
     });
 
-    const snapshot = withWorkspaceHome(workspaceDir, () =>
+    const snapshot = await withWorkspaceHome(workspaceDir, () =>
       buildWorkspaceSkillSnapshot(workspaceDir, {
         config: {
           skills: {
@@ -109,7 +123,7 @@ describe("skills workspace snapshot behavior", () => {
         priority: ["alpha-skill"],
       },
     };
-    const snapshot = withWorkspaceHome(workspaceDir, () =>
+    const snapshot = await withWorkspaceHome(workspaceDir, () =>
       buildWorkspaceSkillSnapshot(workspaceDir, {
         config,
         managedSkillsDir: path.join(workspaceDir, ".managed"),
