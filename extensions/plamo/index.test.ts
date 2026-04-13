@@ -123,10 +123,12 @@ function createDynamicContext(params: {
   provider: string;
   modelId: string;
   models: ProviderRuntimeModel[];
+  providerConfig?: ProviderResolveDynamicModelContext["providerConfig"];
 }): ProviderResolveDynamicModelContext {
   return {
     provider: params.provider,
     modelId: params.modelId,
+    providerConfig: params.providerConfig,
     modelRegistry: {
       find(providerId: string, modelId: string) {
         return (
@@ -257,6 +259,28 @@ describe("plamo provider plugin", () => {
             },
           } as ProviderRuntimeModel,
         ],
+      }),
+    );
+
+    expect(resolved).toMatchObject({
+      provider: "plamo",
+      id: "plamo-next-preview",
+      api: "openai-completions",
+      baseUrl: "https://proxy.example.test/v1",
+      reasoning: false,
+    });
+  });
+
+  it("inherits configured provider baseUrl when forward-compat fallback has no template row", async () => {
+    const provider = await registerSingleProviderPlugin(plamoPlugin);
+    const resolved = provider.resolveDynamicModel?.(
+      createDynamicContext({
+        provider: "plamo",
+        modelId: "plamo-next-preview",
+        models: [],
+        providerConfig: {
+          baseUrl: "https://proxy.example.test/v1",
+        },
       }),
     );
 

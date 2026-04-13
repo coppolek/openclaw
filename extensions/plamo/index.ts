@@ -46,7 +46,7 @@ function resolvePlamoDynamicModel(ctx: ProviderResolveDynamicModelContext) {
       name: modelId,
       provider: PROVIDER_ID,
       api: "openai-completions",
-      baseUrl: PLAMO_BASE_URL,
+      baseUrl: ctx.providerConfig?.baseUrl ?? PLAMO_BASE_URL,
       reasoning: false,
       input: [...PLAMO_MODEL_INPUT],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
