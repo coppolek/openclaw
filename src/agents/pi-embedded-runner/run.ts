@@ -110,6 +110,7 @@ import { handleRetryLimitExhaustion } from "./run/retry-limit.js";
 import { resolveEffectiveRuntimeModel, resolveHookModelSelection } from "./run/setup.js";
 import { mergeAttemptToolMediaPayloads } from "./run/tool-media-payloads.js";
 import {
+  estimateToolResultReductionPotential,
   sessionLikelyHasOversizedToolResults,
   truncateOversizedToolResultsInSession,
 } from "./tool-result-truncation.js";
@@ -940,7 +941,8 @@ export async function runEmbeddedPiAgent(
             const overflowDiagId = createCompactionDiagId();
             const errorText = contextOverflowError.text;
             const msgCount = attempt.messagesSnapshot?.length ?? 0;
-            const observedOverflowTokens = extractObservedOverflowTokenCount(errorText);
+            const observedOverflowTokens =
+              extractObservedOverflowTokenCount(errorText) ?? attempt.estimatedContextTokens;
             log.warn(
               `[context-overflow-diag] sessionKey=${params.sessionKey ?? params.sessionId} ` +
                 `provider=${provider}/${modelId} source=${contextOverflowError.source} ` +
@@ -1082,18 +1084,39 @@ export async function runEmbeddedPiAgent(
             }
             if (!toolResultTruncationAttempted) {
               const contextWindowTokens = ctxInfo.tokens;
-              const hasOversized = attempt.messagesSnapshot
+              const toolResultReduction = attempt.messagesSnapshot
+                ? estimateToolResultReductionPotential({
+                    messages: attempt.messagesSnapshot,
+                    contextWindowTokens,
+                  })
+                : null;
+              const hasOversized = toolResultReduction
                 ? sessionLikelyHasOversizedToolResults({
                     messages: attempt.messagesSnapshot,
                     contextWindowTokens,
                   })
                 : false;
+              const estimatedPromptTokens = derivePromptTokens(lastRunPromptUsage);
+              const promptBudgetBeforeReserve = Math.max(1, Math.floor(contextWindowTokens));
+              const overflowPromptTokens =
+                estimatedPromptTokens != null
+                  ? Math.max(0, estimatedPromptTokens - promptBudgetBeforeReserve)
+                  : undefined;
+              const estimatedOverflowChars =
+                overflowPromptTokens !== undefined ? overflowPromptTokens * 4 : undefined;
+              const truncationLikelyInsufficient =
+                estimatedOverflowChars !== undefined && toolResultReduction
+                  ? toolResultReduction.maxReducibleChars < estimatedOverflowChars
+                  : false;
 
-              if (hasOversized) {
+              if (hasOversized && !truncationLikelyInsufficient) {
                 toolResultTruncationAttempted = true;
                 log.warn(
                   `[context-overflow-recovery] Attempting tool result truncation for ${provider}/${modelId} ` +
-                    `(contextWindow=${contextWindowTokens} tokens)`,
+                    `(contextWindow=${contextWindowTokens} tokens)` +
+                    (toolResultReduction
+                      ? ` reducibleChars=${toolResultReduction.maxReducibleChars}`
+                      : ""),
                 );
                 const truncResult = await truncateOversizedToolResultsInSession({
                   sessionFile: params.sessionFile,
@@ -1109,6 +1132,13 @@ export async function runEmbeddedPiAgent(
                 }
                 log.warn(
                   `[context-overflow-recovery] Tool result truncation did not help: ${truncResult.reason ?? "unknown"}`,
+                );
+              } else if (hasOversized && truncationLikelyInsufficient) {
+                toolResultTruncationAttempted = true;
+                log.warn(
+                  `[context-overflow-recovery] Skipping tool result truncation for ${provider}/${modelId} because ` +
+                    `estimated reducible chars (${toolResultReduction?.maxReducibleChars ?? 0}) ` +
+                    `cannot cover current overflow (${estimatedOverflowChars ?? 0} chars)`,
                 );
               }
             }
