@@ -120,7 +120,7 @@ function mergeResolvedModelRequestHeaders(
   const headers = new Headers(requestConfig.headers);
   const protectedKeys = resolveProtectedModelRequestHeaderKeys(requestConfig);
   for (const [key, value] of new Headers(requestInit?.headers).entries()) {
-    if (protectedKeys.has(normalizeHeaderKey(key))) {
+    if (protectedKeys.has(normalizeHeaderKey(key)) || headers.has(key)) {
       continue;
     }
     headers.set(key, value);

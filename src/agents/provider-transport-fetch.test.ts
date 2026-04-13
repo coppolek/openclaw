@@ -211,4 +211,52 @@ describe("buildGuardedModelFetch", () => {
     const headers = new Headers(request.init?.headers);
     expect(headers.get("authorization")).toBe("Bearer override-token");
   });
+
+  it("keeps configured request headers ahead of caller header collisions", async () => {
+    resolveProviderRequestPolicyConfigMock.mockReturnValue({
+      allowPrivateNetwork: false,
+      headers: {
+        Authorization: "Bearer configured-token",
+        "X-Tenant": "configured-tenant",
+        "X-Trace": "configured-trace",
+      },
+      policy: {
+        attributionHeaders: {},
+      },
+      auth: {
+        configured: false,
+        mode: "provider-default",
+        injectAuthorizationHeader: false,
+      },
+    } as never);
+
+    const { buildGuardedModelFetch } = await import("./provider-transport-fetch.js");
+    const model = {
+      id: "plamo-3.0-prime-beta",
+      provider: "plamo",
+      api: "openai-completions",
+      baseUrl: "https://api.platform.preferredai.jp/v1",
+    } as unknown as Model<"openai-completions">;
+
+    const fetcher = buildGuardedModelFetch(model);
+    await fetcher("https://api.platform.preferredai.jp/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer caller-token",
+        "X-Tenant": "caller-tenant",
+        "X-Trace": "caller-trace",
+        "X-Call": "1",
+      },
+      body: '{"messages":[]}',
+    });
+
+    const request = fetchWithSsrFGuardMock.mock.calls[0]?.[0] as {
+      init?: RequestInit;
+    };
+    const headers = new Headers(request.init?.headers);
+    expect(headers.get("authorization")).toBe("Bearer configured-token");
+    expect(headers.get("x-tenant")).toBe("configured-tenant");
+    expect(headers.get("x-trace")).toBe("configured-trace");
+    expect(headers.get("x-call")).toBe("1");
+  });
 });
