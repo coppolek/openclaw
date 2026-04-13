@@ -229,6 +229,45 @@ describe("plamo provider plugin", () => {
     });
   });
 
+  it("inherits the resolved template baseUrl for forward-compat PLaMo models", async () => {
+    const provider = await registerSingleProviderPlugin(plamoPlugin);
+    const resolved = provider.resolveDynamicModel?.(
+      createDynamicContext({
+        provider: "plamo",
+        modelId: "plamo-next-preview",
+        models: [
+          {
+            provider: "plamo",
+            api: "openai-completions",
+            id: "plamo-3.0-prime-beta",
+            name: "PLaMo 3.0 Prime Beta",
+            baseUrl: "https://proxy.example.test/v1",
+            reasoning: false,
+            input: ["text"],
+            cost: { input: 0.375, output: 1.5625, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: 65_536,
+            maxTokens: 20_000,
+            compat: {
+              maxTokensField: "max_tokens",
+              supportsDeveloperRole: false,
+              supportsReasoningEffort: false,
+              supportsStore: false,
+              supportsStrictMode: false,
+            },
+          } as ProviderRuntimeModel,
+        ],
+      }),
+    );
+
+    expect(resolved).toMatchObject({
+      provider: "plamo",
+      id: "plamo-next-preview",
+      api: "openai-completions",
+      baseUrl: "https://proxy.example.test/v1",
+      reasoning: false,
+    });
+  });
+
   it("drops replayed assistant thinking blocks before sending follow-up turns", async () => {
     const { provider, catalog } = await loadPlamoCatalog();
 
@@ -294,6 +333,10 @@ describe("plamo provider plugin", () => {
                 thinking: "internal reasoning that must not be replayed",
                 thinkingSignature: "reasoning_content",
               },
+              {
+                type: "redacted_thinking",
+                data: "encrypted reasoning that must not be replayed",
+              },
               { type: "text", text: "前回の回答です。" },
             ],
           },
@@ -356,6 +399,10 @@ describe("plamo provider plugin", () => {
               type: "thinking",
               thinking: "reasoning that should not be replayed",
               thinkingSignature: "reasoning_content",
+            },
+            {
+              type: "redacted_thinking",
+              data: "encrypted reasoning that should not be replayed",
             },
             { type: "toolUse", id: "call_1", name: "read", input: { path: "README.md" } },
             { type: "functionCall", id: "call_2", name: "exec", arguments: { cmd: "pwd" } },

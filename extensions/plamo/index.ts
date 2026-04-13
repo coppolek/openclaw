@@ -38,7 +38,6 @@ function resolvePlamoDynamicModel(ctx: ProviderResolveDynamicModelContext) {
       patch: {
         provider: PROVIDER_ID,
         api: "openai-completions",
-        baseUrl: PLAMO_BASE_URL,
         reasoning: false,
       },
     }) ??

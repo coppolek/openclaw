@@ -165,7 +165,12 @@ function dropPlamoThinkingBlocks(messages: AgentMessage[]): AgentMessage[] {
     const nextContent: AssistantContentBlock[] = [];
     let changed = false;
     for (const block of message.content) {
-      if (block && typeof block === "object" && (block as { type?: unknown }).type === "thinking") {
+      if (
+        block &&
+        typeof block === "object" &&
+        ((block as { type?: unknown }).type === "thinking" ||
+          (block as { type?: unknown }).type === "redacted_thinking")
+      ) {
         touched = true;
         changed = true;
         continue;
