@@ -1507,7 +1507,7 @@ describe("plamo provider plugin", () => {
     });
   });
 
-  it("defaults to native streaming and normalizes inline PLaMo tool markup into tool calls", async () => {
+  it("normalizes inline PLaMo tool markup into cloned wrapped-stream snapshots", async () => {
     const toolMarkup =
       "<|plamo:begin_tool_requests:plamo|>" +
       "<|plamo:begin_tool_request:plamo|>" +
@@ -1548,26 +1548,58 @@ describe("plamo provider plugin", () => {
       {} as never,
     );
 
-    for await (const _event of stream) {
-      // Drain the wrapped stream so live partial mutations run.
+    const events: unknown[] = [];
+    for await (const event of stream) {
+      events.push(event);
     }
     const result = await stream.result();
 
     expect(baseFn).toHaveBeenCalledTimes(1);
-    expect(partialMessage.content).toMatchObject([
-      { type: "text", text: "Checking..." },
-      { type: "toolCall", name: "read", arguments: { path: "README.md" } },
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        partial: expect.objectContaining({
+          content: [
+            { type: "text", text: "Checking..." },
+            expect.objectContaining({
+              type: "toolCall",
+              name: "read",
+              arguments: { path: "README.md" },
+            }),
+          ],
+          stopReason: "toolUse",
+        }),
+        message: expect.objectContaining({
+          content: [
+            { type: "text", text: "Reading now." },
+            expect.objectContaining({
+              type: "toolCall",
+              name: "read",
+              arguments: { path: "README.md" },
+            }),
+          ],
+          stopReason: "toolUse",
+        }),
+      }),
+    );
+    expect(partialMessage.content).toEqual([{ type: "text", text: `Checking...${toolMarkup}` }]);
+    expect(streamedMessage.content).toEqual([{ type: "text", text: `Reading now.${toolMarkup}` }]);
+    expect(finalMessage.content).toEqual([
+      { type: "text", text: `I will inspect the file.\n${toolMarkup}` },
     ]);
-    expect(streamedMessage.content).toMatchObject([
-      { type: "text", text: "Reading now." },
-      { type: "toolCall", name: "read", arguments: { path: "README.md" } },
-    ]);
-    expect(finalMessage.content).toMatchObject([
-      { type: "text", text: "I will inspect the file." },
-      { type: "toolCall", name: "read", arguments: { path: "README.md" } },
-    ]);
-    expect(finalMessage).toMatchObject({ stopReason: "toolUse" });
-    expect(result).toBe(finalMessage);
+    expect(finalMessage).toMatchObject({ role: "assistant" });
+    expect(result).toEqual({
+      role: "assistant",
+      stopReason: "toolUse",
+      content: [
+        { type: "text", text: "I will inspect the file." },
+        expect.objectContaining({
+          type: "toolCall",
+          name: "read",
+          arguments: { path: "README.md" },
+        }),
+      ],
+    });
+    expect(result).not.toBe(finalMessage);
   });
 
   it("keeps done reason synchronized with normalized tool-use stopReason on wrapped streams", async () => {
@@ -1628,8 +1660,143 @@ describe("plamo provider plugin", () => {
         }),
       }),
     );
-    expect(result).toBe(doneMessage);
-    expect(doneMessage).toMatchObject({ stopReason: "toolUse" });
+    expect(result).toEqual(
+      expect.objectContaining({
+        stopReason: "toolUse",
+        content: [
+          { type: "text", text: "I will inspect the file." },
+          expect.objectContaining({
+            type: "toolCall",
+            name: "read",
+            arguments: { path: "README.md" },
+          }),
+        ],
+      }),
+    );
+    expect(result).not.toBe(doneMessage);
+    expect(doneMessage).toMatchObject({
+      stopReason: "stop",
+      content: [{ type: "text", text: `I will inspect the file.\n${toolMarkup}` }],
+    });
+  });
+
+  it("preserves later text deltas after wrapped-stream inline tool normalization", async () => {
+    const toolMarkup =
+      "<|plamo:begin_tool_requests:plamo|>" +
+      "<|plamo:begin_tool_request:plamo|>" +
+      "<|plamo:begin_tool_name:plamo|>read<|plamo:end_tool_name:plamo|>" +
+      '<|plamo:begin_tool_arguments:plamo|><|plamo:msg|>{"path":"README.md"}' +
+      "<|plamo:end_tool_arguments:plamo|>" +
+      "<|plamo:end_tool_request:plamo|>" +
+      "<|plamo:end_tool_requests:plamo|>";
+    const liveMessage = {
+      role: "assistant",
+      stopReason: "stop",
+      content: [{ type: "text", text: `Checking...${toolMarkup}` }],
+    };
+
+    const baseFn = vi.fn(() => ({
+      async result() {
+        return liveMessage;
+      },
+      [Symbol.asyncIterator]() {
+        let step = 0;
+        return {
+          async next() {
+            if (step === 0) {
+              step += 1;
+              return { done: false as const, value: { partial: liveMessage } };
+            }
+            if (step === 1) {
+              const firstBlock = liveMessage.content[0];
+              if (!firstBlock || typeof firstBlock !== "object" || firstBlock.type !== "text") {
+                throw new Error("expected live wrapped stream to keep a text block");
+              }
+              firstBlock.text += " Done.";
+              step += 1;
+              return {
+                done: false as const,
+                value: { type: "done", reason: "stop", message: liveMessage },
+              };
+            }
+            return { done: true as const, value: undefined };
+          },
+          async return(value?: unknown) {
+            return { done: true as const, value };
+          },
+          async throw(error?: unknown) {
+            throw error;
+          },
+        };
+      },
+    }));
+
+    const wrapped = createPlamoToolCallWrapper(baseFn as never);
+    const stream = await wrapped(
+      {
+        api: "openai-completions",
+        provider: "plamo",
+        id: "plamo-3.0-prime-beta",
+      } as never,
+      { messages: [] } as never,
+      {} as never,
+    );
+
+    const events: unknown[] = [];
+    for await (const event of stream) {
+      events.push(event);
+    }
+    const result = await stream.result();
+
+    expect(baseFn).toHaveBeenCalledTimes(1);
+    expect(events).toEqual([
+      expect.objectContaining({
+        partial: expect.objectContaining({
+          stopReason: "toolUse",
+          content: [
+            { type: "text", text: "Checking..." },
+            expect.objectContaining({
+              type: "toolCall",
+              name: "read",
+              arguments: { path: "README.md" },
+            }),
+          ],
+        }),
+      }),
+      expect.objectContaining({
+        type: "done",
+        reason: "toolUse",
+        message: expect.objectContaining({
+          stopReason: "toolUse",
+          content: [
+            { type: "text", text: "Checking... Done." },
+            expect.objectContaining({
+              type: "toolCall",
+              name: "read",
+              arguments: { path: "README.md" },
+            }),
+          ],
+        }),
+      }),
+    ]);
+    expect(result).toEqual(
+      expect.objectContaining({
+        stopReason: "toolUse",
+        content: [
+          { type: "text", text: "Checking... Done." },
+          expect.objectContaining({
+            type: "toolCall",
+            name: "read",
+            arguments: { path: "README.md" },
+          }),
+        ],
+      }),
+    );
+    expect(liveMessage).toEqual({
+      role: "assistant",
+      stopReason: "stop",
+      content: [{ type: "text", text: `Checking...${toolMarkup} Done.` }],
+    });
   });
 
   it("treats toolUse and functionCall blocks as prior tool history on the native transport path", async () => {

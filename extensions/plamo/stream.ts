@@ -1476,13 +1476,24 @@ function syncDoneEventReasonWithMessageStopReason(event: unknown): void {
   }
 }
 
+function clonePlamoNormalizationSnapshot<T>(value: T): T {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  try {
+    return structuredClone(value);
+  } catch {
+    return value;
+  }
+}
+
 function wrapStreamNormalizePlamoToolMarkup(
   stream: ReturnType<typeof streamSimple>,
   options?: { normalizePartial?: boolean },
 ): ReturnType<typeof streamSimple> {
   const originalResult = stream.result.bind(stream);
   stream.result = async () => {
-    const message = await originalResult();
+    const message = clonePlamoNormalizationSnapshot(await originalResult());
     normalizePlamoToolMarkupInMessage(message);
     stripPlamoStreamingInternalsInMessage(message);
     return message;
@@ -1496,13 +1507,23 @@ function wrapStreamNormalizePlamoToolMarkup(
         async next() {
           const result = await iterator.next();
           if (!result.done && result.value && typeof result.value === "object") {
-            const event = result.value as { partial?: unknown; message?: unknown };
+            // Normalize cloned snapshots so later deltas still land on the
+            // underlying live message objects owned by the base stream.
+            const event = clonePlamoNormalizationSnapshot(result.value) as {
+              partial?: unknown;
+              message?: unknown;
+            };
             if (options?.normalizePartial !== false) {
               normalizePlamoToolMarkupInMessage(event.partial);
+              stripPlamoStreamingInternalsInMessage(event.partial);
             }
             normalizePlamoToolMarkupInMessage(event.message);
             stripPlamoStreamingInternalsInMessage(event.message);
             syncDoneEventReasonWithMessageStopReason(event);
+            return {
+              ...result,
+              value: event,
+            };
           }
           return result;
         },
