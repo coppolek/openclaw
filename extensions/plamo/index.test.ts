@@ -13,9 +13,9 @@ import { createPlamoToolCallWrapper, normalizePlamoToolMarkupInMessage } from ".
 
 const fetchWithSsrFGuardMock = vi.hoisted(() => vi.fn());
 
-vi.mock("openclaw/plugin-sdk/provider-http", async () => {
-  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/provider-http")>(
-    "openclaw/plugin-sdk/provider-http",
+vi.mock("openclaw/plugin-sdk/provider-http-runtime", async () => {
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/provider-http-runtime")>(
+    "openclaw/plugin-sdk/provider-http-runtime",
   );
   return {
     ...actual,
@@ -165,11 +165,10 @@ describe("plamo provider plugin", () => {
     expect(provider.label).toBe("PLaMo");
     expect(provider.envVars).toEqual(["PLAMO_API_KEY"]);
     expect(provider.auth).toHaveLength(1);
+    expect(provider.buildReplayPolicy).toBeTypeOf("function");
+    expect(provider.sanitizeReplayHistory).toBeTypeOf("function");
     expect(provider.createStreamFn).toBeTypeOf("function");
     expect(provider.wrapStreamFn).toBeUndefined();
-    expect(provider.capabilities).toMatchObject({
-      dropThinkingBlockModelHints: ["plamo"],
-    });
     expect(resolved).not.toBeNull();
     expect(resolved?.provider.id).toBe("plamo");
     expect(resolved?.method.id).toBe("api-key");
@@ -326,6 +325,57 @@ describe("plamo provider plugin", () => {
     expect((request.body.messages as Array<Record<string, unknown>>)[1]).not.toHaveProperty(
       "reasoning_content",
     );
+  });
+
+  it("owns replay cleanup through provider replay hooks", async () => {
+    const provider = await registerSingleProviderPlugin(plamoPlugin);
+
+    expect(
+      provider.buildReplayPolicy?.({
+        provider: "plamo",
+        modelId: "plamo-3.0-prime-beta",
+        modelApi: "openai-completions",
+      } as never),
+    ).toMatchObject({
+      sanitizeToolCallIds: true,
+      toolCallIdMode: "strict",
+      applyAssistantFirstOrderingFix: true,
+      validateGeminiTurns: true,
+      validateAnthropicTurns: true,
+    });
+
+    const sanitized = await provider.sanitizeReplayHistory?.({
+      provider: "plamo",
+      modelId: "plamo-3.0-prime-beta",
+      modelApi: "openai-completions",
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "thinking",
+              thinking: "reasoning that should not be replayed",
+              thinkingSignature: "reasoning_content",
+            },
+            { type: "toolUse", id: "call_1", name: "read", input: { path: "README.md" } },
+            { type: "functionCall", id: "call_2", name: "exec", arguments: { cmd: "pwd" } },
+            { type: "text", text: "Answer" },
+          ],
+        },
+      ],
+      sessionId: "session-1",
+    } as never);
+
+    expect(sanitized).toEqual([
+      {
+        role: "assistant",
+        content: [
+          { type: "toolCall", id: "call_1", name: "read", arguments: { path: "README.md" } },
+          { type: "toolCall", id: "call_2", name: "exec", arguments: { cmd: "pwd" } },
+          { type: "text", text: "Answer" },
+        ],
+      },
+    ]);
   });
 
   it("sends the documented streaming payload and auth headers on the wire", async () => {

@@ -39,4 +39,3 @@ export {
   resolveProviderRequestCapabilities,
   resolveProviderRequestPolicy,
 } from "../agents/provider-attribution.js";
-export { buildGuardedModelFetch } from "../agents/provider-transport-fetch.js";

@@ -16,7 +16,7 @@ import {
   type Usage,
 } from "@mariozechner/pi-ai";
 import { convertMessages } from "@mariozechner/pi-ai/openai-completions";
-import { buildGuardedModelFetch } from "openclaw/plugin-sdk/provider-http";
+import { buildGuardedModelFetch } from "openclaw/plugin-sdk/provider-http-runtime";
 import { normalizeOpenAICompatibleToolParameters } from "openclaw/plugin-sdk/provider-tools";
 
 const PLAMO_BEGIN_TOOL_REQUEST = "<|plamo:begin_tool_request:plamo|>";
@@ -254,6 +254,10 @@ function normalizePlamoReplayToolHistory(messages: AgentMessage[]): AgentMessage
   return touched ? normalizedMessages : messages;
 }
 
+export function sanitizePlamoReplayHistory(messages: AgentMessage[]): AgentMessage[] {
+  return normalizePlamoReplayToolHistory(dropPlamoThinkingBlocks(messages));
+}
+
 function sanitizePlamoReplayMessages(context: RuntimeContext): RuntimeContext {
   const messages = (context as { messages?: unknown } | null | undefined)?.messages;
   if (!Array.isArray(messages)) {
@@ -262,9 +266,7 @@ function sanitizePlamoReplayMessages(context: RuntimeContext): RuntimeContext {
 
   // PLaMo always emits `reasoning_content`, but replaying prior reasoning into
   // follow-up turns can cause the API to stop the visible answer mid-sentence.
-  const sanitized = normalizePlamoReplayToolHistory(
-    dropPlamoThinkingBlocks(messages as AgentMessage[]),
-  );
+  const sanitized = sanitizePlamoReplayHistory(messages as AgentMessage[]);
   if (sanitized === messages) {
     return context;
   }

@@ -1,6 +1,7 @@
 import type { ProviderResolveDynamicModelContext } from "openclaw/plugin-sdk/plugin-entry";
 import { defineSingleProviderPluginEntry } from "openclaw/plugin-sdk/provider-entry";
 import {
+  buildProviderReplayFamilyHooks,
   cloneFirstTemplateModel,
   normalizeModelCompat,
 } from "openclaw/plugin-sdk/provider-model-shared";
@@ -15,9 +16,12 @@ import {
 } from "./model-definitions.js";
 import { applyPlamoConfig, PLAMO_DEFAULT_MODEL_REF } from "./onboard.js";
 import { buildPlamoProvider } from "./provider-catalog.js";
-import { createPlamoToolCallWrapper } from "./stream.js";
+import { createPlamoToolCallWrapper, sanitizePlamoReplayHistory } from "./stream.js";
 
 const PROVIDER_ID = "plamo";
+const OPENAI_COMPATIBLE_REPLAY_HOOKS = buildProviderReplayFamilyHooks({
+  family: "openai-compatible",
+});
 
 function resolvePlamoDynamicModel(ctx: ProviderResolveDynamicModelContext) {
   const modelId = ctx.modelId.trim();
@@ -85,15 +89,14 @@ export default defineSingleProviderPluginEntry({
       buildProvider: buildPlamoProvider,
       allowExplicitBaseUrl: true,
     },
+    ...OPENAI_COMPATIBLE_REPLAY_HOOKS,
+    sanitizeReplayHistory: ({ messages }) => sanitizePlamoReplayHistory(messages),
     normalizeToolSchemas: ({ tools }) =>
       tools.map((tool) => ({
         ...tool,
         parameters: normalizeOpenAICompatibleToolParameters(tool.parameters),
       })),
     resolveDynamicModel: (ctx) => resolvePlamoDynamicModel(ctx),
-    capabilities: {
-      dropThinkingBlockModelHints: ["plamo"],
-    },
     createStreamFn: () => createPlamoToolCallWrapper(undefined),
   },
 });
