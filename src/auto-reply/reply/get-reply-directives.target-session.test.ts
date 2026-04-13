@@ -286,6 +286,7 @@ describe("resolveReplyDirectives", () => {
         resolvedVerboseLevel: "full",
         resolvedReasoningLevel: "high",
         resolvedElevatedLevel: "on",
+        conversationalFreeform: true,
       }),
     });
   });
