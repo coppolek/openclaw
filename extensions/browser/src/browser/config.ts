@@ -82,6 +82,10 @@ export type ResolvedBrowserProfile = {
   color: string;
   driver: "openclaw" | "existing-session";
   attachOnly: boolean;
+  /** Per-profile headless override. undefined = use global setting. */
+  headless: boolean | undefined;
+  /** Per-profile executable path override. undefined = use global executablePath setting. */
+  executablePath: string | undefined;
 };
 
 const DEFAULT_BROWSER_CDP_PORT_RANGE_START = 18800;
@@ -320,6 +324,8 @@ export function resolveProfile(
       color: profile.color,
       driver,
       attachOnly: true,
+      headless: undefined,
+      executablePath: undefined,
     };
   }
 
@@ -353,9 +359,27 @@ export function resolveProfile(
     color: profile.color,
     driver,
     attachOnly: profile.attachOnly ?? resolved.attachOnly,
+    headless: profile.headless,
+    executablePath: profile.executablePath?.trim() || undefined,
   };
 }
 
-export function shouldStartLocalBrowserServer(_resolved: unknown) {
+/** Returns the effective headless setting for a profile, applying per-profile override over the global setting. */
+export function effectiveHeadless(
+  profile: ResolvedBrowserProfile,
+  resolved: ResolvedBrowserConfig,
+): boolean {
+  return profile.headless !== undefined ? profile.headless : resolved.headless;
+}
+
+/** Returns the effective executablePath for a profile, applying per-profile override over the global setting. */
+export function effectiveExecutablePath(
+  profile: ResolvedBrowserProfile,
+  resolved: ResolvedBrowserConfig,
+): string | undefined {
+  return profile.executablePath ?? resolved.executablePath;
+}
+
+export function shouldStartLocalBrowserServer(_resolved: ResolvedBrowserConfig) {
   return true;
 }
