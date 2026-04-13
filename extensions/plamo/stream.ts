@@ -62,6 +62,11 @@ type NormalizedParsedPlamoToolCall = ParsedPlamoToolCall & {
   syntheticId?: string;
 };
 
+type IndexedParsedPlamoToolCall = ParsedPlamoToolCall & {
+  parsedIndex: number;
+  contentIndex: number;
+};
+
 type MessageContentBlock = {
   type?: unknown;
   text?: unknown;
@@ -507,35 +512,78 @@ function resolveToolCallBlockSignature(block: unknown): string | null {
   return createToolCallSignature(name, args as Record<string, unknown>);
 }
 
-function resolveExistingToolCallSignatureCounts(content: unknown[]): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const block of content) {
-    const signature = resolveToolCallBlockSignature(block);
-    if (!signature) {
+function indexParsedPlamoToolCalls(
+  parsedToolCalls: readonly ParsedPlamoToolCall[],
+  content: unknown[],
+): IndexedParsedPlamoToolCall[] {
+  const indexedToolCalls: IndexedParsedPlamoToolCall[] = [];
+  let textOffset = 0;
+  let nextToolCallIndex = 0;
+
+  for (const [contentIndex, block] of content.entries()) {
+    if (!isTextBlock(block)) {
       continue;
     }
-    counts.set(signature, (counts.get(signature) ?? 0) + 1);
+    const rawText = resolveStreamingTextBlockRawText(
+      block as MessageContentBlock & StreamingTextBlock,
+    );
+    const blockStart = textOffset;
+    const blockEnd = blockStart + rawText.length;
+    while (
+      nextToolCallIndex < parsedToolCalls.length &&
+      parsedToolCalls[nextToolCallIndex].range[0] < blockEnd
+    ) {
+      indexedToolCalls.push({
+        ...parsedToolCalls[nextToolCallIndex],
+        parsedIndex: nextToolCallIndex,
+        contentIndex,
+      });
+      nextToolCallIndex += 1;
+    }
+    textOffset = blockEnd;
   }
-  return counts;
+
+  return indexedToolCalls;
 }
 
 function buildNormalizedParsedPlamoToolCalls(
   parsedToolCalls: readonly ParsedPlamoToolCall[],
   content: unknown[],
 ): NormalizedParsedPlamoToolCall[] {
-  const existingToolCallCounts = hasToolCallBlock(content)
-    ? resolveExistingToolCallSignatureCounts(content)
-    : new Map<string, number>();
+  const indexedToolCalls = indexParsedPlamoToolCalls(parsedToolCalls, content);
+  const matchedInlineToolCallIndices = new Set<number>();
+
+  if (hasToolCallBlock(content)) {
+    for (const [contentIndex, block] of content.entries()) {
+      const signature = resolveToolCallBlockSignature(block);
+      if (!signature) {
+        continue;
+      }
+
+      for (let index = indexedToolCalls.length - 1; index >= 0; index -= 1) {
+        const parsedToolCall = indexedToolCalls[index];
+        if (
+          parsedToolCall.contentIndex >= contentIndex ||
+          matchedInlineToolCallIndices.has(parsedToolCall.parsedIndex)
+        ) {
+          continue;
+        }
+        if (createToolCallSignature(parsedToolCall.name, parsedToolCall.arguments) !== signature) {
+          continue;
+        }
+        matchedInlineToolCallIndices.add(parsedToolCall.parsedIndex);
+        break;
+      }
+    }
+  }
+
   return parsedToolCalls.map((toolCall, toolCallIndex) => {
-    const signature = createToolCallSignature(toolCall.name, toolCall.arguments);
-    const existingCount = existingToolCallCounts.get(signature) ?? 0;
-    if (existingCount <= 0) {
+    if (!matchedInlineToolCallIndices.has(toolCallIndex)) {
       return {
         ...toolCall,
         syntheticId: createStablePlamoSyntheticToolCallId(toolCall, toolCallIndex),
       };
     }
-    existingToolCallCounts.set(signature, existingCount - 1);
     return { ...toolCall };
   });
 }

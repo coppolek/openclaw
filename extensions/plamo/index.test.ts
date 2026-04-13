@@ -2616,6 +2616,51 @@ describe("plamo provider plugin", () => {
     });
   });
 
+  it("preserves later inline tool markup when the same structured tool call already appeared", () => {
+    const inlineToolMarkup =
+      "<|plamo:begin_tool_request:plamo|>" +
+      "<|plamo:begin_tool_name:plamo|>write<|plamo:end_tool_name:plamo|>" +
+      '<|plamo:begin_tool_arguments:plamo|><|plamo:msg|>{"path":"notes.txt","content":"ok"}' +
+      "<|plamo:end_tool_arguments:plamo|>" +
+      "<|plamo:end_tool_request:plamo|>";
+
+    const message = {
+      role: "assistant",
+      stopReason: "stop",
+      content: [
+        {
+          type: "toolCall",
+          id: "existing_call",
+          name: "write",
+          arguments: { path: "notes.txt", content: "ok" },
+        },
+        { type: "text", text: `Checking again...${inlineToolMarkup}` },
+      ],
+    };
+
+    normalizePlamoToolMarkupInMessage(message);
+
+    expect(message).toMatchObject({
+      stopReason: "toolUse",
+      content: [
+        {
+          type: "toolCall",
+          id: "existing_call",
+          name: "write",
+          arguments: { path: "notes.txt", content: "ok" },
+        },
+        { type: "text", text: "Checking again..." },
+        {
+          type: "toolCall",
+          name: "write",
+          arguments: { path: "notes.txt", content: "ok" },
+        },
+      ],
+    });
+    expect((message.content[2] as { id?: unknown }).id).toBeTypeOf("string");
+    expect((message.content[2] as { id?: unknown }).id).not.toBe("existing_call");
+  });
+
   it("preserves multiple text blocks around non-text blocks when normalizing inline tool markup", () => {
     const inlineToolMarkup =
       "<|plamo:begin_tool_request:plamo|>" +
