@@ -6,7 +6,7 @@ import { createBrowserProfilesService } from "../profiles-service.js";
 import type { BrowserRouteContext, ProfileContext } from "../server-context.js";
 import { resolveProfileContext } from "./agent.shared.js";
 import type { BrowserRequest, BrowserResponse, BrowserRouteRegistrar } from "./types.js";
-import { getProfileContext, jsonError, toStringOrEmpty } from "./utils.js";
+import { getProfileContext, jsonError, toBoolean, toStringOrEmpty } from "./utils.js";
 
 function handleBrowserRouteError(res: BrowserResponse, err: unknown) {
   const mapped = toBrowserErrorResponse(err);
@@ -135,7 +135,25 @@ export function registerBrowserBasicRoutes(app: BrowserRouteRegistrar, ctx: Brow
       res,
       ctx,
       run: async (profileCtx) => {
-        await profileCtx.ensureBrowserAvailable();
+        // Allow runtime headless override via query param (e.g. ?headless=true)
+        const headlessParam = toBoolean(req.query.headless);
+        if (headlessParam) {
+          const capabilities = getBrowserProfileCapabilities(profileCtx.profile);
+          // Headless mode only works when OpenClaw launches a local browser process.
+          if (
+            profileCtx.profile.driver === "existing-session" ||
+            profileCtx.profile.attachOnly ||
+            capabilities.isRemote
+          ) {
+            return jsonError(
+              res,
+              400,
+              `Headless mode is only supported for locally launched openclaw profiles. Profile "${profileCtx.profile.name}" is attach-only or remote.`,
+            );
+          }
+        }
+
+        await profileCtx.ensureBrowserAvailable({ headless: headlessParam ? true : undefined });
         res.json({ ok: true, profile: profileCtx.profile.name });
       },
     });
