@@ -42,6 +42,7 @@ const PLAMO_TAG_TOKENS = [
   PLAMO_END_TOOL_ARGUMENTS,
   PLAMO_MSG,
 ] as const;
+const PLAMO_SYNTHETIC_TURN_SEED_SYMBOL = Symbol("openclaw.plamoSyntheticTurnSeed");
 
 const PLAMO_TOOL_REQUEST_BLOCK_RE = new RegExp(
   `${escapeRegExp(PLAMO_BEGIN_TOOL_REQUEST)}(.*?)${escapeRegExp(PLAMO_END_TOOL_REQUEST)}`,
@@ -406,6 +407,7 @@ function resolveTrailingPlamoTagPrefixLength(text: string): number {
 function findFirstIncompletePlamoMarkupStart(
   text: string,
   completeRanges: readonly TextRange[],
+  options?: { includeTrailingPrefix?: boolean },
 ): number | null {
   let earliestStart: number | null = null;
   for (const token of [PLAMO_BEGIN_TOOL_REQUESTS, PLAMO_BEGIN_TOOL_REQUEST] as const) {
@@ -423,24 +425,29 @@ function findFirstIncompletePlamoMarkupStart(
     }
   }
 
-  const trailingPrefixLength = resolveTrailingPlamoTagPrefixLength(text);
-  if (trailingPrefixLength > 0) {
-    const trailingPrefixStart = text.length - trailingPrefixLength;
-    earliestStart =
-      earliestStart === null ? trailingPrefixStart : Math.min(earliestStart, trailingPrefixStart);
+  if (options?.includeTrailingPrefix !== false) {
+    const trailingPrefixLength = resolveTrailingPlamoTagPrefixLength(text);
+    if (trailingPrefixLength > 0) {
+      const trailingPrefixStart = text.length - trailingPrefixLength;
+      earliestStart =
+        earliestStart === null ? trailingPrefixStart : Math.min(earliestStart, trailingPrefixStart);
+    }
   }
 
   return earliestStart;
 }
 
-function resolveStreamingVisiblePlamoText(rawText: string): string {
+function resolveStreamingVisiblePlamoText(
+  rawText: string,
+  options?: { includeTrailingPrefix?: boolean },
+): string {
   if (!rawText) {
     return "";
   }
 
   const parsedToolCalls = parsePlamoToolCalls(rawText);
   const markupRanges = collectSafePlamoToolMarkupRanges(rawText, parsedToolCalls);
-  const incompleteMarkupStart = findFirstIncompletePlamoMarkupStart(rawText, markupRanges);
+  const incompleteMarkupStart = findFirstIncompletePlamoMarkupStart(rawText, markupRanges, options);
   const visibleCutoff = incompleteMarkupStart ?? rawText.length;
   const visibleMarkupRanges = markupRanges
     .filter(([start]) => start < visibleCutoff)
@@ -486,8 +493,11 @@ function createToolCallSignature(name: string, args: Record<string, unknown>): s
 function createStablePlamoSyntheticToolCallId(
   toolCall: ParsedPlamoToolCall,
   toolCallIndex: number,
+  turnSeed: string,
 ): string {
   const hash = createHash("sha256")
+    .update(turnSeed)
+    .update("\0")
     .update(String(toolCallIndex))
     .update("\0")
     .update(createToolCallSignature(toolCall.name, toolCall.arguments))
@@ -510,6 +520,36 @@ function resolveToolCallBlockSignature(block: unknown): string | null {
     return null;
   }
   return createToolCallSignature(name, args as Record<string, unknown>);
+}
+
+function resolvePlamoSyntheticToolCallTurnSeed(message: unknown, combinedText: string): string {
+  if (message && typeof message === "object") {
+    const attachedSeed = (message as { [PLAMO_SYNTHETIC_TURN_SEED_SYMBOL]?: unknown })[
+      PLAMO_SYNTHETIC_TURN_SEED_SYMBOL
+    ];
+    if (typeof attachedSeed === "string" && attachedSeed.length > 0) {
+      return attachedSeed;
+    }
+    const responseId = (message as { responseId?: unknown }).responseId;
+    if (typeof responseId === "string" && responseId.trim().length > 0) {
+      return `response:${responseId.trim()}`;
+    }
+    const timestamp = (message as { timestamp?: unknown }).timestamp;
+    if (typeof timestamp === "number" && Number.isFinite(timestamp)) {
+      return `timestamp:${Math.trunc(timestamp)}`;
+    }
+  }
+  return `content:${createHash("sha256").update(combinedText).digest("hex").slice(0, 24)}`;
+}
+
+function attachPlamoSyntheticToolCallTurnSeed(value: unknown, turnSeed: string): void {
+  if (!value || typeof value !== "object") {
+    return;
+  }
+  Object.defineProperty(value, PLAMO_SYNTHETIC_TURN_SEED_SYMBOL, {
+    value: turnSeed,
+    configurable: true,
+  });
 }
 
 function indexParsedPlamoToolCalls(
@@ -549,6 +589,7 @@ function indexParsedPlamoToolCalls(
 function buildNormalizedParsedPlamoToolCalls(
   parsedToolCalls: readonly ParsedPlamoToolCall[],
   content: unknown[],
+  turnSeed: string,
 ): NormalizedParsedPlamoToolCall[] {
   const indexedToolCalls = indexParsedPlamoToolCalls(parsedToolCalls, content);
   const matchedInlineToolCallIndices = new Set<number>();
@@ -581,7 +622,7 @@ function buildNormalizedParsedPlamoToolCalls(
     if (!matchedInlineToolCallIndices.has(toolCallIndex)) {
       return {
         ...toolCall,
-        syntheticId: createStablePlamoSyntheticToolCallId(toolCall, toolCallIndex),
+        syntheticId: createStablePlamoSyntheticToolCallId(toolCall, toolCallIndex, turnSeed),
       };
     }
     return { ...toolCall };
@@ -1061,6 +1102,9 @@ function createNativePlamoStream(
         if (currentBlock.type === "text") {
           currentBlock.text = resolveStreamingVisiblePlamoText(
             resolveStreamingTextBlockRawText(currentBlock),
+            {
+              includeTrailingPrefix: false,
+            },
           );
           if (currentBlock.streamStarted) {
             stream.push({
@@ -1514,7 +1558,11 @@ export function normalizePlamoToolMarkupInMessage(message: unknown): void {
     return;
   }
 
-  const normalizedToolCalls = buildNormalizedParsedPlamoToolCalls(parsedToolCalls, content);
+  const normalizedToolCalls = buildNormalizedParsedPlamoToolCalls(
+    parsedToolCalls,
+    content,
+    resolvePlamoSyntheticToolCallTurnSeed(message, combinedText),
+  );
 
   const nextContent: unknown[] = [];
   let textOffset = 0;
@@ -1642,9 +1690,16 @@ function wrapStreamNormalizePlamoToolMarkup(
   stream: ReturnType<typeof streamSimple>,
   options?: { normalizePartial?: boolean },
 ): ReturnType<typeof streamSimple> {
+  const normalizationTurnSeed = createHash("sha256")
+    .update(String(Date.now()))
+    .update("\0")
+    .update(String(Math.random()))
+    .digest("hex")
+    .slice(0, 24);
   const originalResult = stream.result.bind(stream);
   stream.result = async () => {
     const message = clonePlamoNormalizationSnapshot(await originalResult());
+    attachPlamoSyntheticToolCallTurnSeed(message, normalizationTurnSeed);
     normalizePlamoToolMarkupInMessage(message);
     stripPlamoStreamingInternalsInMessage(message);
     return message;
@@ -1665,9 +1720,11 @@ function wrapStreamNormalizePlamoToolMarkup(
               message?: unknown;
             };
             if (options?.normalizePartial !== false) {
+              attachPlamoSyntheticToolCallTurnSeed(event.partial, normalizationTurnSeed);
               normalizePlamoToolMarkupInMessage(event.partial);
             }
             stripPlamoStreamingInternalsInMessage(event.partial);
+            attachPlamoSyntheticToolCallTurnSeed(event.message, normalizationTurnSeed);
             normalizePlamoToolMarkupInMessage(event.message);
             stripPlamoStreamingInternalsInMessage(event.message);
             syncDoneEventReasonWithMessageStopReason(event);

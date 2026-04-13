@@ -1626,6 +1626,70 @@ describe("plamo provider plugin", () => {
     });
   });
 
+  it("preserves trailing plain-text markup prefixes on the final native stream flush", async () => {
+    const { provider, catalog } = await loadPlamoCatalog();
+
+    const server = createServer((req, res) => {
+      req.resume();
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.write(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-trailing-prefix",
+          choices: [{ index: 0, delta: { content: "Ends with <|" } }],
+        })}\n\n`,
+      );
+      res.write(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-trailing-prefix",
+          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        })}\n\n`,
+      );
+      res.end("data: [DONE]\n\n");
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      server.close();
+      throw new Error("expected tcp server address");
+    }
+
+    const [model] = catalog.provider.models;
+    const wrapped = createWrappedPlamoStream(provider);
+    const stream = await wrapped(
+      {
+        ...model,
+        provider: "plamo",
+        api: "openai-completions",
+        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+      } as never,
+      {
+        systemPrompt: "system prompt",
+        messages: [{ role: "user", content: "Return a literal suffix." }],
+      } as never,
+      {
+        apiKey: "test-key",
+      } as never,
+    );
+
+    let result: Awaited<ReturnType<typeof stream.result>> | undefined;
+    try {
+      for await (const _event of stream) {
+        // Drain the stream so the final message is assembled.
+      }
+      result = await stream.result();
+    } finally {
+      server.close();
+    }
+
+    expect(result).toMatchObject({
+      stopReason: "stop",
+      content: [{ type: "text", text: "Ends with <|" }],
+    });
+  });
+
   it("strips parser-only fields from native partial stream snapshots", async () => {
     const { provider, catalog } = await loadPlamoCatalog();
 
@@ -2900,6 +2964,42 @@ describe("plamo provider plugin", () => {
 
     expect(firstToolCallId).toBeTypeOf("string");
     expect(secondToolCallId).toBe(firstToolCallId);
+  });
+
+  it("generates different synthetic tool-call ids for identical inline calls in later assistant turns", () => {
+    const inlineToolMarkup =
+      "<|plamo:begin_tool_request:plamo|>" +
+      "<|plamo:begin_tool_name:plamo|>write<|plamo:end_tool_name:plamo|>" +
+      '<|plamo:begin_tool_arguments:plamo|><|plamo:msg|>{"path":"notes.txt","content":"ok"}' +
+      "<|plamo:end_tool_arguments:plamo|>" +
+      "<|plamo:end_tool_request:plamo|>";
+
+    const firstMessage = {
+      role: "assistant",
+      stopReason: "stop",
+      timestamp: 1_700_000_000_000,
+      content: [{ type: "text", text: `Checking...${inlineToolMarkup}` }],
+    };
+    const secondMessage = {
+      role: "assistant",
+      stopReason: "stop",
+      timestamp: 1_700_000_000_001,
+      content: [{ type: "text", text: `Checking...${inlineToolMarkup}` }],
+    };
+
+    normalizePlamoToolMarkupInMessage(firstMessage);
+    normalizePlamoToolMarkupInMessage(secondMessage);
+
+    const firstToolCallId = (firstMessage.content as Array<{ type?: string; id?: string }>).find(
+      (block) => block.type === "toolCall",
+    )?.id;
+    const secondToolCallId = (secondMessage.content as Array<{ type?: string; id?: string }>).find(
+      (block) => block.type === "toolCall",
+    )?.id;
+
+    expect(firstToolCallId).toBeTypeOf("string");
+    expect(secondToolCallId).toBeTypeOf("string");
+    expect(secondToolCallId).not.toBe(firstToolCallId);
   });
 
   it("preserves raw inline tool markup when no valid tool-call blocks are produced", () => {
