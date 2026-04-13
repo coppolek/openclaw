@@ -29,6 +29,11 @@ type AnthropicVertexProviderPlugin = {
     run: (ctx: ProviderCatalogContext) => ReturnType<typeof runAnthropicVertexCatalog>;
   };
   resolveConfigApiKey: (params: { env: NodeJS.ProcessEnv }) => string | undefined;
+  resolveSyntheticAuth: (params: {
+    provider: string;
+    config: unknown;
+    providerConfig: unknown;
+  }) => { apiKey: string; source?: string; mode?: string } | undefined;
 };
 
 type AdcProjectFile = {
@@ -78,9 +83,6 @@ function resolveAnthropicVertexAdcCredentialsPathCandidate(
   const explicit = normalizeOptionalString(env.GOOGLE_APPLICATION_CREDENTIALS);
   if (explicit) {
     return explicit;
-  }
-  if (env !== process.env) {
-    return undefined;
   }
   return resolveAnthropicVertexDefaultAdcPath(env);
 }
@@ -210,6 +212,16 @@ export const anthropicVertexProviderDiscovery: AnthropicVertexProviderPlugin = {
     run: runAnthropicVertexCatalog,
   },
   resolveConfigApiKey: ({ env }) => resolveAnthropicVertexConfigApiKey(env),
+  resolveSyntheticAuth: () => {
+    if (!hasAnthropicVertexAvailableAuth()) {
+      return undefined;
+    }
+    return {
+      apiKey: GCP_VERTEX_CREDENTIALS_MARKER,
+      source: "gcp-vertex-credentials (ADC)",
+      mode: "api-key",
+    };
+  },
 };
 
 export default anthropicVertexProviderDiscovery;
