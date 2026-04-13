@@ -1141,9 +1141,15 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                 type: "integer",
                 minimum: 0,
                 maximum: 9007199254740991,
+                title: "ACP Session Lane Task Timeout (ms)",
+                description:
+                  "Maximum milliseconds a single ACP session-lane task may hold the lane before OpenClaw releases it and lets the next queued task run. Default: 600000. Set 0 to disable.",
               },
             },
             additionalProperties: false,
+            title: "ACP Session Lane",
+            description:
+              "ACP per-session lane controls for serial actor tasks such as initialize, status, cancel, and close.",
           },
           stream: {
             type: "object",
