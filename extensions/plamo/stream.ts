@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { AgentMessage, StreamFn } from "@mariozechner/pi-agent-core";
@@ -53,6 +53,10 @@ type ParsedPlamoToolCall = {
   name: string;
   arguments: Record<string, unknown>;
   range: TextRange;
+};
+
+type NormalizedParsedPlamoToolCall = ParsedPlamoToolCall & {
+  syntheticId?: string;
 };
 
 type MessageContentBlock = {
@@ -471,6 +475,19 @@ function createToolCallSignature(name: string, args: Record<string, unknown>): s
   );
 }
 
+function createStablePlamoSyntheticToolCallId(
+  toolCall: ParsedPlamoToolCall,
+  toolCallIndex: number,
+): string {
+  const hash = createHash("sha256")
+    .update(String(toolCallIndex))
+    .update("\0")
+    .update(createToolCallSignature(toolCall.name, toolCall.arguments))
+    .digest("hex")
+    .slice(0, 24);
+  return `plamo_call_${hash}`;
+}
+
 function resolveToolCallBlockSignature(block: unknown): string | null {
   if (!block || typeof block !== "object") {
     return null;
@@ -497,6 +514,27 @@ function resolveExistingToolCallSignatureCounts(content: unknown[]): Map<string,
     counts.set(signature, (counts.get(signature) ?? 0) + 1);
   }
   return counts;
+}
+
+function buildNormalizedParsedPlamoToolCalls(
+  parsedToolCalls: readonly ParsedPlamoToolCall[],
+  content: unknown[],
+): NormalizedParsedPlamoToolCall[] {
+  const existingToolCallCounts = hasToolCallBlock(content)
+    ? resolveExistingToolCallSignatureCounts(content)
+    : new Map<string, number>();
+  return parsedToolCalls.map((toolCall, toolCallIndex) => {
+    const signature = createToolCallSignature(toolCall.name, toolCall.arguments);
+    const existingCount = existingToolCallCounts.get(signature) ?? 0;
+    if (existingCount <= 0) {
+      return {
+        ...toolCall,
+        syntheticId: createStablePlamoSyntheticToolCallId(toolCall, toolCallIndex),
+      };
+    }
+    existingToolCallCounts.set(signature, existingCount - 1);
+    return { ...toolCall };
+  });
 }
 
 function resolvePlamoCompat(model: RuntimeModel): ResolvedPlamoCompat {
@@ -629,25 +667,33 @@ function buildChatCompletionsUrl(baseUrl: string): string {
   return new URL("chat/completions", normalizedBaseUrl).toString();
 }
 
-function resolvePlamoApiKey(model: RuntimeModel, options: RuntimeOptions): string {
-  const apiKey = options?.apiKey || getEnvApiKey(model.provider);
-  if (!apiKey) {
-    throw new Error(`No API key for provider: ${model.provider}`);
-  }
-  return apiKey;
+function resolvePlamoApiKey(model: RuntimeModel, options: RuntimeOptions): string | undefined {
+  return options?.apiKey || getEnvApiKey(model.provider) || undefined;
+}
+
+function hasAuthorizationHeader(headers: Record<string, string>): boolean {
+  return Object.entries(headers).some(
+    ([key, value]) => key.trim().toLowerCase() === "authorization" && value.trim().length > 0,
+  );
 }
 
 function buildRequestHeaders(
   model: RuntimeModel,
-  apiKey: string,
+  apiKey: string | undefined,
   options: RuntimeOptions,
 ): Record<string, string> {
-  return {
-    Authorization: `Bearer ${apiKey}`,
+  const headers = {
     Accept: "text/event-stream",
     "Content-Type": "application/json",
     ...(model as { headers?: Record<string, string> }).headers,
     ...options?.headers,
+  };
+  if (!apiKey || hasAuthorizationHeader(headers)) {
+    return headers;
+  }
+  return {
+    Authorization: `Bearer ${apiKey}`,
+    ...headers,
   };
 }
 
@@ -1302,6 +1348,55 @@ function removePlamoToolMarkupRanges(
   return segments.join("");
 }
 
+function isPlamoMarkupAdjacentOnLeft(offset: number, ranges: readonly TextRange[]): boolean {
+  return ranges.some(([start, end]) => end === offset || (start < offset && end > offset));
+}
+
+function isPlamoMarkupAdjacentOnRight(offset: number, ranges: readonly TextRange[]): boolean {
+  return ranges.some(([start, end]) => start === offset || (start < offset && end > offset));
+}
+
+function appendNormalizedPlamoTextSegment(params: {
+  nextContent: unknown[];
+  stableBlock: Omit<StreamingTextBlock, "rawText" | "streamStarted">;
+  rawText: string;
+  blockStart: number;
+  segmentStart: number;
+  segmentEnd: number;
+  markupRanges: TextRange[];
+}): void {
+  if (params.segmentStart >= params.segmentEnd) {
+    return;
+  }
+
+  let cleanedText = removePlamoToolMarkupRanges(
+    params.rawText.slice(
+      params.segmentStart - params.blockStart,
+      params.segmentEnd - params.blockStart,
+    ),
+    params.segmentStart,
+    params.markupRanges,
+  );
+  if (!cleanedText) {
+    return;
+  }
+
+  if (isPlamoMarkupAdjacentOnLeft(params.segmentStart, params.markupRanges)) {
+    cleanedText = cleanedText.trimStart();
+  }
+  if (isPlamoMarkupAdjacentOnRight(params.segmentEnd, params.markupRanges)) {
+    cleanedText = cleanedText.trimEnd();
+  }
+  if (!cleanedText) {
+    return;
+  }
+
+  params.nextContent.push({
+    ...params.stableBlock,
+    text: cleanedText,
+  });
+}
+
 export function parsePlamoToolCalls(text: string): ParsedPlamoToolCall[] {
   if (!text) {
     return [];
@@ -1364,21 +1459,11 @@ export function normalizePlamoToolMarkupInMessage(message: unknown): void {
     return;
   }
 
-  const existingToolCallCounts = hasToolCallBlock(content)
-    ? resolveExistingToolCallSignatureCounts(content)
-    : new Map<string, number>();
-  const synthesizedToolCalls = parsedToolCalls.filter((toolCall) => {
-    const signature = createToolCallSignature(toolCall.name, toolCall.arguments);
-    const existingCount = existingToolCallCounts.get(signature) ?? 0;
-    if (existingCount <= 0) {
-      return true;
-    }
-    existingToolCallCounts.set(signature, existingCount - 1);
-    return false;
-  });
+  const normalizedToolCalls = buildNormalizedParsedPlamoToolCalls(parsedToolCalls, content);
 
   const nextContent: unknown[] = [];
   let textOffset = 0;
+  let nextToolCallIndex = 0;
   for (const block of content) {
     if (!isTextBlock(block)) {
       nextContent.push(block);
@@ -1389,45 +1474,53 @@ export function normalizePlamoToolMarkupInMessage(message: unknown): void {
     );
     const blockStart = textOffset;
     const blockEnd = blockStart + rawText.length;
-    let cleanedText = removePlamoToolMarkupRanges(rawText, blockStart, markupRanges);
-    textOffset = blockEnd;
     const {
       rawText: _rawText,
       streamStarted: _streamStarted,
       ...stableBlock
     } = block as MessageContentBlock & StreamingTextBlock;
-    if (cleanedText === rawText) {
-      nextContent.push(stableBlock);
-      continue;
+    let cursor = blockStart;
+    while (
+      nextToolCallIndex < normalizedToolCalls.length &&
+      normalizedToolCalls[nextToolCallIndex].range[0] < blockEnd
+    ) {
+      const toolCall = normalizedToolCalls[nextToolCallIndex];
+      const segmentEnd = Math.max(cursor, Math.min(blockEnd, toolCall.range[0]));
+      appendNormalizedPlamoTextSegment({
+        nextContent,
+        stableBlock,
+        rawText,
+        blockStart,
+        segmentStart: cursor,
+        segmentEnd,
+        markupRanges,
+      });
+      if (toolCall.syntheticId && toolCall.range[0] >= blockStart) {
+        nextContent.push({
+          type: "toolCall",
+          id: toolCall.syntheticId,
+          name: toolCall.name,
+          arguments: toolCall.arguments,
+        });
+      }
+      cursor = Math.max(cursor, Math.min(blockEnd, toolCall.range[1]));
+      nextToolCallIndex += 1;
     }
-    const shouldTrimStart = markupRanges.some(
-      ([start, end]) => start >= blockStart && start < blockEnd && end > blockStart,
-    );
-    const shouldTrimEnd = markupRanges.some(
-      ([start, end]) => end > blockStart && end <= blockEnd && start < blockEnd,
-    );
-    if (shouldTrimStart) {
-      cleanedText = cleanedText.trimStart();
-    }
-    if (shouldTrimEnd) {
-      cleanedText = cleanedText.trimEnd();
-    }
-    if (cleanedText) {
-      nextContent.push({ ...stableBlock, text: cleanedText });
-    }
-  }
 
-  for (const toolCall of synthesizedToolCalls) {
-    nextContent.push({
-      type: "toolCall",
-      id: `plamo_call_${randomUUID().replaceAll("-", "")}`,
-      name: toolCall.name,
-      arguments: toolCall.arguments,
+    appendNormalizedPlamoTextSegment({
+      nextContent,
+      stableBlock,
+      rawText,
+      blockStart,
+      segmentStart: cursor,
+      segmentEnd: blockEnd,
+      markupRanges,
     });
+    textOffset = blockEnd;
   }
 
   (message as { content: unknown[] }).content = nextContent;
-  if (synthesizedToolCalls.length > 0) {
+  if (normalizedToolCalls.some((toolCall) => toolCall.syntheticId)) {
     const stopReason = (message as { stopReason?: unknown }).stopReason;
     if (stopReason === undefined || stopReason === "stop") {
       (message as { stopReason?: unknown }).stopReason = "toolUse";
@@ -1523,7 +1616,7 @@ function wrapStreamNormalizePlamoToolMarkup(
             return {
               ...result,
               value: event,
-            };
+            } as typeof result;
           }
           return result;
         },
