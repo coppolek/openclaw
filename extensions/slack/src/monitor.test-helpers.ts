@@ -247,9 +247,9 @@ vi.mock("./monitor/send.runtime.js", () => {
   };
 });
 
-vi.mock("./monitor/pairing.runtime.js", async () => {
-  const actual = await vi.importActual<typeof import("./monitor/pairing.runtime.js")>(
-    "./monitor/pairing.runtime.js",
+vi.mock("./monitor/conversation.runtime.js", async () => {
+  const actual = await vi.importActual<typeof import("./monitor/conversation.runtime.js")>(
+    "./monitor/conversation.runtime.js",
   );
   return {
     ...actual,

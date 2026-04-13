@@ -6,4 +6,4 @@ export {
   resolveConversationLabel,
   resolvePluginConversationBindingApproval,
   upsertChannelPairingRequest,
-} from "./conversation.runtime.shared.js";
+} from "openclaw/plugin-sdk/conversation-runtime";

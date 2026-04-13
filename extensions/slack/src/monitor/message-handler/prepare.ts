@@ -47,7 +47,7 @@ import {
   resolveStorePath,
 } from "../config.runtime.js";
 import { normalizeSlackChannelType, type SlackMonitorContext } from "../context.js";
-import { recordInboundSession, resolveConversationLabel } from "../conversation-session.runtime.js";
+import { recordInboundSession, resolveConversationLabel } from "../conversation.runtime.js";
 import { authorizeSlackDirectMessage } from "../dm-auth.js";
 import { resolveSlackThreadStarter } from "../media.js";
 import { finalizeInboundContext } from "../reply.runtime.js";
