@@ -28,6 +28,18 @@ type UsageAuthState = {
   store?: AuthStore;
 };
 
+function normalizeProfileProvider(value: string | undefined): string {
+  return normalizeProviderId(value ?? "");
+}
+
+function resolveUsageProviderId(
+  value: string | undefined,
+  fallback: UsageProviderId,
+): UsageProviderId {
+  const normalized = normalizeProviderId(value ?? "");
+  return (normalized || fallback) as UsageProviderId;
+}
+
 function resolveUsageAuthStore(state: UsageAuthState): AuthStore {
   state.store ??= ensureAuthProfileStore(state.agentDir, {
     allowKeychainPrompt: false,
@@ -90,7 +102,8 @@ function resolveProviderApiKeyFromConfigAndStore(params: {
 
 async function resolveOAuthToken(params: {
   state: UsageAuthState;
-  provider: string;
+  provider: UsageProviderId;
+  preferredProfileId?: string;
 }): Promise<ProviderAuth | null> {
   const store = resolveUsageAuthStore(params.state);
   const order = resolveAuthProfileOrder({
@@ -98,7 +111,21 @@ async function resolveOAuthToken(params: {
     store,
     provider: params.provider,
   });
-  const deduped = dedupeProfileIds(order);
+  const preferredProfileId = params.preferredProfileId?.trim();
+  const normalizedProvider = normalizeProfileProvider(params.provider);
+  const preferredProfile = preferredProfileId
+    ? store.profiles[preferredProfileId]
+    : undefined;
+  const preferredProfileMatchesProvider =
+    preferredProfile &&
+    normalizeProfileProvider(
+      typeof preferredProfile.provider === "string" ? preferredProfile.provider : undefined,
+    ) === normalizedProvider;
+  const deduped = dedupeProfileIds(
+    preferredProfileId && preferredProfileMatchesProvider
+      ? [preferredProfileId, ...order]
+      : order,
+  );
 
   for (const profileId of deduped) {
     const cred = store.profiles[profileId];
@@ -117,13 +144,14 @@ async function resolveOAuthToken(params: {
       if (!resolved) {
         continue;
       }
+      const accountId =
+        cred.type === "oauth" && "accountId" in cred
+          ? (cred as { accountId?: string }).accountId
+          : undefined;
       return {
-        provider: params.provider as UsageProviderId,
+        provider: params.provider,
         token: resolved.apiKey,
-        accountId:
-          cred.type === "oauth" && "accountId" in cred
-            ? (cred as { accountId?: string }).accountId
-            : undefined,
+        ...(accountId ? { accountId } : {}),
       };
     } catch {
       // ignore
@@ -136,6 +164,7 @@ async function resolveOAuthToken(params: {
 async function resolveProviderUsageAuthViaPlugin(params: {
   state: UsageAuthState;
   provider: UsageProviderId;
+  preferredProfileId?: string;
 }): Promise<ProviderAuth | null> {
   const resolved = await resolveProviderUsageAuthWithPlugin({
     provider: params.provider,
@@ -153,9 +182,14 @@ async function resolveProviderUsageAuthViaPlugin(params: {
           envDirect: options?.envDirect,
         }),
       resolveOAuthToken: async (options) => {
+        const resolvedProvider = resolveUsageProviderId(
+          options?.provider,
+          params.provider,
+        );
         const auth = await resolveOAuthToken({
           state: params.state,
-          provider: options?.provider ?? params.provider,
+          provider: resolvedProvider,
+          preferredProfileId: params.preferredProfileId,
         });
         return auth
           ? {
@@ -179,10 +213,12 @@ async function resolveProviderUsageAuthViaPlugin(params: {
 async function resolveProviderUsageAuthFallback(params: {
   state: UsageAuthState;
   provider: UsageProviderId;
+  preferredProfileId?: string;
 }): Promise<ProviderAuth | null> {
   const oauthToken = await resolveOAuthToken({
     state: params.state,
     provider: params.provider,
+    preferredProfileId: params.preferredProfileId,
   });
   if (oauthToken) {
     return oauthToken;
@@ -206,6 +242,7 @@ export async function resolveProviderAuths(params: {
   providers: UsageProviderId[];
   auth?: ProviderAuth[];
   agentDir?: string;
+  preferredProfileIds?: Partial<Record<UsageProviderId, string | undefined>>;
   config?: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
 }): Promise<ProviderAuth[]> {
@@ -221,9 +258,11 @@ export async function resolveProviderAuths(params: {
   const auths: ProviderAuth[] = [];
 
   for (const provider of params.providers) {
+    const preferredProfileId = params.preferredProfileIds?.[provider];
     const pluginAuth = await resolveProviderUsageAuthViaPlugin({
       state,
       provider,
+      preferredProfileId,
     });
     if (pluginAuth) {
       auths.push(pluginAuth);
@@ -232,6 +271,7 @@ export async function resolveProviderAuths(params: {
     const fallbackAuth = await resolveProviderUsageAuthFallback({
       state,
       provider,
+      preferredProfileId,
     });
     if (fallbackAuth) {
       auths.push(fallbackAuth);

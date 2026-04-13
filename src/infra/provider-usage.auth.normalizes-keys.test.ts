@@ -418,6 +418,130 @@ describe("resolveProviderAuths key normalization", () => {
     });
   }
 
+  it("prefers the requested OAuth profile for provider usage auth", async () => {
+    await withSuiteHome(async (home) => {
+      await writeAuthProfiles(home, {
+        "openai-codex:default": {
+          type: "oauth",
+          provider: "openai-codex",
+          token: "token-default",
+          expires: Date.now() + 60_000,
+        },
+        "openai-codex:kate@gmail.com": {
+          type: "oauth",
+          provider: "openai-codex",
+          token: "token-kate",
+          expires: Date.now() + 60_000,
+        },
+      });
+      await writeProfileOrder(home, "openai-codex", [
+        "openai-codex:default",
+        "openai-codex:kate@gmail.com",
+      ]);
+
+      const result = await resolveProviderAuths({
+        providers: ["openai-codex"],
+        agentDir: agentDirForHome(home),
+        env: buildSuiteEnv(home),
+        preferredProfileIds: {
+          "openai-codex": "openai-codex:kate@gmail.com",
+        },
+      });
+
+      expect(result).toEqual([
+        {
+          provider: "openai-codex",
+          token: "token-kate",
+        },
+      ]);
+    });
+  });
+
+  it("ignores a preferred profile id that belongs to another provider", async () => {
+    await withSuiteHome(async (home) => {
+      await writeAuthProfiles(home, {
+        "openai-codex:default": {
+          type: "oauth",
+          provider: "openai-codex",
+          token: "token-default",
+          expires: Date.now() + 60_000,
+        },
+        "anthropic:other": {
+          type: "oauth",
+          provider: "anthropic",
+          token: "token-wrong-provider",
+          expires: Date.now() + 60_000,
+        },
+      });
+      await writeProfileOrder(home, "openai-codex", ["openai-codex:default"]);
+
+      const result = await resolveProviderAuths({
+        providers: ["openai-codex"],
+        agentDir: agentDirForHome(home),
+        env: buildSuiteEnv(home),
+        preferredProfileIds: {
+          "openai-codex": "anthropic:other",
+        },
+      });
+
+      expect(result).toEqual([
+        {
+          provider: "openai-codex",
+          token: "token-default",
+        },
+      ]);
+    });
+  });
+
+  it("preserves preferred profile ids across provider override lookups", async () => {
+    providerRuntimeMocks.providerRuntimeMock.resolveProviderUsageAuthWithPlugin.mockImplementationOnce(
+      async (params) => {
+        if (params.provider !== "minimax") {
+          return null;
+        }
+        const auth = await params.context.resolveOAuthToken({ provider: "minimax-portal" });
+        return auth ? { token: auth.token } : null;
+      },
+    );
+
+    await withSuiteHome(async (home) => {
+      await writeAuthProfiles(home, {
+        "minimax-portal:default": {
+          type: "oauth",
+          provider: "minimax-portal",
+          token: "token-default",
+          expires: Date.now() + 60_000,
+        },
+        "minimax-portal:kate@gmail.com": {
+          type: "oauth",
+          provider: "minimax-portal",
+          token: "token-kate",
+          expires: Date.now() + 60_000,
+        },
+      });
+      await writeProfileOrder(home, "minimax-portal", [
+        "minimax-portal:default",
+        "minimax-portal:kate@gmail.com",
+      ]);
+
+      const result = await resolveProviderAuths({
+        providers: ["minimax"],
+        agentDir: agentDirForHome(home),
+        env: buildSuiteEnv(home),
+        preferredProfileIds: {
+          minimax: "minimax-portal:kate@gmail.com",
+        },
+      });
+
+      expect(result).toEqual([
+        {
+          provider: "minimax",
+          token: "token-kate",
+        },
+      ]);
+    });
+  });
+
   async function expectResolvedAuthsFromSuiteHome(params: {
     providers: Parameters<typeof resolveProviderAuths>[0]["providers"];
     expected: Awaited<ReturnType<typeof resolveProviderAuths>>;
