@@ -13,9 +13,9 @@ const state = vi.hoisted(() => ({
   runEmbeddedPiAgentMock: vi.fn(),
   runWithModelFallbackMock: vi.fn(),
   isInternalMessageChannelMock: vi.fn((_: unknown) => false),
-  isCompactionFailureErrorMock: vi.fn(() => false),
-  isContextOverflowErrorMock: vi.fn(() => false),
-  isLikelyContextOverflowErrorMock: vi.fn(() => false),
+  isCompactionFailureErrorMock: vi.fn((_message?: string) => false),
+  isContextOverflowErrorMock: vi.fn((_message?: string) => false),
+  isLikelyContextOverflowErrorMock: vi.fn((_message?: string) => false),
 }));
 
 vi.mock("../../agents/pi-embedded.js", () => ({
@@ -1660,7 +1660,9 @@ describe("runAgentTurnWithFallback", () => {
 
     expect(resetSessionAfterCompactionFailure).not.toHaveBeenCalled();
     expect(result.kind).toBe("final");
-    expect(result.payload.text).toContain("Use /new to start a fresh session");
+    expect((result as { kind: "final"; payload: { text: string } }).payload.text).toContain(
+      "Use /new to start a fresh session",
+    );
   });
 
   it("resets on embedded compaction_failure errors even when surfaced as embedded meta errors", async () => {
@@ -1712,7 +1714,9 @@ describe("runAgentTurnWithFallback", () => {
       expect.objectContaining({ kind: "compaction_failure" }),
     );
     expect(result.kind).toBe("final");
-    expect(result.payload.text).toContain("I've reset our conversation to start fresh");
+    expect((result as { kind: "final"; payload: { text: string } }).payload.text).toContain(
+      "I've reset our conversation to start fresh",
+    );
   });
 
   it("drops authProfileId when fallback switches providers", async () => {
