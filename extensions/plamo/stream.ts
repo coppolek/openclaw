@@ -16,7 +16,10 @@ import {
   type Usage,
 } from "@mariozechner/pi-ai";
 import { convertMessages } from "@mariozechner/pi-ai/openai-completions";
-import { buildGuardedModelFetch } from "openclaw/plugin-sdk/provider-http-runtime";
+import {
+  buildGuardedModelFetch,
+  resolveModelRequestAuthMode,
+} from "openclaw/plugin-sdk/provider-http-runtime";
 import { normalizeOpenAICompatibleToolParameters } from "openclaw/plugin-sdk/provider-tools";
 
 const PLAMO_BEGIN_TOOL_REQUEST = "<|plamo:begin_tool_request:plamo|>";
@@ -668,6 +671,10 @@ function buildChatCompletionsUrl(baseUrl: string): string {
 }
 
 function resolvePlamoApiKey(model: RuntimeModel, options: RuntimeOptions): string | undefined {
+  const requestAuthMode = resolveModelRequestAuthMode(model);
+  if (requestAuthMode === "authorization-bearer" || requestAuthMode === "header") {
+    return undefined;
+  }
   return options?.apiKey || getEnvApiKey(model.provider) || undefined;
 }
 
