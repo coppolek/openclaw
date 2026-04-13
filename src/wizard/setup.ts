@@ -540,6 +540,8 @@ export async function runSetupWizard(
       const { warnIfModelConfigLooksOff } = await loadAuthChoiceModule();
       await warnIfModelConfigLooksOff(nextConfig, prompter);
     }
+  } else if (!authChoice) {
+    return;
   } else {
     const [
       { applyAuthChoice, resolvePreferredProviderForAuthChoice, warnIfModelConfigLooksOff },
