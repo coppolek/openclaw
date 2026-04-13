@@ -1602,6 +1602,153 @@ describe("plamo provider plugin", () => {
     });
   });
 
+  it("strips parser-only fields from native partial stream snapshots", async () => {
+    const { provider, catalog } = await loadPlamoCatalog();
+
+    const server = createServer((req, res) => {
+      req.resume();
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.write(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-native-partials",
+          choices: [{ index: 0, delta: { content: "Checking..." } }],
+        })}\n\n`,
+      );
+      res.write(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-native-partials",
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    function: { name: "read", arguments: '{"path":"README' },
+                  },
+                ],
+              },
+            },
+          ],
+        })}\n\n`,
+      );
+      res.write(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-native-partials",
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    function: { arguments: '.md"}' },
+                  },
+                ],
+              },
+              finish_reason: "tool_calls",
+            },
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+        })}\n\n`,
+      );
+      res.end("data: [DONE]\n\n");
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      server.close();
+      throw new Error("expected tcp server address");
+    }
+
+    const [model] = catalog.provider.models;
+    const wrapped = createWrappedPlamoStream(provider);
+    const stream = await wrapped(
+      {
+        ...model,
+        provider: "plamo",
+        api: "openai-completions",
+        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+      } as never,
+      {
+        systemPrompt: "system prompt",
+        messages: [{ role: "user", content: "こんにちは" }],
+      } as never,
+      {
+        apiKey: "test-key",
+      } as never,
+    );
+
+    const events: Array<Record<string, unknown>> = [];
+    let result: Awaited<ReturnType<typeof stream.result>> | undefined;
+    try {
+      for await (const event of stream) {
+        events.push(event as Record<string, unknown>);
+      }
+      result = await stream.result();
+    } finally {
+      server.close();
+    }
+
+    const textStartEvent = events.find((event) => event.type === "text_start");
+    expect(textStartEvent).toMatchObject({
+      partial: {
+        content: expect.arrayContaining([{ type: "text", text: "Checking..." }]),
+      },
+    });
+    expect(
+      (
+        textStartEvent as {
+          partial?: {
+            content?: Array<Record<string, unknown>>;
+          };
+        }
+      ).partial?.content?.[0],
+    ).not.toHaveProperty("rawText");
+    expect(
+      (
+        textStartEvent as {
+          partial?: {
+            content?: Array<Record<string, unknown>>;
+          };
+        }
+      ).partial?.content?.[0],
+    ).not.toHaveProperty("streamStarted");
+
+    const toolCallDeltaEvent = events.find((event) => event.type === "toolcall_delta");
+    expect(toolCallDeltaEvent).toMatchObject({
+      partial: {
+        content: expect.arrayContaining([
+          expect.objectContaining({
+            type: "toolCall",
+            name: "read",
+            arguments: {},
+          }),
+        ]),
+      },
+    });
+    const streamedToolCallBlock = (
+      (
+        toolCallDeltaEvent as {
+          partial?: {
+            content?: Array<Record<string, unknown>>;
+          };
+        }
+      ).partial?.content ?? []
+    ).find((block) => block.type === "toolCall");
+    expect(streamedToolCallBlock).not.toHaveProperty("partialArgs");
+
+    expect(result).toMatchObject({
+      stopReason: "toolUse",
+      content: [
+        { type: "text", text: "Checking..." },
+        { type: "toolCall", name: "read", arguments: { path: "README.md" } },
+      ],
+    });
+  });
+
   it("splits interleaved tool-call deltas by index when ids are omitted", async () => {
     const { provider, catalog } = await loadPlamoCatalog();
 

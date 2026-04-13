@@ -117,4 +117,98 @@ describe("buildGuardedModelFetch", () => {
       }),
     );
   });
+
+  it("applies resolved transport auth and extra headers before dispatch", async () => {
+    resolveProviderRequestPolicyConfigMock.mockReturnValue({
+      allowPrivateNetwork: false,
+      headers: {
+        "X-Tenant": "acme",
+        "X-Proxy-Token": "proxy-token",
+        "X-Provider": "provider",
+      },
+      policy: {
+        attributionHeaders: {
+          "X-Provider": "provider",
+        },
+      },
+      auth: {
+        configured: true,
+        mode: "header",
+        headerName: "X-Proxy-Token",
+        value: "proxy-token",
+        injectAuthorizationHeader: false,
+      },
+    } as never);
+
+    const { buildGuardedModelFetch } = await import("./provider-transport-fetch.js");
+    const model = {
+      id: "plamo-3.0-prime-beta",
+      provider: "plamo",
+      api: "openai-completions",
+      baseUrl: "https://api.platform.preferredai.jp/v1",
+    } as unknown as Model<"openai-completions">;
+
+    const fetcher = buildGuardedModelFetch(model);
+    await fetcher("https://api.platform.preferredai.jp/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer caller",
+        "X-Call": "1",
+        "X-Provider": "caller",
+      },
+      body: '{"messages":[]}',
+    });
+
+    const request = fetchWithSsrFGuardMock.mock.calls[0]?.[0] as {
+      init?: RequestInit;
+    };
+    const headers = new Headers(request.init?.headers);
+    expect(headers.get("authorization")).toBeNull();
+    expect(headers.get("x-call")).toBe("1");
+    expect(headers.get("x-provider")).toBe("provider");
+    expect(headers.get("x-proxy-token")).toBe("proxy-token");
+    expect(headers.get("x-tenant")).toBe("acme");
+  });
+
+  it("keeps configured bearer auth overrides ahead of caller authorization headers", async () => {
+    resolveProviderRequestPolicyConfigMock.mockReturnValue({
+      allowPrivateNetwork: false,
+      headers: {
+        Authorization: "Bearer override-token",
+      },
+      policy: {
+        attributionHeaders: {},
+      },
+      auth: {
+        configured: true,
+        mode: "authorization-bearer",
+        headerName: "Authorization",
+        value: "override-token",
+        injectAuthorizationHeader: true,
+      },
+    } as never);
+
+    const { buildGuardedModelFetch } = await import("./provider-transport-fetch.js");
+    const model = {
+      id: "plamo-3.0-prime-beta",
+      provider: "plamo",
+      api: "openai-completions",
+      baseUrl: "https://api.platform.preferredai.jp/v1",
+    } as unknown as Model<"openai-completions">;
+
+    const fetcher = buildGuardedModelFetch(model);
+    await fetcher("https://api.platform.preferredai.jp/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer caller",
+      },
+      body: '{"messages":[]}',
+    });
+
+    const request = fetchWithSsrFGuardMock.mock.calls[0]?.[0] as {
+      init?: RequestInit;
+    };
+    const headers = new Headers(request.init?.headers);
+    expect(headers.get("authorization")).toBe("Bearer override-token");
+  });
 });

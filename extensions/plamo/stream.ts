@@ -1550,11 +1550,14 @@ function stripPlamoStreamingInternalsInMessage(message: unknown): void {
   }
 
   for (const block of content) {
-    if (!isTextBlock(block)) {
+    if (isTextBlock(block)) {
+      delete (block as { rawText?: unknown }).rawText;
+      delete (block as { streamStarted?: unknown }).streamStarted;
       continue;
     }
-    delete (block as { rawText?: unknown }).rawText;
-    delete (block as { streamStarted?: unknown }).streamStarted;
+    if (block && typeof block === "object" && (block as { type?: unknown }).type === "toolCall") {
+      delete (block as { partialArgs?: unknown }).partialArgs;
+    }
   }
 }
 
@@ -1615,8 +1618,8 @@ function wrapStreamNormalizePlamoToolMarkup(
             };
             if (options?.normalizePartial !== false) {
               normalizePlamoToolMarkupInMessage(event.partial);
-              stripPlamoStreamingInternalsInMessage(event.partial);
             }
+            stripPlamoStreamingInternalsInMessage(event.partial);
             normalizePlamoToolMarkupInMessage(event.message);
             stripPlamoStreamingInternalsInMessage(event.message);
             syncDoneEventReasonWithMessageStopReason(event);
