@@ -25,11 +25,35 @@ export function guardSessionManager(
     sessionKey?: string;
     inputProvenance?: InputProvenance;
     allowSyntheticToolResults?: boolean;
+    providerMetadata?: Record<string, unknown>;
     allowedToolNames?: Iterable<string>;
   },
 ): GuardedSessionManager {
   if (typeof (sessionManager as GuardedSessionManager).flushPendingToolResults === "function") {
     return sessionManager as GuardedSessionManager;
+  }
+
+  if (opts?.providerMetadata && Object.keys(opts.providerMetadata).length > 0) {
+    const originalAppend = sessionManager.appendMessage.bind(sessionManager);
+    type SessionMessage = Parameters<typeof originalAppend>[0];
+    const providerMetadata = opts.providerMetadata;
+    sessionManager.appendMessage = ((message: SessionMessage) => {
+      if (!message || typeof message !== "object" || Array.isArray(message as unknown)) {
+        return originalAppend(message);
+      }
+      const messageRecord = message as unknown as Record<string, unknown>;
+      const existing = messageRecord.providerMetadata;
+      const existingObj =
+        existing && typeof existing === "object" && !Array.isArray(existing) ? existing : {};
+      const merged = {
+        ...messageRecord,
+        providerMetadata: {
+          ...(existingObj as Record<string, unknown>),
+          ...providerMetadata,
+        },
+      };
+      return originalAppend(merged as unknown as SessionMessage);
+    }) as SessionManager["appendMessage"];
   }
 
   const hookRunner = getGlobalHookRunner();
@@ -64,7 +88,6 @@ export function guardSessionManager(
         return out?.message ?? message;
       }
     : undefined;
-
   const guard = installSessionToolResultGuard(sessionManager, {
     sessionKey: opts?.sessionKey,
     transformMessageForPersistence: (message) =>

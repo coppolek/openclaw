@@ -10,6 +10,7 @@ import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import type { GlobalHookRunnerRegistry } from "./hook-registry.types.js";
 import type { PluginHookGatewayContext, PluginHookGatewayStopEvent } from "./hook-types.js";
 import { createHookRunner, type HookRunner } from "./hooks.js";
+import { installPluginRuntimeRequestAttributionFetch } from "./runtime/request-attribution-fetch.js";
 
 type HookRunnerGlobalState = {
   hookRunner: HookRunner | null;
@@ -32,6 +33,7 @@ const getLog = () => createSubsystemLogger("plugins");
 export function initializeGlobalHookRunner(registry: GlobalHookRunnerRegistry): void {
   const state = getState();
   const log = getLog();
+  installPluginRuntimeRequestAttributionFetch();
   state.registry = registry;
   state.hookRunner = createHookRunner(registry, {
     logger: {

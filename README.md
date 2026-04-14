@@ -158,6 +158,85 @@ pnpm gateway:watch
 
 Note: `pnpm openclaw ...` runs TypeScript directly (via `tsx`). `pnpm build` produces `dist/` for running via Node / the packaged `openclaw` binary.
 
+## Vida Fork Deltas
+
+This repository tracks upstream OpenClaw releases and keeps a small set of Vida-specific patches.
+Treat this section as the preservation contract for future upstream merges and release-tag syncs.
+
+- Release-tag sync rule:
+  merge the target upstream release tag first, preserve the deltas below on that tag line, validate them, and only then sync the resolved release line back into `main`.
+- Audit note (2026-03-27):
+  this section was historically incomplete and omitted at least some substantive older Vida deltas from prior release tags.
+  Until the next corrected fork release lands, do not use this section by itself as the preservation inventory for upstream merges.
+  Cross-check the historical `vida-v*` tags, substantive fork-only commits, and the current `v2026.3.24` merge plan before deciding a fork behavior can be dropped.
+- Full historical fork-only commit list:
+  `git log --oneline upstream/main..main`
+- Diff vs upstream tip:
+  `git diff upstream/main...main`
+
+### Product/runtime deltas
+
+- `vida-responses` provider/runtime:
+  Why: Vida runs OpenClaw behind a separate control plane, so upstream provider auth/config did not cover Vida's backend-issued credentials, routing rules, and OpenAI-compatible response surface.
+  Runtime files: `src/providers/vida-responses.ts`, `src/providers/vida-responses-shared.ts`, `src/config/types.models.ts`, `src/config/zod-schema.ts`, `src/agents/pi-embedded-runner/run/attempt.ts`.
+  Direct tests: `src/providers/vida-responses.test.ts`, `src/providers/vida-responses-shared.stream-parse.test.ts`, `src/config/schema.test.ts`.
+- OpenResponses and embedded-runner hosted-run parity:
+  Why: Vida needs provider metadata, streamed reasoning, client tool definitions, and bounded tool-result payloads to survive the hop from the OpenResponses HTTP layer into embedded agent execution without losing parity.
+  Runtime files: `src/gateway/openresponses-http.ts`, `src/gateway/open-responses.schema.ts`, `src/agents/agent-command.ts`, `src/agents/command/types.ts`, `src/agents/pi-embedded-runner/run.ts`, `src/agents/pi-embedded-runner/run/params.ts`, `src/agents/pi-embedded-runner/run/attempt.ts`, `src/agents/pi-embedded-subscribe.ts`, `src/agents/pi-embedded-subscribe.handlers.tools.ts`.
+  Direct tests: `src/gateway/openresponses-http.test.ts`, `src/gateway/openresponses-parity.test.ts`, `src/commands/agent.test.ts`, `src/agents/pi-embedded-subscribe.subscribe-embedded-pi-session.subscribeembeddedpisession.test.ts`.
+- Browser reliability patches carried on top of upstream browser internals:
+  Why: Vida routes browser-dependent hosted workflows through long-lived gateway processes, so indefinite reads or poorly classified transient failures create visible control-plane stalls and retries in production.
+  Runtime files: `src/browser/client.ts`, `src/browser/client-fetch.ts`.
+  Direct tests: `src/browser/client.test.ts`, `src/browser/client-fetch.error-classification.test.ts`.
+- Plugin request attribution for plugin-owned Vida OpenAI traffic:
+  Why: Vida plugins such as `memory-lancedb` still create their own OpenAI SDK clients inside lifecycle hooks, and those requests must carry `x-openclaw-agent-id` / `x-openclaw-session-key` when they traverse `${VIDA_API_BASE_URL}/openai/v1`.
+  Runtime files: `src/plugins/hook-runner-global.ts`, `src/plugins/hooks.ts`, `src/plugins/runtime/request-attribution-fetch.ts`, `src/plugins/runtime/request-attribution-scope.ts`.
+  Direct tests: `src/plugins/hooks.request-attribution.test.ts`, `src/plugins/runtime/request-attribution-fetch.test.ts`, `src/plugins/runtime/request-attribution-scope.test.ts`.
+- WhatsApp/Vida-specific session defaults and disconnect status extraction:
+  Why: Vida relies on the WhatsApp browser identity and nested disconnect status handling staying stable across upstream WhatsApp channel refactors.
+  Runtime files: `extensions/whatsapp/src/session.ts`, `extensions/whatsapp/src/session-errors.ts`.
+  Direct tests: `extensions/whatsapp/src/session.test.ts`, `extensions/whatsapp/src/session-errors.test.ts`.
+- Transcript/tool-result metadata preservation:
+  Why: Vida needs downstream transcripts and relay metadata to stay correlated across the OpenResponses, provider, and audit surfaces even when tool output is chunked or sanitized.
+  Runtime files: `src/agents/session-tool-result-guard-wrapper.ts`.
+  Direct tests: `src/agents/session-tool-result-guard.tool-result-persist-hook.test.ts`, `src/agents/session-tool-result-guard.transcript-events.test.ts`.
+
+### Fork operations deltas
+
+- Added upstream sync automation for main/release maintenance:
+  `scripts/sync-upstream-main.sh`, `scripts/sync-upstream-release.sh`.
+- Added Vida fork release validation and Docker alignment checks:
+  `scripts/verify-vida-release.sh`.
+- Added Vida sync runbook and fork-tag workflow (`vida-vYYYY.M.D` tags):
+  `scripts/README.vida-release-sync.md`.
+- Why these scripts exist:
+  Vida ships downstream Docker/provisioner integrations that consume fork tags directly, so release sync cannot be a generic upstream merge; it must preserve fork patches, emit predictable `vida-*` tags, and verify Docker ref/date-tag compatibility before publish.
+
+### Downstream coupling that must be revalidated on every release-tag merge
+
+- `openclaw-docker`
+  carries the Docker/browser patch layer for Vida deployment, including the custom `sandbox-browser-entrypoint.sh` patching, lazy browser supervisor, and noVNC asset patching.
+- `vida-openclaw-provisioner`
+  owns browser profile assignment, slot routing, external CDP URLs, and the path-bound noVNC ticket contract.
+- `vida.live`
+  issues signed browser access tickets and builds launch URLs from provisioner-published browser profile metadata.
+
+Do not treat the fork as self-contained. A release-tag merge is incomplete until these downstream contracts are revalidated.
+
+### Historical fork-only milestones
+
+- `410fc35db`: New Vida LLM provider integration.
+- `cb23a28a8`: Provider metadata passthrough support.
+- `03a48da13`: OpenResponses tool outputs and reasoning passthrough.
+- `a4b7a208f`: Reasoning-summary mapping in OpenResponses output.
+- `cfe0917f2`: Vida provider metadata/reasoning-effort passthrough.
+- `cca004332`: Malformed JSON hardening for Vida tool-call args.
+- `5c78c4d31`: Plugin request attribution for plugin-owned Vida OpenAI traffic.
+- `5059f9c83`: WhatsApp Vida browser identity + nested disconnect status handling.
+- `097bcb056`, `b2bf2bd4a`, `44be49c89`, `0408c7f7d`: Vida sync/release script stack.
+
+Update this section whenever a new fork-only patch is merged to `main`.
+
 ## Security defaults (DM access)
 
 OpenClaw connects to real messaging surfaces. Treat inbound DMs as **untrusted input**.

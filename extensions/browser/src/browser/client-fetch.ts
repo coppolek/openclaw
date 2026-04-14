@@ -101,6 +101,9 @@ const BROWSER_TOOL_MODEL_HINT =
   "Do NOT retry the browser tool — it will keep failing. " +
   "Use an alternative approach or inform the user that the browser is currently unavailable.";
 
+const BROWSER_TOOL_BOUNDED_RETRY_HINT =
+  'Do NOT blindly retry in a loop. Take a fresh browser snapshot (snapshotFormat="ai", refs="aria"), then retry this action once with updated refs. ' +
+  "If it still times out, report the browser as unavailable.";
 function isRateLimitStatus(status: number): boolean {
   return status === 429;
 }
@@ -112,6 +115,24 @@ function resolveBrowserFetchOperatorHint(url: string): string {
     : "If this is a sandboxed session, ensure the sandbox browser is running.";
 }
 
+function isBrowserActionPath(url: string): boolean {
+  const parsedPath = (() => {
+    try {
+      return new URL(url, "http://localhost").pathname.toLowerCase();
+    } catch {
+      return "";
+    }
+  })();
+  const actionPath =
+    parsedPath === "/act" ||
+    parsedPath === "/tabs/action" ||
+    parsedPath === "/screenshot" ||
+    parsedPath === "/navigate" ||
+    parsedPath === "/pdf" ||
+    parsedPath.startsWith("/hooks/");
+  return actionPath;
+}
+
 function normalizeErrorMessage(err: unknown): string {
   const message = err instanceof Error ? normalizeOptionalString(err.message) : undefined;
   if (message) {
@@ -120,11 +141,14 @@ function normalizeErrorMessage(err: unknown): string {
   return String(err);
 }
 
-function appendBrowserToolModelHint(message: string): string {
-  if (message.includes(BROWSER_TOOL_MODEL_HINT)) {
+function appendBrowserToolModelHint(message: string, modelHint = BROWSER_TOOL_MODEL_HINT): string {
+  if (
+    message.includes(BROWSER_TOOL_MODEL_HINT) ||
+    message.includes(BROWSER_TOOL_BOUNDED_RETRY_HINT)
+  ) {
     return message;
   }
-  return `${message} ${BROWSER_TOOL_MODEL_HINT}`;
+  return `${message} ${modelHint}`;
 }
 
 async function discardResponseBody(res: Response): Promise<void> {
@@ -137,14 +161,24 @@ async function discardResponseBody(res: Response): Promise<void> {
 
 function enhanceDispatcherPathError(url: string, err: unknown): Error {
   const msg = normalizeErrorMessage(err);
-  const suffix = `${resolveBrowserFetchOperatorHint(url)} ${BROWSER_TOOL_MODEL_HINT}`;
+  const msgLower = msg.toLowerCase();
+  const modelHint =
+    isBrowserActionPath(url) &&
+    (msgLower.includes("timed out") ||
+      msgLower.includes("timeout") ||
+      msgLower.includes("aborted") ||
+      msgLower.includes("abort") ||
+      msgLower.includes("aborterror"))
+      ? BROWSER_TOOL_BOUNDED_RETRY_HINT
+      : BROWSER_TOOL_MODEL_HINT;
+  const suffix = `${resolveBrowserFetchOperatorHint(url)} ${modelHint}`;
   const normalized = msg.endsWith(".") ? msg : `${msg}.`;
   return new Error(`${normalized} ${suffix}`, err instanceof Error ? { cause: err } : undefined);
 }
 
 function enhanceBrowserFetchError(url: string, err: unknown, timeoutMs: number): Error {
   const operatorHint = resolveBrowserFetchOperatorHint(url);
-  const msg = String(err);
+  const msg = normalizeErrorMessage(err);
   const msgLower = normalizeLowercaseStringOrEmpty(msg);
   const looksLikeTimeout =
     msgLower.includes("timed out") ||
@@ -153,9 +187,14 @@ function enhanceBrowserFetchError(url: string, err: unknown, timeoutMs: number):
     msgLower.includes("abort") ||
     msgLower.includes("aborterror");
   if (looksLikeTimeout) {
+    const modelHint =
+      !isAbsoluteHttp(url) && isBrowserActionPath(url)
+        ? BROWSER_TOOL_BOUNDED_RETRY_HINT
+        : BROWSER_TOOL_MODEL_HINT;
     return new Error(
       appendBrowserToolModelHint(
         `Can't reach the OpenClaw browser control service (timed out after ${timeoutMs}ms). ${operatorHint}`,
+        modelHint,
       ),
     );
   }

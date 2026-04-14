@@ -134,7 +134,7 @@ export async function createWaSocket(
     version,
     logger,
     printQRInTerminal: false,
-    browser: ["openclaw", "cli", VERSION],
+    browser: ["Vida Operator", "web", VERSION],
     syncFullHistory: false,
     markOnlineOnConnect: false,
     agent,

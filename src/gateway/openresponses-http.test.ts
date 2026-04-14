@@ -654,18 +654,45 @@ describe("OpenResponses HTTP API (e2e)", () => {
     const port = enabledPort;
     try {
       agentCommand.mockClear();
-      agentCommand.mockImplementationOnce((async (opts: unknown) =>
-        buildAssistantDeltaResult({
-          opts,
-          emit: emitAgentEvent,
-          deltas: ["he", "llo"],
-          text: "hello",
-        })) as never);
+      agentCommand.mockImplementationOnce((async (opts: unknown) => {
+        const runId = (opts as { runId?: string } | undefined)?.runId ?? "";
+        const onReasoningStream = (
+          opts as { onReasoningStream?: (payload: { text?: string }) => void }
+        )?.onReasoningStream;
+        onReasoningStream?.({ text: "thinking..." });
+        emitAgentEvent({ runId, stream: "assistant", data: { delta: "he" } });
+        emitAgentEvent({ runId, stream: "assistant", data: { delta: "llo" } });
+        emitAgentEvent({
+          runId,
+          stream: "tool",
+          data: {
+            phase: "start",
+            name: "browser",
+            toolCallId: "call_tool_1",
+            args: { action: "open", targetUrl: "https://example.com" },
+          },
+        });
+        emitAgentEvent({
+          runId,
+          stream: "tool",
+          data: {
+            phase: "result",
+            name: "browser",
+            toolCallId: "call_tool_1",
+            result: {
+              content: [{ type: "text", text: "ok" }],
+              ok: true,
+            },
+          },
+        });
+        return { payloads: [{ text: "hello" }] } as never;
+      }) as never);
 
       const resDelta = await postResponses(port, {
         stream: true,
         model: "openclaw",
         input: "hi",
+        reasoning: { summary: "auto" },
       });
       expect(resDelta.status).toBe(200);
       expect(resDelta.headers.get("content-type") ?? "").toContain("text/event-stream");
@@ -693,6 +720,20 @@ describe("OpenResponses HTTP API (e2e)", () => {
         .join("");
       expect(deltas).toBe("hello");
 
+      const outputItems = deltaEvents
+        .filter((e) => e.event === "response.output_item.added")
+        .map((e) => JSON.parse(e.data) as { item?: { type?: string } })
+        .map((parsed) => parsed.item?.type);
+      expect(outputItems).toContain("function_call");
+      expect(outputItems).toContain("function_call_output");
+      expect(outputItems).toContain("reasoning");
+      const reasoningItem = deltaEvents
+        .filter((e) => e.event === "response.output_item.added")
+        .map((e) => JSON.parse(e.data) as { item?: { type?: string; summary?: string } })
+        .map((parsed) => parsed.item)
+        .find((item) => item?.type === "reasoning");
+      expect(reasoningItem?.summary).toBe("thinking...");
+
       const completedDeltaResponse = deltaEvents.find((e) => e.event === "response.completed");
       const completedDeltaOutput = (
         JSON.parse(completedDeltaResponse?.data ?? "{}") as {
@@ -700,7 +741,6 @@ describe("OpenResponses HTTP API (e2e)", () => {
         }
       ).response?.output;
       expect(completedDeltaOutput?.[0]?.phase).toBe("final_answer");
-
       agentCommand.mockClear();
       agentCommand.mockResolvedValueOnce({
         payloads: [{ text: "hello" }],
@@ -826,6 +866,81 @@ describe("OpenResponses HTTP API (e2e)", () => {
     } finally {
       await server.close({ reason: "openresponses token auth owner test done" });
     }
+  });
+
+  it("forwards provider_metadata and configured tool-result size caps into agent execution", async () => {
+    const config = {
+      gateway: {
+        http: {
+          endpoints: {
+            responses: {
+              enabled: true,
+              toolResultMaxDataBytes: 3210,
+            },
+          },
+        },
+      },
+    };
+    await writeGatewayConfig(config);
+
+    const port = await getFreePort();
+    const server = await startServer(port, { openResponsesEnabled: true });
+    try {
+      agentCommand.mockClear();
+      agentCommand.mockResolvedValueOnce({
+        payloads: [{ text: "ok" }],
+      } as never);
+
+      const providerMetadata = {
+        vida: {
+          reasoningEffort: "high",
+          traceId: "trace-123",
+        },
+        relay: {
+          requestId: "req-456",
+        },
+      };
+
+      const res = await postResponses(port, {
+        model: "openclaw",
+        input: "hi",
+        provider_metadata: providerMetadata,
+      });
+
+      expect(res.status).toBe(200);
+      const opts = (agentCommand.mock.calls[0] as unknown[] | undefined)?.[0];
+      expect(
+        (opts as { providerMetadata?: Record<string, unknown> } | undefined)?.providerMetadata,
+      ).toEqual(providerMetadata);
+      expect(
+        (opts as { toolResultMaxDataBytes?: number } | undefined)?.toolResultMaxDataBytes,
+      ).toBe(3210);
+      await ensureResponseConsumed(res);
+    } finally {
+      await server.close({ reason: "responses provider metadata forwarding test done" });
+    }
+  });
+
+  it("maps reasoning.effort to one-shot thinking while keeping streamed reasoning enabled", async () => {
+    const port = enabledPort;
+    agentCommand.mockClear();
+    agentCommand.mockResolvedValueOnce({
+      payloads: [{ text: "ok" }],
+    } as never);
+
+    const res = await postResponses(port, {
+      model: "openclaw",
+      input: "hi",
+      reasoning: { effort: "high", summary: "auto" },
+    });
+
+    expect(res.status).toBe(200);
+    const opts = (agentCommand.mock.calls[0] as unknown[] | undefined)?.[0] as
+      | { thinkingOnce?: string; reasoningLevel?: string }
+      | undefined;
+    expect(opts?.thinkingOnce).toBe("high");
+    expect(opts?.reasoningLevel).toBe("stream");
+    await ensureResponseConsumed(res);
   });
 
   it("preserves assistant text alongside non-stream function_call output", async () => {

@@ -1387,6 +1387,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                   enum: [
                     "openai-completions",
                     "openai-responses",
+                    "vida-responses",
                     "openai-codex-responses",
                     "anthropic-messages",
                     "google-generative-ai",
@@ -2725,6 +2726,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                         enum: [
                           "openai-completions",
                           "openai-responses",
+                          "vida-responses",
                           "openai-codex-responses",
                           "anthropic-messages",
                           "google-generative-ai",
@@ -21555,6 +21557,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                           },
                         },
                         additionalProperties: false,
+                      },
+                      toolResultMaxDataBytes: {
+                        type: "integer",
+                        minimum: 0,
+                        maximum: 9007199254740991,
                       },
                     },
                     additionalProperties: false,

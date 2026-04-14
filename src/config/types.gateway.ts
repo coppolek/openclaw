@@ -277,6 +277,8 @@ export type GatewayHttpResponsesConfig = {
   files?: GatewayHttpResponsesFilesConfig;
   /** Image inputs (input_image). */
   images?: GatewayHttpResponsesImagesConfig;
+  /** Max decoded bytes retained for tool-result base64 payloads. */
+  toolResultMaxDataBytes?: number;
 };
 
 export type GatewayHttpResponsesFilesConfig = {

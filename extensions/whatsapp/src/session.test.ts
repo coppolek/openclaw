@@ -9,6 +9,7 @@ const useMultiFileAuthStateMock = vi.mocked(baileys.useMultiFileAuthState);
 
 let createWaSocket: typeof import("./session.js").createWaSocket;
 let formatError: typeof import("./session.js").formatError;
+let getStatusCode: typeof import("./session.js").getStatusCode;
 let logWebSelfId: typeof import("./session.js").logWebSelfId;
 let waitForWaConnection: typeof import("./session.js").waitForWaConnection;
 let waitForCredsSaveQueue: typeof import("./session.js").waitForCredsSaveQueue;
@@ -81,8 +82,14 @@ function mockLogWebSelfIdCreds(me: Record<string, string>) {
 
 describe("web session", () => {
   beforeAll(async () => {
-    ({ createWaSocket, formatError, logWebSelfId, waitForWaConnection, waitForCredsSaveQueue } =
-      await import("./session.js"));
+    ({
+      createWaSocket,
+      formatError,
+      getStatusCode,
+      logWebSelfId,
+      waitForWaConnection,
+      waitForCredsSaveQueue,
+    } = await import("./session.js"));
   });
 
   beforeEach(() => {
@@ -106,6 +113,11 @@ describe("web session", () => {
       expect.objectContaining({ printQRInTerminal: false }),
     );
     const passed = makeWASocket.mock.calls[0][0];
+    expect((passed as { browser?: unknown }).browser).toEqual([
+      "Vida Operator",
+      "web",
+      expect.any(String),
+    ]);
     const passedLogger = (passed as { logger?: { level?: string; trace?: unknown } }).logger;
     expect(passedLogger?.level).toBe("silent");
     expect(typeof passedLogger?.trace).toBe("function");
@@ -229,6 +241,19 @@ describe("web session", () => {
     expect(formatError(err)).toContain("status=408");
     expect(formatError(err)).toContain("Request Time-out");
     expect(formatError(err)).toContain("QR refs attempts ended");
+  });
+
+  it("extracts status from lastDisconnect.error wrapper", () => {
+    const err = {
+      lastDisconnect: {
+        error: {
+          output: {
+            statusCode: 401,
+          },
+        },
+      },
+    };
+    expect(getStatusCode(err)).toBe(401);
   });
 
   it("does not clobber creds backup when creds.json is corrupted", async () => {

@@ -66,6 +66,10 @@ import type {
   PluginHookBeforeInstallEvent,
   PluginHookBeforeInstallResult,
 } from "./hook-types.js";
+import {
+  resolvePluginRuntimeRequestAttributionScope,
+  withPluginRuntimeRequestAttributionScope,
+} from "./runtime/request-attribution-scope.js";
 
 // Re-export types for consumers
 export type {
@@ -295,6 +299,9 @@ export function createHookRunner(
     return firstLine || "unknown error";
   };
 
+  const withRequestAttributionScope = <T>(ctx: unknown, run: () => T): T =>
+    withPluginRuntimeRequestAttributionScope(resolvePluginRuntimeRequestAttributionScope(ctx), run);
+
   const isPromiseLike = (value: unknown): value is PromiseLike<unknown> => {
     if ((typeof value !== "object" && typeof value !== "function") || value === null) {
       return false;
@@ -329,7 +336,9 @@ export function createHookRunner(
 
     const promises = hooks.map(async (hook) => {
       try {
-        await (hook.handler as (event: unknown, ctx: unknown) => Promise<void>)(event, ctx);
+        await withRequestAttributionScope(ctx, () =>
+          (hook.handler as (event: unknown, ctx: unknown) => Promise<void>)(event, ctx),
+        );
       } catch (err) {
         handleHookError({ hookName, pluginId: hook.pluginId, error: err });
       }
@@ -359,9 +368,9 @@ export function createHookRunner(
 
     for (const hook of hooks) {
       try {
-        const handlerResult = await (
-          hook.handler as (event: unknown, ctx: unknown) => Promise<TResult>
-        )(event, ctx);
+        const handlerResult = await withRequestAttributionScope(ctx, () =>
+          (hook.handler as (event: unknown, ctx: unknown) => Promise<TResult>)(event, ctx),
+        );
 
         if (handlerResult !== undefined && handlerResult !== null) {
           if (policy.mergeResults) {
@@ -437,9 +446,9 @@ export function createHookRunner(
   ): Promise<TResult | undefined> {
     for (const hook of hooks) {
       try {
-        const handlerResult = await (
-          hook.handler as (event: unknown, ctx: unknown) => Promise<TResult | void>
-        )(event, ctx);
+        const handlerResult = await withRequestAttributionScope(ctx, () =>
+          (hook.handler as (event: unknown, ctx: unknown) => Promise<TResult | void>)(event, ctx),
+        );
         if (handlerResult?.handled) {
           return handlerResult;
         }
@@ -485,9 +494,9 @@ export function createHookRunner(
     let firstError: string | null = null;
     for (const hook of hooks) {
       try {
-        const handlerResult = await (
-          hook.handler as (event: unknown, ctx: unknown) => Promise<TResult | void>
-        )(event, ctx);
+        const handlerResult = await withRequestAttributionScope(ctx, () =>
+          (hook.handler as (event: unknown, ctx: unknown) => Promise<TResult | void>)(event, ctx),
+        );
         if (handlerResult?.handled) {
           return { status: "handled", result: handlerResult };
         }
@@ -844,7 +853,9 @@ export function createHookRunner(
 
     for (const hook of hooks) {
       try {
-        const out = runSyncHookHandler(hook, { ...event, message: current }, ctx);
+        const out = withRequestAttributionScope(ctx, () =>
+          runSyncHookHandler(hook, { ...event, message: current }, ctx),
+        );
 
         // Guard against accidental async handlers (this hook is sync-only).
         if (isPromiseLike(out)) {
@@ -904,7 +915,9 @@ export function createHookRunner(
 
     for (const hook of hooks) {
       try {
-        const out = runSyncHookHandler(hook, { ...event, message: current }, ctx);
+        const out = withRequestAttributionScope(ctx, () =>
+          runSyncHookHandler(hook, { ...event, message: current }, ctx),
+        );
 
         // Guard against accidental async handlers (this hook is sync-only).
         if (isPromiseLike(out)) {

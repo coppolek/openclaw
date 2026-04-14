@@ -143,6 +143,7 @@ export type ToolHandlerParams = Pick<
   | "onBlockReplyFlush"
   | "onAgentEvent"
   | "onToolResult"
+  | "toolResultMaxDataBytes"
   | "sessionKey"
   | "sessionId"
   | "agentId"

@@ -2,7 +2,9 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { SENSITIVE_URL_HINT_TAG } from "../shared/net/redact-sensitive-url.js";
 import { buildConfigSchema, lookupConfigSchema } from "./schema.js";
 import { applyDerivedTags, CONFIG_TAGS, deriveTagsForPath } from "./schema.tags.js";
+import { MODEL_APIS } from "./types.models.js";
 import { ToolsSchema } from "./zod-schema.agent-runtime.js";
+import { OpenClawSchema } from "./zod-schema.js";
 
 describe("config schema", () => {
   type SchemaInput = NonNullable<Parameters<typeof buildConfigSchema>[0]>;
@@ -114,6 +116,10 @@ describe("config schema", () => {
     expect(res.uiHints["models.providers.*.baseUrl"]?.tags).toContain(SENSITIVE_URL_HINT_TAG);
     expect(res.version).toBeTruthy();
     expect(res.generatedAt).toBeTruthy();
+  });
+
+  it("keeps vida-responses in the supported model API surface", () => {
+    expect(MODEL_APIS).toContain("vida-responses");
   });
 
   it("includes MCP SSE header schema under mcp.servers entries", () => {
@@ -338,6 +344,23 @@ describe("config schema", () => {
         },
       }),
     ).toThrow();
+  });
+
+  it("accepts responses toolResultMaxDataBytes in the runtime config schema", () => {
+    const parsed = OpenClawSchema.parse({
+      gateway: {
+        http: {
+          endpoints: {
+            responses: {
+              enabled: true,
+              toolResultMaxDataBytes: 4096,
+            },
+          },
+        },
+      },
+    });
+
+    expect(parsed.gateway?.http?.endpoints?.responses?.toolResultMaxDataBytes).toBe(4096);
   });
 
   it("keeps tags in the allowed taxonomy", () => {

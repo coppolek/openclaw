@@ -6,7 +6,9 @@ import {
   DefaultResourceLoader,
   SessionManager,
 } from "@mariozechner/pi-coding-agent";
+import "../../../providers/vida-responses.js";
 import { filterHeartbeatPairs } from "../../../auto-reply/heartbeat-filter.js";
+import "../../../providers/vida-responses.js";
 import { resolveChannelCapabilities } from "../../../config/channel-capabilities.js";
 import { formatErrorMessage } from "../../../infra/errors.js";
 import { resolveHeartbeatSummaryForAgent } from "../../../infra/heartbeat-summary.js";
@@ -872,6 +874,7 @@ export async function runEmbeddedAttempt(
         sessionKey: params.sessionKey,
         inputProvenance: params.inputProvenance,
         allowSyntheticToolResults: transcriptPolicy.allowSyntheticToolResults,
+        providerMetadata: params.providerMetadata,
         allowedToolNames,
       });
       trackSessionManagerAccess(params.sessionFile);
@@ -1505,6 +1508,7 @@ export async function runEmbeddedAttempt(
           verboseLevel: params.verboseLevel,
           reasoningMode: params.reasoningLevel ?? "off",
           toolResultFormat: params.toolResultFormat,
+          toolResultMaxDataBytes: params.toolResultMaxDataBytes,
           shouldEmitToolResult: params.shouldEmitToolResult,
           shouldEmitToolOutput: params.shouldEmitToolOutput,
           onToolResult: params.onToolResult,
