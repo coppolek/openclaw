@@ -33,6 +33,20 @@ openclaw browser --browser-profile openclaw open https://example.com
 openclaw browser --browser-profile openclaw snapshot
 ```
 
+## Quick troubleshooting
+
+If `start` fails with `not reachable after start`, troubleshoot CDP readiness first. If `start` and `tabs` succeed but `open` or `navigate` fails, the browser control plane is healthy and the failure is usually navigation SSRF policy.
+
+Minimal sequence:
+
+```bash
+openclaw browser --browser-profile openclaw start
+openclaw browser --browser-profile openclaw tabs
+openclaw browser --browser-profile openclaw open https://example.com
+```
+
+Detailed guidance: [Browser troubleshooting](/tools/browser#cdp-startup-failure-vs-navigation-ssrf-block)
+
 ## Lifecycle
 
 ```bash
@@ -213,7 +227,13 @@ Current existing-session limits:
 - `click` is left-click only
 - `type` does not support `slowly=true`
 - `press` does not support `delayMs`
+- `hover`, `scrollintoview`, `drag`, `select`, `fill`, and `evaluate` reject
+  per-call timeout overrides
+- `select` supports one value only
 - `wait --load networkidle` is not supported
+- file uploads require `--ref` / `--input-ref`, do not support CSS
+  `--element`, and currently support one file at a time
+- dialog hooks do not support `--timeout`
 - screenshots support page captures and `--ref`, but not CSS `--element`
 - `responsebody`, download interception, PDF export, and batch actions still
   require a managed browser or raw CDP profile

@@ -13,7 +13,7 @@ OpenClaw is **not** a hostile multi-tenant security boundary for multiple advers
 If you need mixed-trust or adversarial-user operation, split trust boundaries (separate gateway + credentials, ideally separate OS users/hosts).
 </Warning>
 
-**On this page:** [Trust model](#scope-first-personal-assistant-security-model) | [Quick audit](#quick-check-openclaw-security-audit) | [Hardened baseline](#hardened-baseline-in-60-seconds) | [DM access model](#dm-access-model-pairing--allowlist--open--disabled) | [Configuration hardening](#configuration-hardening-examples) | [Incident response](#incident-response)
+**On this page:** [Trust model](#scope-first-personal-assistant-security-model) | [Quick audit](#quick-check-openclaw-security-audit) | [Hardened baseline](#hardened-baseline-in-60-seconds) | [DM access model](#dm-access-model-pairing-allowlist-open-disabled) | [Configuration hardening](#configuration-hardening-examples) | [Incident response](#incident-response)
 
 ## Scope first: personal assistant security model
 
@@ -187,7 +187,7 @@ Allowlists gate triggers and command authorization. The `contextVisibility` sett
 - `contextVisibility: "allowlist"` filters supplemental context to senders allowed by the active allowlist checks.
 - `contextVisibility: "allowlist_quote"` behaves like `allowlist`, but still keeps one explicit quoted reply.
 
-Set `contextVisibility` per channel or per room/conversation. See [Group Chats](/channels/groups#context-visibility) for setup details.
+Set `contextVisibility` per channel or per room/conversation. See [Group Chats](/channels/groups#context-visibility-and-allowlists) for setup details.
 
 Advisory triage guidance:
 
@@ -304,8 +304,8 @@ High-signal `checkId` values you will most likely see in real deployments (not e
 | `browser.remote_cdp_http`                                     | warn          | Remote CDP over plain HTTP lacks transport encryption                                | browser profile `cdpUrl`                                                                             | no       |
 | `browser.remote_cdp_private_host`                             | warn          | Remote CDP targets a private/internal host                                           | browser profile `cdpUrl`, `browser.ssrfPolicy.*`                                                     | no       |
 | `sandbox.docker_config_mode_off`                              | warn          | Sandbox Docker config present but inactive                                           | `agents.*.sandbox.mode`                                                                              | no       |
-| `sandbox.bind_mount_non_absolute`                             | critical      | Relative bind mounts can resolve unpredictably                                       | `agents.*.sandbox.binds[].source`                                                                    | no       |
-| `sandbox.dangerous_bind_mount`                                | critical      | Sandbox bind mount points outside safe trusted paths                                 | `agents.*.sandbox.binds`                                                                             | no       |
+| `sandbox.bind_mount_non_absolute`                             | warn          | Relative bind mounts can resolve unpredictably                                       | `agents.*.sandbox.docker.binds[]`                                                                    | no       |
+| `sandbox.dangerous_bind_mount`                                | critical      | Sandbox bind mount targets blocked system, credential, or Docker socket paths        | `agents.*.sandbox.docker.binds[]`                                                                    | no       |
 | `sandbox.dangerous_network_mode`                              | critical      | Sandbox Docker network uses `host` or `container:*` namespace-join mode              | `agents.*.sandbox.docker.network`                                                                    | no       |
 | `sandbox.dangerous_seccomp_profile`                           | critical      | Sandbox seccomp profile weakens container isolation                                  | `agents.*.sandbox.docker.securityOpt`                                                                | no       |
 | `sandbox.dangerous_apparmor_profile`                          | critical      | Sandbox AppArmor profile weakens container isolation                                 | `agents.*.sandbox.docker.securityOpt`                                                                | no       |
@@ -542,8 +542,12 @@ change other sessions.
 
 Two built-in tools can make persistent control-plane changes:
 
-- `gateway` can call `config.apply`, `config.patch`, and `update.run`.
+- `gateway` can inspect config with `config.schema.lookup` / `config.get`, and can make persistent changes with `config.apply`, `config.patch`, and `update.run`.
 - `cron` can create scheduled jobs that keep running after the original chat/task ends.
+
+The owner-only `gateway` runtime tool still refuses to rewrite
+`tools.exec.ask` or `tools.exec.security`; legacy `tools.bash.*` aliases are
+normalized to the same protected exec paths before the write.
 
 For any agent/surface that handles untrusted content, deny these by default:
 
@@ -574,6 +578,8 @@ Plugins run **in-process** with the Gateway. Treat them as trusted code:
   - Gateway-backed skill dependency installs follow the same dangerous/suspicious split: built-in `critical` findings block unless the caller explicitly sets `dangerouslyForceUnsafeInstall`, while suspicious findings still warn only. `openclaw skills install` remains the separate ClawHub skill download/install flow.
 
 Details: [Plugins](/tools/plugin)
+
+<a id="dm-access-model-pairing-allowlist-open-disabled"></a>
 
 ## DM access model (pairing / allowlist / open / disabled)
 
@@ -694,6 +700,13 @@ tool calls. Reduce the blast radius by:
   `gateway.http.endpoints.responses.images.urlAllowlist`, and keep `maxUrlParts` low.
   Empty allowlists are treated as unset; use `files.allowUrl: false` / `images.allowUrl: false`
   if you want to disable URL fetching entirely.
+- For OpenResponses file inputs, decoded `input_file` text is still injected as
+  **untrusted external content**. Do not rely on file text being trusted just because
+  the Gateway decoded it locally. The injected block still carries explicit
+  `<<<EXTERNAL_UNTRUSTED_CONTENT ...>>>` boundary markers plus `Source: External`
+  metadata, even though this path omits the longer `SECURITY NOTICE:` banner.
+- The same marker-based wrapping is applied when media-understanding extracts text
+  from attached documents before appending that text to the media prompt.
 - Enabling sandboxing and strict tool allowlists for any agent that touches untrusted input.
 - Keeping secrets out of prompts; pass them via env/config on the gateway host instead.
 
@@ -717,15 +730,16 @@ Recommendations:
 
 ## Reasoning & verbose output in groups
 
-`/reasoning` and `/verbose` can expose internal reasoning or tool output that
+`/reasoning`, `/verbose`, and `/trace` can expose internal reasoning, tool
+output, or plugin diagnostics that
 was not meant for a public channel. In group settings, treat them as **debug
 only** and keep them off unless you explicitly need them.
 
 Guidance:
 
-- Keep `/reasoning` and `/verbose` disabled in public rooms.
+- Keep `/reasoning`, `/verbose`, and `/trace` disabled in public rooms.
 - If you enable them, do so only in trusted DMs or tightly controlled rooms.
-- Remember: verbose output can include tool args, URLs, and data the model saw.
+- Remember: verbose and trace output can include tool args, URLs, plugin diagnostics, and data the model saw.
 
 ## Configuration Hardening (examples)
 
@@ -1106,6 +1120,7 @@ Also consider agent workspace access inside the sandbox:
 - `agents.defaults.sandbox.workspaceAccess: "none"` (default) keeps the agent workspace off-limits; tools run against a sandbox workspace under `~/.openclaw/sandboxes`
 - `agents.defaults.sandbox.workspaceAccess: "ro"` mounts the agent workspace read-only at `/agent` (disables `write`/`edit`/`apply_patch`)
 - `agents.defaults.sandbox.workspaceAccess: "rw"` mounts the agent workspace read/write at `/workspace`
+- Extra `sandbox.docker.binds` are validated against normalized and canonicalized source paths. Parent-symlink tricks and canonical home aliases still fail closed if they resolve into blocked roots such as `/etc`, `/var/run`, or credential directories under the OS home.
 
 Important: `tools.elevated` is the global baseline escape hatch that runs exec outside the sandbox. The effective host is `gateway` by default, or `node` when the exec target is configured to `node`. Keep `tools.elevated.allowFrom` tight and don’t enable it for strangers. You can further restrict elevated per agent via `agents.list[].tools.elevated`. See [Elevated Mode](/tools/elevated).
 
@@ -1137,13 +1152,13 @@ access those accounts and data. Treat browser profiles as **sensitive state**:
 - Disable browser proxy routing when you don’t need it (`gateway.nodes.browser.mode="off"`).
 - Chrome MCP existing-session mode is **not** “safer”; it can act as you in whatever that host Chrome profile can reach.
 
-### Browser SSRF policy (trusted-network default)
+### Browser SSRF policy (strict by default)
 
-OpenClaw’s browser network policy defaults to the trusted-operator model: private/internal destinations are allowed unless you explicitly disable them.
+OpenClaw’s browser navigation policy is strict by default: private/internal destinations stay blocked unless you explicitly opt in.
 
-- Default: `browser.ssrfPolicy.dangerouslyAllowPrivateNetwork: true` (implicit when unset).
+- Default: `browser.ssrfPolicy.dangerouslyAllowPrivateNetwork` is unset, so browser navigation keeps private/internal/special-use destinations blocked.
 - Legacy alias: `browser.ssrfPolicy.allowPrivateNetwork` is still accepted for compatibility.
-- Strict mode: set `browser.ssrfPolicy.dangerouslyAllowPrivateNetwork: false` to block private/internal/special-use destinations by default.
+- Opt-in mode: set `browser.ssrfPolicy.dangerouslyAllowPrivateNetwork: true` to allow private/internal/special-use destinations.
 - In strict mode, use `hostnameAllowlist` (patterns like `*.example.com`) and `allowedHostnames` (exact host exceptions, including blocked names like `localhost`) for explicit exceptions.
 - Navigation is checked before request and best-effort re-checked on the final `http(s)` URL after navigation to reduce redirect-based pivots.
 
