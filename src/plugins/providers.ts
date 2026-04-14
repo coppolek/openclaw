@@ -3,7 +3,6 @@ import { withBundledPluginVitestCompat } from "./bundled-compat.js";
 import { normalizePluginsConfig, resolveEffectivePluginActivationState } from "./config-state.js";
 import type { PluginLoadOptions } from "./loader.js";
 import {
-  hasExplicitManifestOwnerTrust,
   isActivatedManifestOwner,
   passesManifestOwnerBasePolicy,
 } from "./manifest-owner-policy.js";
@@ -151,23 +150,13 @@ function isProviderPluginEligibleForSetupDiscovery(params: {
   if (!params.shouldFilterUntrustedWorkspacePlugins || params.plugin.origin !== "workspace") {
     return true;
   }
-  const explicitlyTrustedButDisabled =
-    params.normalizedConfig.entries[params.plugin.id]?.enabled === false &&
-    hasExplicitManifestOwnerTrust({
-      plugin: params.plugin,
-      normalizedConfig: params.normalizedConfig,
-    });
   if (
     !passesManifestOwnerBasePolicy({
       plugin: params.plugin,
       normalizedConfig: params.normalizedConfig,
-      ...(explicitlyTrustedButDisabled ? { allowExplicitlyDisabled: true } : {}),
     })
   ) {
     return false;
-  }
-  if (explicitlyTrustedButDisabled) {
-    return true;
   }
   return isActivatedManifestOwner({
     plugin: params.plugin,
