@@ -150,10 +150,10 @@ def check_memory_md(workspace: Path):
 
     print(f"  📊 Size: {size_kb:.1f} KB, {lines} lines")
 
-    if size_kb > 50:
-        warn("MEMORY.md", f"Large file ({size_kb:.0f} KB) — consider pruning during distillation")
-    elif size_kb > 100:
+    if size_kb > 100:
         warn("MEMORY.md", f"Very large ({size_kb:.0f} KB) — this will consume significant context window")
+    elif size_kb > 50:
+        warn("MEMORY.md", f"Large file ({size_kb:.0f} KB) — consider pruning during distillation")
 
     # Check for sections
     sections = [l for l in content.split("\n") if l.startswith("## ")]
