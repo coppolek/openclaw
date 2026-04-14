@@ -6175,7 +6175,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                     },
                     historyLimit: {
                       type: "integer",
-                      exclusiveMinimum: 0,
+                      minimum: 0,
                       maximum: 9007199254740991,
                     },
                   },
@@ -17780,7 +17780,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
               },
               historyLimit: {
                 type: "integer",
-                exclusiveMinimum: 0,
+                minimum: 0,
                 maximum: 9007199254740991,
                 title: "Group History Limit",
                 description:
