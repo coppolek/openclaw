@@ -355,7 +355,10 @@ function extractToolArguments(block: string): string | null {
   if (raw === null) {
     return null;
   }
-  const normalized = raw.includes(PLAMO_MSG) ? (raw.split(PLAMO_MSG, 2)[1] ?? "") : raw;
+  const trimmedStart = raw.trimStart();
+  const normalized = trimmedStart.startsWith(PLAMO_MSG)
+    ? trimmedStart.slice(PLAMO_MSG.length)
+    : raw;
   return normalized.trim();
 }
 
@@ -773,6 +776,12 @@ function hasAuthorizationHeader(headers: Record<string, string>): boolean {
   );
 }
 
+function stripAuthorizationHeaders(headers: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(headers).filter(([key]) => key.trim().toLowerCase() !== "authorization"),
+  );
+}
+
 function buildRequestHeaders(
   model: RuntimeModel,
   apiKey: string | undefined,
@@ -788,8 +797,8 @@ function buildRequestHeaders(
     return headers;
   }
   return {
+    ...stripAuthorizationHeaders(headers),
     Authorization: `Bearer ${apiKey}`,
-    ...headers,
   };
 }
 
