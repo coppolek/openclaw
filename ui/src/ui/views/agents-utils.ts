@@ -4,6 +4,7 @@ import {
   normalizeToolName,
   resolveToolProfilePolicy,
 } from "../../../../src/agents/tool-policy-shared.js";
+import { t } from "../../i18n/index.ts";
 import { normalizeLowercaseStringOrEmpty, normalizeOptionalString } from "../string-coerce.ts";
 import type {
   AgentIdentityResult,
@@ -123,19 +124,81 @@ export const PROFILE_OPTIONS = [
   { id: "full", label: "Full" },
 ] as const;
 
+const TOOL_SECTION_LABEL_KEYS: Record<string, string> = {
+  fs: "agentsPage.tools.sections.fs",
+  runtime: "agentsPage.tools.sections.runtime",
+  web: "agentsPage.tools.sections.web",
+  memory: "agentsPage.tools.sections.memory",
+  sessions: "agentsPage.tools.sections.sessions",
+  ui: "agentsPage.tools.sections.ui",
+  messaging: "agentsPage.tools.sections.messaging",
+  automation: "agentsPage.tools.sections.automation",
+  nodes: "agentsPage.tools.sections.nodes",
+  agents: "agentsPage.tools.sections.agents",
+  media: "agentsPage.tools.sections.media",
+};
+
+const TOOL_DESCRIPTION_KEYS: Record<string, string> = {
+  read: "agentsPage.tools.toolDescriptions.read",
+  write: "agentsPage.tools.toolDescriptions.write",
+  edit: "agentsPage.tools.toolDescriptions.edit",
+  apply_patch: "agentsPage.tools.toolDescriptions.applyPatch",
+  exec: "agentsPage.tools.toolDescriptions.exec",
+  process: "agentsPage.tools.toolDescriptions.process",
+  web_search: "agentsPage.tools.toolDescriptions.webSearch",
+  web_fetch: "agentsPage.tools.toolDescriptions.webFetch",
+  memory_search: "agentsPage.tools.toolDescriptions.memorySearch",
+  memory_get: "agentsPage.tools.toolDescriptions.memoryGet",
+  sessions_list: "agentsPage.tools.toolDescriptions.sessionsList",
+  sessions_history: "agentsPage.tools.toolDescriptions.sessionsHistory",
+  sessions_send: "agentsPage.tools.toolDescriptions.sessionsSend",
+  sessions_spawn: "agentsPage.tools.toolDescriptions.sessionsSpawn",
+  session_status: "agentsPage.tools.toolDescriptions.sessionStatus",
+  browser: "agentsPage.tools.toolDescriptions.browser",
+  canvas: "agentsPage.tools.toolDescriptions.canvas",
+  message: "agentsPage.tools.toolDescriptions.message",
+  cron: "agentsPage.tools.toolDescriptions.cron",
+  gateway: "agentsPage.tools.toolDescriptions.gateway",
+  nodes: "agentsPage.tools.toolDescriptions.nodes",
+  agents_list: "agentsPage.tools.toolDescriptions.agentsList",
+  image: "agentsPage.tools.toolDescriptions.image",
+};
+
+const TOOL_PROFILE_LABEL_KEYS: Record<string, string> = {
+  minimal: "agentsPage.tools.profiles.minimal",
+  coding: "agentsPage.tools.profiles.coding",
+  messaging: "agentsPage.tools.profiles.messaging",
+  full: "agentsPage.tools.profiles.full",
+};
+
+export function localizeToolSectionLabel(id: string, fallback: string) {
+  const key = TOOL_SECTION_LABEL_KEYS[id];
+  return key ? t(key) : fallback;
+}
+
+export function localizeToolDescription(id: string, fallback: string) {
+  const key = TOOL_DESCRIPTION_KEYS[id];
+  return key ? t(key) : fallback;
+}
+
+export function localizeToolProfileLabel(id: string, fallback: string) {
+  const key = TOOL_PROFILE_LABEL_KEYS[id];
+  return key ? t(key) : fallback;
+}
+
 export function resolveToolSections(
   toolsCatalogResult: ToolsCatalogResult | null,
 ): AgentToolSection[] {
   if (toolsCatalogResult?.groups?.length) {
     return toolsCatalogResult.groups.map((group) => ({
       id: group.id,
-      label: group.label,
+      label: localizeToolSectionLabel(group.id, group.label),
       source: group.source,
       pluginId: group.pluginId,
       tools: group.tools.map((tool) => ({
         id: tool.id,
         label: tool.label,
-        description: tool.description,
+        description: localizeToolDescription(tool.id, tool.description),
         source: tool.source,
         pluginId: tool.pluginId,
         optional: tool.optional,
@@ -143,16 +206,26 @@ export function resolveToolSections(
       })),
     }));
   }
-  return FALLBACK_TOOL_SECTIONS;
+  return FALLBACK_TOOL_SECTIONS.map((section) => ({
+    ...section,
+    label: localizeToolSectionLabel(section.id, section.label),
+    tools: section.tools.map((tool) => ({
+      ...tool,
+      description: localizeToolDescription(tool.id, tool.description),
+    })),
+  }));
 }
 
 export function resolveToolProfileOptions(
   toolsCatalogResult: ToolsCatalogResult | null,
-): readonly ToolCatalogProfile[] | typeof PROFILE_OPTIONS {
-  if (toolsCatalogResult?.profiles?.length) {
-    return toolsCatalogResult.profiles;
-  }
-  return PROFILE_OPTIONS;
+): readonly ToolCatalogProfile[] {
+  const profiles = toolsCatalogResult?.profiles?.length
+    ? toolsCatalogResult.profiles
+    : PROFILE_OPTIONS;
+  return profiles.map((profile) => ({
+    ...profile,
+    label: localizeToolProfileLabel(profile.id, profile.label),
+  }));
 }
 
 type ToolPolicy = {
@@ -356,7 +429,9 @@ export function buildAgentContext(
     model: modelLabel,
     identityName,
     identityAvatar,
-    skillsLabel: skillFilter ? `${skillCount} selected` : "all skills",
+    skillsLabel: skillFilter
+      ? t("agentsPage.overview.skillsSelected", { count: String(skillCount ?? 0) })
+      : t("agentsPage.overview.allSkills"),
     isDefault: Boolean(defaultId && agent.id === defaultId),
   };
 }

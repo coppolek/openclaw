@@ -1,4 +1,5 @@
 import { html, nothing } from "lit";
+import { t } from "../../i18n/index.ts";
 import { icons } from "../icons.ts";
 import { normalizeLowercaseStringOrEmpty } from "../string-coerce.ts";
 import type { ConfigUiHints } from "../types.ts";
@@ -275,54 +276,173 @@ const sectionIcons = {
   `,
 };
 
-// Section metadata
-export const SECTION_META: Record<string, { label: string; description: string }> = {
-  env: {
-    label: "Environment Variables",
-    description: "Environment variables passed to the gateway process",
-  },
-  update: { label: "Updates", description: "Auto-update settings and release channel" },
-  agents: { label: "Agents", description: "Agent configurations, models, and identities" },
-  auth: { label: "Authentication", description: "API keys and authentication profiles" },
-  channels: {
-    label: "Channels",
-    description: "Messaging channels (Telegram, Discord, Slack, etc.)",
-  },
-  messages: { label: "Messages", description: "Message handling and routing settings" },
-  commands: { label: "Commands", description: "Custom slash commands" },
-  hooks: { label: "Hooks", description: "Webhooks and event hooks" },
-  skills: { label: "Skills", description: "Skill packs and capabilities" },
-  tools: { label: "Tools", description: "Tool configurations (browser, search, etc.)" },
-  gateway: { label: "Gateway", description: "Gateway server settings (port, auth, binding)" },
-  wizard: { label: "Setup Wizard", description: "Setup wizard state and history" },
-  // Additional sections
-  meta: { label: "Metadata", description: "Gateway metadata and version information" },
-  logging: { label: "Logging", description: "Log levels and output configuration" },
-  browser: { label: "Browser", description: "Browser automation settings" },
-  ui: { label: "UI", description: "User interface preferences" },
-  models: { label: "Models", description: "AI model configurations and providers" },
-  bindings: { label: "Bindings", description: "Key bindings and shortcuts" },
-  broadcast: { label: "Broadcast", description: "Broadcast and notification settings" },
-  audio: { label: "Audio", description: "Audio input/output settings" },
-  session: { label: "Session", description: "Session management and persistence" },
-  cron: { label: "Cron", description: "Scheduled tasks and automation" },
-  web: { label: "Web", description: "Web server and API settings" },
-  discovery: { label: "Discovery", description: "Service discovery and networking" },
-  canvasHost: { label: "Canvas Host", description: "Canvas rendering and display" },
-  talk: { label: "Talk", description: "Voice and speech settings" },
-  plugins: { label: "Plugins", description: "Plugin management and extensions" },
-  diagnostics: {
-    label: "Diagnostics",
-    description: "Instrumentation, OpenTelemetry, and cache-trace settings",
-  },
-  cli: { label: "CLI", description: "CLI banner and startup behavior" },
-  secrets: { label: "Secrets", description: "Secret provider configuration" },
-  acp: {
-    label: "ACP",
-    description: "Agent Communication Protocol runtime and streaming settings",
-  },
-  mcp: { label: "MCP", description: "Model Context Protocol server definitions" },
+type SectionMetaEntry = {
+  descriptionKey: string;
+  labelKey: string;
 };
+
+// Section metadata
+export const SECTION_META: Record<string, SectionMetaEntry> = {
+  env: {
+    labelKey: "settings.sections.env.label",
+    descriptionKey: "settings.sections.env.description",
+  },
+  update: {
+    labelKey: "settings.sections.update.label",
+    descriptionKey: "settings.sections.update.description",
+  },
+  agents: {
+    labelKey: "settings.sections.agents.label",
+    descriptionKey: "settings.sections.agents.description",
+  },
+  auth: {
+    labelKey: "settings.sections.auth.label",
+    descriptionKey: "settings.sections.auth.description",
+  },
+  channels: {
+    labelKey: "settings.sections.channels.label",
+    descriptionKey: "settings.sections.channels.description",
+  },
+  messages: {
+    labelKey: "settings.sections.messages.label",
+    descriptionKey: "settings.sections.messages.description",
+  },
+  commands: {
+    labelKey: "settings.sections.commands.label",
+    descriptionKey: "settings.sections.commands.description",
+  },
+  approvals: {
+    labelKey: "settings.sections.approvals.label",
+    descriptionKey: "settings.sections.approvals.description",
+  },
+  hooks: {
+    labelKey: "settings.sections.hooks.label",
+    descriptionKey: "settings.sections.hooks.description",
+  },
+  skills: {
+    labelKey: "settings.sections.skills.label",
+    descriptionKey: "settings.sections.skills.description",
+  },
+  memory: {
+    labelKey: "settings.sections.memory.label",
+    descriptionKey: "settings.sections.memory.description",
+  },
+  tools: {
+    labelKey: "settings.sections.tools.label",
+    descriptionKey: "settings.sections.tools.description",
+  },
+  gateway: {
+    labelKey: "settings.sections.gateway.label",
+    descriptionKey: "settings.sections.gateway.description",
+  },
+  media: {
+    labelKey: "settings.sections.media.label",
+    descriptionKey: "settings.sections.media.description",
+  },
+  nodeHost: {
+    labelKey: "settings.sections.nodeHost.label",
+    descriptionKey: "settings.sections.nodeHost.description",
+  },
+  wizard: {
+    labelKey: "settings.sections.wizard.label",
+    descriptionKey: "settings.sections.wizard.description",
+  },
+  // Additional sections
+  meta: {
+    labelKey: "settings.sections.meta.label",
+    descriptionKey: "settings.sections.meta.description",
+  },
+  logging: {
+    labelKey: "settings.sections.logging.label",
+    descriptionKey: "settings.sections.logging.description",
+  },
+  browser: {
+    labelKey: "settings.sections.browser.label",
+    descriptionKey: "settings.sections.browser.description",
+  },
+  ui: {
+    labelKey: "settings.sections.ui.label",
+    descriptionKey: "settings.sections.ui.description",
+  },
+  models: {
+    labelKey: "settings.sections.models.label",
+    descriptionKey: "settings.sections.models.description",
+  },
+  bindings: {
+    labelKey: "settings.sections.bindings.label",
+    descriptionKey: "settings.sections.bindings.description",
+  },
+  broadcast: {
+    labelKey: "settings.sections.broadcast.label",
+    descriptionKey: "settings.sections.broadcast.description",
+  },
+  audio: {
+    labelKey: "settings.sections.audio.label",
+    descriptionKey: "settings.sections.audio.description",
+  },
+  session: {
+    labelKey: "settings.sections.session.label",
+    descriptionKey: "settings.sections.session.description",
+  },
+  cron: {
+    labelKey: "settings.sections.cron.label",
+    descriptionKey: "settings.sections.cron.description",
+  },
+  web: {
+    labelKey: "settings.sections.web.label",
+    descriptionKey: "settings.sections.web.description",
+  },
+  discovery: {
+    labelKey: "settings.sections.discovery.label",
+    descriptionKey: "settings.sections.discovery.description",
+  },
+  canvasHost: {
+    labelKey: "settings.sections.canvasHost.label",
+    descriptionKey: "settings.sections.canvasHost.description",
+  },
+  talk: {
+    labelKey: "settings.sections.talk.label",
+    descriptionKey: "settings.sections.talk.description",
+  },
+  plugins: {
+    labelKey: "settings.sections.plugins.label",
+    descriptionKey: "settings.sections.plugins.description",
+  },
+  diagnostics: {
+    labelKey: "settings.sections.diagnostics.label",
+    descriptionKey: "settings.sections.diagnostics.description",
+  },
+  cli: {
+    labelKey: "settings.sections.cli.label",
+    descriptionKey: "settings.sections.cli.description",
+  },
+  secrets: {
+    labelKey: "settings.sections.secrets.label",
+    descriptionKey: "settings.sections.secrets.description",
+  },
+  acp: {
+    labelKey: "settings.sections.acp.label",
+    descriptionKey: "settings.sections.acp.description",
+  },
+  mcp: {
+    labelKey: "settings.sections.mcp.label",
+    descriptionKey: "settings.sections.mcp.description",
+  },
+};
+
+function resolveSectionMetaText(key: string, schema?: JsonSchema) {
+  const meta = SECTION_META[key];
+  if (meta) {
+    return {
+      label: t(meta.labelKey),
+      description: t(meta.descriptionKey),
+    };
+  }
+  return {
+    label: schema?.title ?? humanize(key),
+    description: schema?.description ?? "",
+  };
+}
 
 function getSectionIcon(key: string) {
   return sectionIcons[key as keyof typeof sectionIcons] ?? sectionIcons.default;
@@ -344,8 +464,10 @@ function matchesSearch(params: {
   const sectionMetaMatches =
     q &&
     (normalizeLowercaseStringOrEmpty(params.key).includes(q) ||
-      (meta?.label ? normalizeLowercaseStringOrEmpty(meta.label).includes(q) : false) ||
-      (meta?.description ? normalizeLowercaseStringOrEmpty(meta.description).includes(q) : false));
+      (meta?.labelKey ? normalizeLowercaseStringOrEmpty(t(meta.labelKey)).includes(q) : false) ||
+      (meta?.descriptionKey
+        ? normalizeLowercaseStringOrEmpty(t(meta.descriptionKey)).includes(q)
+        : false));
 
   if (sectionMetaMatches && criteria.tags.length === 0) {
     return true;
@@ -362,12 +484,12 @@ function matchesSearch(params: {
 
 export function renderConfigForm(props: ConfigFormProps) {
   if (!props.schema) {
-    return html` <div class="muted">Schema unavailable.</div> `;
+    return html` <div class="muted">${t("settings.form.schemaUnavailable")}</div> `;
   }
   const schema = props.schema;
   const value = props.value ?? {};
   if (schemaType(schema) !== "object" || !schema.properties) {
-    return html` <div class="callout danger">Unsupported schema. Use Raw.</div> `;
+    return html` <div class="callout danger">${t("settings.form.unsupportedSchemaUseRaw")}</div> `;
   }
   const unsupported = new Set(props.unsupportedPaths ?? []);
   const properties = schema.properties;
@@ -427,7 +549,9 @@ export function renderConfigForm(props: ConfigFormProps) {
       <div class="config-empty">
         <div class="config-empty__icon">${icons.search}</div>
         <div class="config-empty__text">
-          ${searchQuery ? `No settings match "${searchQuery}"` : "No settings in this section"}
+          ${searchQuery
+            ? t("settings.form.noSettingsMatch", { query: searchQuery })
+            : t("settings.form.noSettingsInSection")}
         </div>
       </div>
     `;
@@ -496,10 +620,7 @@ export function renderConfigForm(props: ConfigFormProps) {
             });
           })()
         : filteredEntries.map(([key, node]) => {
-            const meta = SECTION_META[key] ?? {
-              label: key.charAt(0).toUpperCase() + key.slice(1),
-              description: node.description ?? "",
-            };
+            const meta = resolveSectionMetaText(key, node);
 
             return renderSectionCard({
               id: `config-section-${key}`,

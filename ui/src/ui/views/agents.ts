@@ -156,7 +156,7 @@ export function renderAgents(props: AgentsProps) {
               @change=${(e: Event) => props.onSelectAgent((e.target as HTMLSelectElement).value)}
             >
               ${agents.length === 0
-                ? html` <option value="">No agents</option> `
+                ? html` <option value="">${t("agentsPage.toolbar.noAgents")}</option> `
                 : agents.map(
                     (agent) => html`
                       <option value=${agent.id} ?selected=${agent.id === selectedId}>
@@ -175,9 +175,9 @@ export function renderAgents(props: AgentsProps) {
                     type="button"
                     class="btn btn--sm btn--ghost"
                     @click=${() => void navigator.clipboard.writeText(selectedAgent.id)}
-                    title="Copy agent ID to clipboard"
+                    title="${t("agentsPage.toolbar.copyIdTitle")}"
                   >
-                    Copy ID
+                    ${t("agentsPage.toolbar.copyId")}
                   </button>
                   <button
                     type="button"
@@ -185,10 +185,12 @@ export function renderAgents(props: AgentsProps) {
                     ?disabled=${Boolean(defaultId && selectedAgent.id === defaultId)}
                     @click=${() => props.onSetDefault(selectedAgent.id)}
                     title=${defaultId && selectedAgent.id === defaultId
-                      ? "Already the default agent"
-                      : "Set as the default agent"}
+                      ? t("agentsPage.toolbar.alreadyDefaultTitle")
+                      : t("agentsPage.toolbar.setDefaultTitle")}
                   >
-                    ${defaultId && selectedAgent.id === defaultId ? "Default" : "Set Default"}
+                    ${defaultId && selectedAgent.id === defaultId
+                      ? t("agentsPage.toolbar.default")
+                      : t("agentsPage.toolbar.setDefault")}
                   </button>
                 `
               : nothing}
@@ -209,8 +211,8 @@ export function renderAgents(props: AgentsProps) {
         ${!selectedAgent
           ? html`
               <div class="card">
-                <div class="card-title">Select an agent</div>
-                <div class="card-sub">Pick an agent to inspect its workspace and tools.</div>
+                <div class="card-title">${t("agentsPage.empty.title")}</div>
+                <div class="card-sub">${t("agentsPage.empty.subtitle")}</div>
               </div>
             `
           : html`
@@ -348,12 +350,12 @@ function renderAgentTabs(
   counts: Record<string, number | null>,
 ) {
   const tabs: Array<{ id: AgentsPanel; label: string }> = [
-    { id: "overview", label: "Overview" },
-    { id: "files", label: "Files" },
-    { id: "tools", label: "Tools" },
-    { id: "skills", label: "Skills" },
-    { id: "channels", label: "Channels" },
-    { id: "cron", label: "Cron Jobs" },
+    { id: "overview", label: t("tabs.overview") },
+    { id: "files", label: t("agentsPage.tabs.files") },
+    { id: "tools", label: t("agentsPage.tabs.tools") },
+    { id: "skills", label: t("tabs.skills") },
+    { id: "channels", label: t("tabs.channels") },
+    { id: "cron", label: t("tabs.cron") },
   ];
   return html`
     <div class="agent-tabs">

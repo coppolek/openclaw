@@ -100,46 +100,53 @@ export function renderAgentOverview(params: {
 
   return html`
     <section class="card">
-      <div class="card-title">Overview</div>
-      <div class="card-sub">Workspace paths and identity metadata.</div>
+      <div class="card-title">${t("tabs.overview")}</div>
+      <div class="card-sub">${t("agentsPage.overview.subtitle")}</div>
 
       <div class="agents-overview-grid" style="margin-top: 16px;">
         <div class="agent-kv">
-          <div class="label">Workspace</div>
+          <div class="label">${t("agentsPage.common.workspace")}</div>
           <div>
             <button
               type="button"
               class="workspace-link mono"
               @click=${() => onSelectPanel("files")}
-              title="Open Files tab"
+              title="${t("agentsPage.common.openFilesTab")}"
             >
               ${workspace}
             </button>
           </div>
         </div>
         <div class="agent-kv">
-          <div class="label">Primary Model</div>
+          <div class="label">${t("agentsPage.common.primaryModel")}</div>
           <div class="mono">${model}</div>
         </div>
         <div class="agent-kv">
-          <div class="label">Skills Filter</div>
-          <div>${skillFilter ? `${skillCount} selected` : "all skills"}</div>
+          <div class="label">${t("agentsPage.common.skillsFilter")}</div>
+          <div>
+            ${skillFilter
+              ? t("agentsPage.overview.skillsSelected", { count: String(skillCount ?? 0) })
+              : t("agentsPage.overview.allSkills")}
+          </div>
         </div>
       </div>
 
       ${configDirty
         ? html`
             <div class="callout warn" style="margin-top: 16px">
-              You have unsaved config changes.
+              ${t("agentsPage.overview.unsavedConfigChanges")}
             </div>
           `
         : nothing}
 
       <div class="agent-model-select" style="margin-top: 20px;">
-        <div class="label">Model Selection</div>
+        <div class="label">${t("agentsPage.overview.modelSelection")}</div>
         <div class="agent-model-fields">
           <label class="field">
-            <span>Primary model${isDefault ? " (default)" : ""}</span>
+            <span>
+              ${t("agentsPage.overview.primaryModel")}
+              ${isDefault ? ` ${t("agentsPage.overview.defaultSuffix")}` : ""}
+            </span>
             <select
               .value=${isDefault ? (effectivePrimary ?? "") : (entryPrimary ?? "")}
               ?disabled=${disabled}
@@ -147,17 +154,21 @@ export function renderAgentOverview(params: {
                 onModelChange(agent.id, (e.target as HTMLSelectElement).value || null)}
             >
               ${isDefault
-                ? html` <option value="">Not set</option> `
+                ? html` <option value="">${t("agentsPage.overview.notSet")}</option> `
                 : html`
                     <option value="">
-                      ${defaultPrimary ? `Inherit default (${defaultPrimary})` : "Inherit default"}
+                      ${defaultPrimary
+                        ? t("agentsPage.overview.inheritDefaultWithValue", {
+                            value: defaultPrimary,
+                          })
+                        : t("agentsPage.overview.inheritDefault")}
                     </option>
                   `}
               ${buildModelOptions(configForm, effectivePrimary ?? undefined, params.modelCatalog)}
             </select>
           </label>
           <div class="field">
-            <span>Fallbacks</span>
+            <span>${t("agentsPage.overview.fallbacks")}</span>
             <div
               class="agent-chip-input"
               @click=${(e: Event) => {
@@ -185,7 +196,9 @@ export function renderAgentOverview(params: {
               )}
               <input
                 ?disabled=${disabled}
-                placeholder=${fallbackChips.length === 0 ? "provider/model" : ""}
+                placeholder=${fallbackChips.length === 0
+                  ? t("agentsPage.overview.fallbackPlaceholder")
+                  : ""}
                 @keydown=${handleChipKeydown}
                 @blur=${(e: Event) => {
                   const input = e.target as HTMLInputElement;
@@ -214,7 +227,7 @@ export function renderAgentOverview(params: {
             ?disabled=${configSaving || !configDirty}
             @click=${onConfigSave}
           >
-            ${configSaving ? "Saving…" : "Save"}
+            ${configSaving ? t("common.saving") : t("common.save")}
           </button>
         </div>
       </div>

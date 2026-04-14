@@ -1,5 +1,6 @@
 import { render } from "lit";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { i18n } from "../../i18n/index.ts";
 import { DEFAULT_CRON_FORM } from "../app-defaults.ts";
 import type { CronJob } from "../types.ts";
 import { renderCron, type CronProps } from "./cron.ts";
@@ -78,6 +79,10 @@ function createProps(overrides: Partial<CronProps> = {}): CronProps {
 }
 
 describe("cron view", () => {
+  beforeEach(async () => {
+    await i18n.setLocale("en");
+  });
+
   it("shows all-job history mode by default", () => {
     const container = document.createElement("div");
     render(renderCron(createProps()), container);

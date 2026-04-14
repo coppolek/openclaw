@@ -1,7 +1,8 @@
 /* @vitest-environment jsdom */
 
 import { render } from "lit";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { i18n } from "../../i18n/index.ts";
 import {
   renderDreaming,
   setDreamAdvancedWaitingSort,
@@ -198,6 +199,10 @@ function renderInto(props: DreamingProps): HTMLDivElement {
 }
 
 describe("dreaming view", () => {
+  beforeEach(async () => {
+    await i18n.setLocale("en");
+  });
+
   it("renders the sleeping lobster SVG", () => {
     const container = renderInto(buildProps());
     const svg = container.querySelector(".dreams__lobster svg");

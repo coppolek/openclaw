@@ -1,6 +1,7 @@
 import { html, nothing } from "lit";
 import { t, i18n, SUPPORTED_LOCALES, type Locale, isSupportedLocale } from "../../i18n/index.ts";
 import type { EventLogEntry } from "../app-events.ts";
+import type { PlansViewProps } from "../controllers/plans.ts";
 import { buildExternalLinkRel, EXTERNAL_LINK_TARGET } from "../external-link.ts";
 import { formatRelativeTimestamp, formatDurationHuman } from "../format.ts";
 import type { GatewayHelloOk } from "../gateway.ts";
@@ -25,6 +26,7 @@ import {
   shouldShowPairingHint,
 } from "./overview-hints.ts";
 import { renderOverviewLogTail } from "./overview-log-tail.ts";
+import { renderPlans } from "./plans.ts";
 
 export type OverviewProps = {
   connected: boolean;
@@ -46,6 +48,7 @@ export type OverviewProps = {
   cronJobs: CronJob[];
   cronStatus: CronStatus | null;
   attentionItems: AttentionItem[];
+  plans: PlansViewProps;
   eventLog: EventLogEntry[];
   overviewLogLines: string[];
   showGatewayToken: boolean;
@@ -60,6 +63,17 @@ export type OverviewProps = {
   onNavigate: (tab: string) => void;
   onRefreshLogs: () => void;
 };
+
+function renderOverviewPlans(props: OverviewProps) {
+  return html`
+    <div>
+      ${renderPlans(props.plans)}
+      <div class="muted" style="margin-top: 10px; font-size: 12px;">
+        ${t("overview.plans.fullSurfaceHint")}
+      </div>
+    </div>
+  `;
+}
 
 export function renderOverview(props: OverviewProps) {
   const snapshot = props.hello?.snapshot as
@@ -94,8 +108,8 @@ export function renderOverview(props: OverviewProps) {
             href="https://docs.openclaw.ai/web/control-ui#device-pairing-first-connection"
             target=${EXTERNAL_LINK_TARGET}
             rel=${buildExternalLinkRel()}
-            title="Device pairing docs (opens in new tab)"
-            >Docs: Device pairing</a
+            title="${t("overview.links.devicePairingTitle")}"
+            >${t("overview.links.devicePairingLabel")}</a
           >
         </div>
       </div>
@@ -127,8 +141,8 @@ export function renderOverview(props: OverviewProps) {
               href="https://docs.openclaw.ai/web/dashboard"
               target=${EXTERNAL_LINK_TARGET}
               rel=${buildExternalLinkRel()}
-              title="Control UI auth docs (opens in new tab)"
-              >Docs: Control UI auth</a
+              title="${t("overview.links.authTitle")}"
+              >${t("overview.links.authLabel")}</a
             >
           </div>
         </div>
@@ -143,8 +157,8 @@ export function renderOverview(props: OverviewProps) {
             href="https://docs.openclaw.ai/web/dashboard"
             target=${EXTERNAL_LINK_TARGET}
             rel=${buildExternalLinkRel()}
-            title="Control UI auth docs (opens in new tab)"
-            >Docs: Control UI auth</a
+            title="${t("overview.links.authTitle")}"
+            >${t("overview.links.authLabel")}</a
           >
         </div>
       </div>
@@ -176,8 +190,8 @@ export function renderOverview(props: OverviewProps) {
             href="https://docs.openclaw.ai/gateway/tailscale"
             target=${EXTERNAL_LINK_TARGET}
             rel=${buildExternalLinkRel()}
-            title="Tailscale Serve docs (opens in new tab)"
-            >Docs: Tailscale Serve</a
+            title="${t("overview.links.tailscaleTitle")}"
+            >${t("overview.links.tailscaleLabel")}</a
           >
           <span class="muted"> · </span>
           <a
@@ -185,8 +199,8 @@ export function renderOverview(props: OverviewProps) {
             href="https://docs.openclaw.ai/web/control-ui#insecure-http"
             target=${EXTERNAL_LINK_TARGET}
             rel=${buildExternalLinkRel()}
-            title="Insecure HTTP docs (opens in new tab)"
-            >Docs: Insecure HTTP</a
+            title="${t("overview.links.insecureHttpTitle")}"
+            >${t("overview.links.insecureHttpLabel")}</a
           >
         </div>
       </div>
@@ -204,10 +218,9 @@ export function renderOverview(props: OverviewProps) {
     }
     return html`
       <div class="muted" style="margin-top: 8px">
-        Auth token must be passed as a URL fragment:
-        <span class="mono">#token=&lt;token&gt;</span>. Query parameters (<span class="mono"
-          >?token=</span
-        >) may appear in server logs.
+        ${t("overview.queryTokenHint.prefix")}
+        <span class="mono">#token=&lt;token&gt;</span>. ${t("overview.queryTokenHint.middle")}
+        <span class="mono">?token=</span> ${t("overview.queryTokenHint.suffix")}
       </div>
     `;
   })();
@@ -420,6 +433,10 @@ export function renderOverview(props: OverviewProps) {
       onNavigate: props.onNavigate,
     })}
     ${renderOverviewAttention({ items: props.attentionItems })}
+
+    <div class="ov-section-divider"></div>
+
+    ${renderOverviewPlans(props)}
 
     <div class="ov-section-divider"></div>
 

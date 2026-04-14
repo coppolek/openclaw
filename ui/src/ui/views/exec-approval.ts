@@ -1,4 +1,5 @@
 import { html, nothing } from "lit";
+import { t } from "../../i18n/index.ts";
 import type { AppViewState } from "../app-view-state.ts";
 import type {
   ExecApprovalRequest,
@@ -30,10 +31,13 @@ function renderExecBody(request: ExecApprovalRequestPayload) {
   return html`
     <div class="exec-approval-command mono">${request.command}</div>
     <div class="exec-approval-meta">
-      ${renderMetaRow("Host", request.host)} ${renderMetaRow("Agent", request.agentId)}
-      ${renderMetaRow("Session", request.sessionKey)} ${renderMetaRow("CWD", request.cwd)}
-      ${renderMetaRow("Resolved", request.resolvedPath)}
-      ${renderMetaRow("Security", request.security)} ${renderMetaRow("Ask", request.ask)}
+      ${renderMetaRow(t("execApproval.host"), request.host)}
+      ${renderMetaRow(t("execApproval.agent"), request.agentId)}
+      ${renderMetaRow(t("execApproval.session"), request.sessionKey)}
+      ${renderMetaRow(t("execApproval.cwd"), request.cwd)}
+      ${renderMetaRow(t("execApproval.resolved"), request.resolvedPath)}
+      ${renderMetaRow(t("execApproval.security"), request.security)}
+      ${renderMetaRow(t("execApproval.ask"), request.ask)}
     </div>
   `;
 }
@@ -46,9 +50,10 @@ ${active.pluginDescription}</pre
         >`
       : nothing}
     <div class="exec-approval-meta">
-      ${renderMetaRow("Severity", active.pluginSeverity)}
-      ${renderMetaRow("Plugin", active.pluginId)} ${renderMetaRow("Agent", active.request.agentId)}
-      ${renderMetaRow("Session", active.request.sessionKey)}
+      ${renderMetaRow(t("execApproval.severity"), active.pluginSeverity)}
+      ${renderMetaRow(t("execApproval.plugin"), active.pluginId)}
+      ${renderMetaRow(t("execApproval.agent"), active.request.agentId)}
+      ${renderMetaRow(t("execApproval.session"), active.request.sessionKey)}
     </div>
   `;
 }
@@ -60,12 +65,15 @@ export function renderExecApprovalPrompt(state: AppViewState) {
   }
   const request = active.request;
   const remainingMs = active.expiresAtMs - Date.now();
-  const remaining = remainingMs > 0 ? `expires in ${formatRemaining(remainingMs)}` : "expired";
+  const remaining =
+    remainingMs > 0
+      ? t("execApproval.expiresIn", { value: formatRemaining(remainingMs) })
+      : t("execApproval.expired");
   const queueCount = state.execApprovalQueue.length;
   const isPlugin = active.kind === "plugin";
   const title = isPlugin
-    ? (active.pluginTitle ?? "Plugin approval needed")
-    : "Exec approval needed";
+    ? (active.pluginTitle ?? t("execApproval.pluginApprovalNeeded"))
+    : t("execApproval.execApprovalNeeded");
   return html`
     <div class="exec-approval-overlay" role="dialog" aria-live="polite">
       <div class="exec-approval-card">
@@ -75,7 +83,9 @@ export function renderExecApprovalPrompt(state: AppViewState) {
             <div class="exec-approval-sub">${remaining}</div>
           </div>
           ${queueCount > 1
-            ? html`<div class="exec-approval-queue">${queueCount} pending</div>`
+            ? html`<div class="exec-approval-queue">
+                ${t("execApproval.pending", { count: String(queueCount) })}
+              </div>`
             : nothing}
         </div>
         ${isPlugin ? renderPluginBody(active) : renderExecBody(request)}
@@ -88,21 +98,21 @@ export function renderExecApprovalPrompt(state: AppViewState) {
             ?disabled=${state.execApprovalBusy}
             @click=${() => state.handleExecApprovalDecision("allow-once")}
           >
-            Allow once
+            ${t("execApproval.allowOnce")}
           </button>
           <button
             class="btn"
             ?disabled=${state.execApprovalBusy}
             @click=${() => state.handleExecApprovalDecision("allow-always")}
           >
-            Always allow
+            ${t("execApproval.alwaysAllow")}
           </button>
           <button
             class="btn danger"
             ?disabled=${state.execApprovalBusy}
             @click=${() => state.handleExecApprovalDecision("deny")}
           >
-            Deny
+            ${t("execApproval.deny")}
           </button>
         </div>
       </div>

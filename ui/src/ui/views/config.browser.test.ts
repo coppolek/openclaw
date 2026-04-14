@@ -1,5 +1,6 @@
 import { render } from "lit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { i18n } from "../../i18n/index.ts";
 import type { ThemeMode, ThemeName } from "../theme.ts";
 import { renderConfig, type ConfigProps } from "./config.ts";
 
@@ -98,7 +99,8 @@ describe("config view", () => {
     container.querySelector<HTMLButtonElement>(".config-raw-toggle.active")?.click();
   }
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await i18n.setLocale("en");
     resetRawRevealState();
   });
 
@@ -356,7 +358,8 @@ describe("config view", () => {
     });
 
     const text = normalizedText(container);
-    expect(text).toContain("1 secret redacted");
+    expect(text).toContain("redacted");
+    expect(text).toContain("1 sensitive values hidden.");
     expect(text).toContain("Use the reveal button above to edit the raw config.");
     expect(text).not.toContain("supersecret");
     expect(container.querySelector("textarea")).toBeNull();
