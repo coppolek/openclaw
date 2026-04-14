@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import path from "node:path";
 import {
   getRegisteredAgentHarness,
@@ -1426,7 +1427,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
           if (!tool) {
             throw new Error(`Tool factory did not produce tool: ${toolName}`);
           }
-          const toolCallId = `plugin-${record.id}-${Date.now()}`;
+          const toolCallId = `plugin-${record.id}-${crypto.randomUUID()}`;
           return tool.execute(toolCallId, toolParams);
         },
       },
