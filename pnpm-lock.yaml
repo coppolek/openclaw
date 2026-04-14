@@ -199,9 +199,6 @@ importers:
       node-edge-tts:
         specifier: ^1.2.10
         version: 1.2.10
-      node-llama-cpp:
-        specifier: 3.18.1
-        version: 3.18.1(typescript@6.0.2)
       nostr-tools:
         specifier: ^2.23.3
         version: 2.23.3(typescript@6.0.2)
@@ -339,6 +336,9 @@ importers:
       music-metadata:
         specifier: ^11.12.3
         version: 11.12.3
+      node-llama-cpp:
+        specifier: ^3.18.1
+        version: 3.18.1(typescript@6.0.2)
       openshell:
         specifier: 0.1.0
         version: 0.1.0
@@ -6258,10 +6258,6 @@ packages:
     resolution: {integrity: sha512-eonl3sLUha+S1GzTPxychyhnUzKyeQkZ7jLjKrBagJgPla13F+uQ71HgpFefyHgqrjEbCPkDArxYsjY8/+gLKA==}
     engines: {node: '>= 0.4.0'}
 
-  node-addon-api@8.6.0:
-    resolution: {integrity: sha512-gBVjCaqDlRUk0EwoPNKzIr9KkS9041G/q31IBShPs1Xz6UTA+EXdZADbzqAJQrpDRq71CIMnOP5VMut3SL0z5Q==}
-    engines: {node: ^18 || ^20 || >= 21}
-
   node-addon-api@8.7.0:
     resolution: {integrity: sha512-9MdFxmkKaOYVTV+XVRG8ArDwwQ77XIgIPyKASB1k3JPq3M8fGQQQE3YpMOrKm6g//Ktx8ivZr8xo1Qmtqub+GA==}
     engines: {node: ^18 || ^20 || >= 21}
@@ -9037,7 +9033,8 @@ snapshots:
     dependencies:
       hono: 4.12.12
 
-  '@huggingface/jinja@0.5.6': {}
+  '@huggingface/jinja@0.5.6':
+    optional: true
 
   '@img/colour@1.1.0': {}
 
@@ -9426,8 +9423,10 @@ snapshots:
       debug: 4.4.3
     transitivePeerDependencies:
       - supports-color
+    optional: true
 
-  '@kwsites/promise-deferred@1.1.1': {}
+  '@kwsites/promise-deferred@1.1.1':
+    optional: true
 
   '@lancedb/lancedb-darwin-arm64@0.27.2':
     optional: true
@@ -10994,7 +10993,8 @@ snapshots:
   '@thi.ng/errors@2.6.7':
     optional: true
 
-  '@tinyhttp/content-disposition@2.2.4': {}
+  '@tinyhttp/content-disposition@2.2.4':
+    optional: true
 
   '@tloncorp/tlon-skill-darwin-arm64@0.3.5':
     optional: true
@@ -11520,7 +11520,8 @@ snapshots:
 
   another-json@0.2.0: {}
 
-  ansi-escapes@6.2.1: {}
+  ansi-escapes@6.2.1:
+    optional: true
 
   ansi-regex@5.0.1: {}
 
@@ -11530,7 +11531,8 @@ snapshots:
     dependencies:
       color-convert: 2.0.1
 
-  ansi-styles@6.2.3: {}
+  ansi-styles@6.2.3:
+    optional: true
 
   ansis@4.2.0: {}
 
@@ -11598,6 +11600,7 @@ snapshots:
   async-retry@1.3.3:
     dependencies:
       retry: 0.13.1
+    optional: true
 
   asynckit@0.4.0: {}
 
@@ -11809,7 +11812,8 @@ snapshots:
     dependencies:
       is-regex: 1.2.1
 
-  chmodrp@1.0.2: {}
+  chmodrp@1.0.2:
+    optional: true
 
   chokidar@5.0.0:
     dependencies:
@@ -11817,7 +11821,8 @@ snapshots:
 
   chownr@3.0.0: {}
 
-  ci-info@4.4.0: {}
+  ci-info@4.4.0:
+    optional: true
 
   cjs-module-lexer@2.2.0: {}
 
@@ -11828,6 +11833,7 @@ snapshots:
   cli-cursor@5.0.0:
     dependencies:
       restore-cursor: 5.1.0
+    optional: true
 
   cli-highlight@2.1.11:
     dependencies:
@@ -11840,7 +11846,8 @@ snapshots:
 
   cli-spinners@2.9.2: {}
 
-  cli-spinners@3.4.0: {}
+  cli-spinners@3.4.0:
+    optional: true
 
   cli-table3@0.6.5:
     dependencies:
@@ -11875,6 +11882,7 @@ snapshots:
       yargs: 17.7.2
     transitivePeerDependencies:
       - supports-color
+    optional: true
 
   codec-parser@2.5.0:
     optional: true
@@ -11910,7 +11918,8 @@ snapshots:
       table-layout: 4.1.1
       typical: 7.3.0
 
-  commander@10.0.1: {}
+  commander@10.0.1:
+    optional: true
 
   commander@12.1.0: {}
 
@@ -12154,7 +12163,8 @@ snapshots:
 
   ee-first@1.1.1: {}
 
-  emoji-regex@10.6.0: {}
+  emoji-regex@10.6.0:
+    optional: true
 
   emoji-regex@8.0.0: {}
 
@@ -12177,7 +12187,8 @@ snapshots:
 
   entities@7.0.1: {}
 
-  env-var@7.5.0: {}
+  env-var@7.5.0:
+    optional: true
 
   es-define-property@1.0.1: {}
 
@@ -12397,11 +12408,13 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  filename-reserved-regex@3.0.0: {}
+  filename-reserved-regex@3.0.0:
+    optional: true
 
   filenamify@6.0.0:
     dependencies:
       filename-reserved-regex: 3.0.0
+    optional: true
 
   filing-cabinet@5.2.0:
     dependencies:
@@ -12834,6 +12847,7 @@ snapshots:
       strip-ansi: 7.2.0
     optionalDependencies:
       '@reflink/reflink': 0.1.19
+    optional: true
 
   ircv3@0.33.1:
     dependencies:
@@ -12868,6 +12882,7 @@ snapshots:
   is-fullwidth-code-point@5.1.0:
     dependencies:
       get-east-asian-width: 1.5.0
+    optional: true
 
   is-glob@4.0.3:
     dependencies:
@@ -12879,7 +12894,8 @@ snapshots:
 
   is-interactive@1.0.0: {}
 
-  is-interactive@2.0.0: {}
+  is-interactive@2.0.0:
+    optional: true
 
   is-network-error@1.3.1: {}
 
@@ -12906,7 +12922,8 @@ snapshots:
 
   is-unicode-supported@0.1.0: {}
 
-  is-unicode-supported@2.1.0: {}
+  is-unicode-supported@2.1.0:
+    optional: true
 
   is-url-superb@4.0.0: {}
 
@@ -12920,7 +12937,8 @@ snapshots:
 
   isexe@2.0.0: {}
 
-  isexe@4.0.0: {}
+  isexe@4.0.0:
+    optional: true
 
   istanbul-lib-coverage@3.2.2: {}
 
@@ -13119,9 +13137,11 @@ snapshots:
     dependencies:
       immediate: 3.0.6
 
-  lifecycle-utils@2.1.0: {}
+  lifecycle-utils@2.1.0:
+    optional: true
 
-  lifecycle-utils@3.1.1: {}
+  lifecycle-utils@3.1.1:
+    optional: true
 
   lightningcss-android-arm64@1.32.0:
     optional: true
@@ -13206,7 +13226,8 @@ snapshots:
 
   lodash.clonedeep@4.5.0: {}
 
-  lodash.debounce@4.0.8: {}
+  lodash.debounce@4.0.8:
+    optional: true
 
   lodash.identity@3.0.0: {}
 
@@ -13237,6 +13258,7 @@ snapshots:
     dependencies:
       is-unicode-supported: 2.1.0
       yoctocolors: 2.1.2
+    optional: true
 
   loglevel@1.9.2: {}
 
@@ -13247,6 +13269,7 @@ snapshots:
   lowdb@7.0.1:
     dependencies:
       steno: 4.0.2
+    optional: true
 
   lru-cache@11.3.3: {}
 
@@ -13413,7 +13436,8 @@ snapshots:
 
   mimic-fn@2.1.0: {}
 
-  mimic-function@5.0.1: {}
+  mimic-function@5.0.1:
+    optional: true
 
   minimatch@10.2.4:
     dependencies:
@@ -13474,18 +13498,18 @@ snapshots:
 
   nanoid@3.3.11: {}
 
-  nanoid@5.1.6: {}
+  nanoid@5.1.6:
+    optional: true
 
   negotiator@1.0.0: {}
 
   netmask@2.1.1: {}
 
-  node-addon-api@8.6.0: {}
-
   node-addon-api@8.7.0:
     optional: true
 
-  node-api-headers@1.8.0: {}
+  node-api-headers@1.8.0:
+    optional: true
 
   node-downloader-helper@2.1.11: {}
 
@@ -13527,7 +13551,7 @@ snapshots:
       lifecycle-utils: 3.1.1
       log-symbols: 7.0.1
       nanoid: 5.1.6
-      node-addon-api: 8.6.0
+      node-addon-api: 8.7.0
       ora: 9.3.0
       pretty-ms: 9.3.0
       proper-lockfile: 4.1.2
@@ -13556,6 +13580,7 @@ snapshots:
       typescript: 6.0.2
     transitivePeerDependencies:
       - supports-color
+    optional: true
 
   node-readable-to-web-readable-stream@0.4.2:
     optional: true
@@ -13644,6 +13669,7 @@ snapshots:
   onetime@7.0.0:
     dependencies:
       mimic-function: 5.0.1
+    optional: true
 
   oniguruma-parser@0.12.1: {}
 
@@ -13708,6 +13734,7 @@ snapshots:
       log-symbols: 7.0.1
       stdin-discarder: 0.3.1
       string-width: 8.2.0
+    optional: true
 
   osc-progress@0.3.0: {}
 
@@ -13849,9 +13876,11 @@ snapshots:
 
   parse-ms@2.1.0: {}
 
-  parse-ms@3.0.0: {}
+  parse-ms@3.0.0:
+    optional: true
 
-  parse-ms@4.0.0: {}
+  parse-ms@4.0.0:
+    optional: true
 
   parse5-htmlparser2-tree-adapter@6.0.1:
     dependencies:
@@ -13973,7 +14002,8 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  pretty-bytes@6.1.1: {}
+  pretty-bytes@6.1.1:
+    optional: true
 
   pretty-ms@7.0.1:
     dependencies:
@@ -13982,10 +14012,12 @@ snapshots:
   pretty-ms@8.0.0:
     dependencies:
       parse-ms: 3.0.0
+    optional: true
 
   pretty-ms@9.3.0:
     dependencies:
       parse-ms: 4.0.0
+    optional: true
 
   prism-media@1.3.5(@discordjs/opus@0.10.0)(opusscript@0.1.1):
     optionalDependencies:
@@ -14279,6 +14311,7 @@ snapshots:
     dependencies:
       onetime: 7.0.0
       signal-exit: 4.1.0
+    optional: true
 
   retry@0.12.0: {}
 
@@ -14519,7 +14552,8 @@ snapshots:
 
   signal-exit@3.0.7: {}
 
-  signal-exit@4.1.0: {}
+  signal-exit@4.1.0:
+    optional: true
 
   signal-polyfill@0.2.2: {}
 
@@ -14536,6 +14570,7 @@ snapshots:
       debug: 4.4.3
     transitivePeerDependencies:
       - supports-color
+    optional: true
 
   simple-xml-to-json@1.2.7: {}
 
@@ -14558,17 +14593,20 @@ snapshots:
       - bare-buffer
       - react-native-b4a
 
-  sleep-promise@9.1.0: {}
+  sleep-promise@9.1.0:
+    optional: true
 
   slice-ansi@7.1.2:
     dependencies:
       ansi-styles: 6.2.3
       is-fullwidth-code-point: 5.1.0
+    optional: true
 
   slice-ansi@8.0.0:
     dependencies:
       ansi-styles: 6.2.3
       is-fullwidth-code-point: 5.1.0
+    optional: true
 
   smart-buffer@4.2.0: {}
 
@@ -14643,7 +14681,8 @@ snapshots:
 
   std-env@4.0.0: {}
 
-  stdin-discarder@0.3.1: {}
+  stdin-discarder@0.3.1:
+    optional: true
 
   stdout-update@4.0.1:
     dependencies:
@@ -14651,8 +14690,10 @@ snapshots:
       ansi-styles: 6.2.3
       string-width: 7.2.0
       strip-ansi: 7.2.0
+    optional: true
 
-  steno@4.0.2: {}
+  steno@4.0.2:
+    optional: true
 
   stream-to-array@2.3.0:
     dependencies:
@@ -14678,11 +14719,13 @@ snapshots:
       emoji-regex: 10.6.0
       get-east-asian-width: 1.5.0
       strip-ansi: 7.2.0
+    optional: true
 
   string-width@8.2.0:
     dependencies:
       get-east-asian-width: 1.5.0
       strip-ansi: 7.2.0
+    optional: true
 
   string_decoder@1.1.1:
     dependencies:
@@ -14983,7 +15026,8 @@ snapshots:
       - '@emnapi/core'
       - '@emnapi/runtime'
 
-  url-join@4.0.1: {}
+  url-join@4.0.1:
+    optional: true
 
   url-parse@1.5.10:
     dependencies:
@@ -15002,7 +15046,8 @@ snapshots:
 
   uuid@9.0.1: {}
 
-  validate-npm-package-name@7.0.2: {}
+  validate-npm-package-name@7.0.2:
+    optional: true
 
   vary@1.1.2: {}
 
@@ -15102,6 +15147,7 @@ snapshots:
   which@6.0.1:
     dependencies:
       isexe: 4.0.0
+    optional: true
 
   why-is-node-running@2.3.0:
     dependencies:
