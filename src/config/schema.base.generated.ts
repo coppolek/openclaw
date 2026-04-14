@@ -7041,6 +7041,44 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                           minimum: 0,
                           maximum: 9007199254740991,
                         },
+                        rubberband: {
+                          type: "object",
+                          properties: {
+                            enabled: {
+                              type: "boolean",
+                            },
+                            mode: {
+                              type: "string",
+                              enum: ["block", "alert", "log", "off", "shadow"],
+                            },
+                            thresholds: {
+                              type: "object",
+                              properties: {
+                                alert: {
+                                  type: "integer",
+                                  minimum: 0,
+                                  maximum: 100,
+                                },
+                                block: {
+                                  type: "integer",
+                                  minimum: 0,
+                                  maximum: 100,
+                                },
+                              },
+                              additionalProperties: false,
+                            },
+                            allowedDestinations: {
+                              type: "array",
+                              items: {
+                                type: "string",
+                              },
+                            },
+                            notifyChannel: {
+                              type: "boolean",
+                            },
+                          },
+                          additionalProperties: false,
+                        },
                       },
                       additionalProperties: false,
                     },
@@ -17291,6 +17329,59 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                 },
                 additionalProperties: false,
               },
+              rubberband: {
+                type: "object",
+                properties: {
+                  enabled: {
+                    type: "boolean",
+                    title: "RubberBand Enabled",
+                    description:
+                      "Enable RubberBand static command pattern detection (default: true).",
+                  },
+                  mode: {
+                    type: "string",
+                    enum: ["block", "alert", "log", "off", "shadow"],
+                    title: "RubberBand Mode",
+                    description: "RubberBand enforcement mode: block, alert, log, shadow, or off.",
+                  },
+                  thresholds: {
+                    type: "object",
+                    properties: {
+                      alert: {
+                        type: "integer",
+                        minimum: 0,
+                        maximum: 100,
+                        title: "RubberBand Alert Threshold",
+                        description: "Score threshold to trigger an alert (default: 40).",
+                      },
+                      block: {
+                        type: "integer",
+                        minimum: 0,
+                        maximum: 100,
+                        title: "RubberBand Block Threshold",
+                        description: "Score threshold to block execution (default: 60).",
+                      },
+                    },
+                    additionalProperties: false,
+                  },
+                  allowedDestinations: {
+                    type: "array",
+                    items: {
+                      type: "string",
+                    },
+                    title: "RubberBand Allowed Destinations",
+                    description:
+                      "Hostnames/IPs allowed for network commands (e.g. localhost, 127.0.0.1). Destinations not on this list raise the exfil score.",
+                  },
+                  notifyChannel: {
+                    type: "boolean",
+                    title: "RubberBand Notify User Channel",
+                    description:
+                      "When true, RubberBand alerts/blocks are sent to the user's messaging channel.",
+                  },
+                },
+                additionalProperties: false,
+              },
             },
             additionalProperties: false,
             title: "Exec Tool",
@@ -23902,6 +23993,36 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
     "tools.exec.strictInlineEval": {
       label: "Require Inline-Eval Approval",
       help: "Require explicit approval for interpreter inline-eval forms such as `python -c`, `node -e`, `ruby -e`, or `osascript -e`. Prevents silent allowlist reuse and downgrades allow-always to ask-each-time for those forms.",
+      tags: ["tools"],
+    },
+    "tools.exec.rubberband.enabled": {
+      label: "RubberBand Enabled",
+      help: "Enable RubberBand static command pattern detection (default: true).",
+      tags: ["tools"],
+    },
+    "tools.exec.rubberband.mode": {
+      label: "RubberBand Mode",
+      help: "RubberBand enforcement mode: block, alert, log, shadow, or off.",
+      tags: ["tools"],
+    },
+    "tools.exec.rubberband.thresholds.alert": {
+      label: "RubberBand Alert Threshold",
+      help: "Score threshold to trigger an alert (default: 40).",
+      tags: ["tools"],
+    },
+    "tools.exec.rubberband.thresholds.block": {
+      label: "RubberBand Block Threshold",
+      help: "Score threshold to block execution (default: 60).",
+      tags: ["tools"],
+    },
+    "tools.exec.rubberband.allowedDestinations": {
+      label: "RubberBand Allowed Destinations",
+      help: "Hostnames/IPs allowed for network commands (e.g. localhost, 127.0.0.1). Destinations not on this list raise the exfil score.",
+      tags: ["access", "tools"],
+    },
+    "tools.exec.rubberband.notifyChannel": {
+      label: "RubberBand Notify User Channel",
+      help: "When true, RubberBand alerts/blocks are sent to the user's messaging channel.",
       tags: ["tools"],
     },
     "tools.exec.safeBinTrustedDirs": {
