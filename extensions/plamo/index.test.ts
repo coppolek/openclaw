@@ -177,6 +177,29 @@ describe("plamo provider plugin", () => {
     expect(resolved?.method.id).toBe("api-key");
   });
 
+  it("advertises PLaMo refs as modern models", async () => {
+    const provider = await registerSingleProviderPlugin(plamoPlugin);
+
+    expect(
+      provider.isModernModelRef?.({
+        provider: "plamo",
+        modelId: "plamo-3.0-prime-beta",
+      } as never),
+    ).toBe(true);
+    expect(
+      provider.isModernModelRef?.({
+        provider: "plamo",
+        modelId: " PLaMo-next-preview ",
+      } as never),
+    ).toBe(true);
+    expect(
+      provider.isModernModelRef?.({
+        provider: "plamo",
+        modelId: "gpt-5.4",
+      } as never),
+    ).toBe(false);
+  });
+
   it("builds the static PLaMo model catalog", async () => {
     const { provider, catalog } = await loadPlamoCatalog();
     expect(provider.catalog).toBeDefined();

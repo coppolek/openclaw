@@ -23,9 +23,13 @@ const OPENAI_COMPATIBLE_REPLAY_HOOKS = buildProviderReplayFamilyHooks({
   family: "openai-compatible",
 });
 
+function isPlamoModelId(modelId: string): boolean {
+  return modelId.trim().toLowerCase().startsWith("plamo-");
+}
+
 function resolvePlamoDynamicModel(ctx: ProviderResolveDynamicModelContext) {
   const modelId = ctx.modelId.trim();
-  if (!modelId || !modelId.startsWith("plamo-")) {
+  if (!modelId || !isPlamoModelId(modelId)) {
     return undefined;
   }
 
@@ -96,6 +100,7 @@ export default defineSingleProviderPluginEntry({
         parameters: normalizeOpenAICompatibleToolParameters(tool.parameters),
       })),
     resolveDynamicModel: (ctx) => resolvePlamoDynamicModel(ctx),
+    isModernModelRef: ({ modelId }) => isPlamoModelId(modelId),
     createStreamFn: () => createPlamoToolCallWrapper(undefined),
   },
 });
