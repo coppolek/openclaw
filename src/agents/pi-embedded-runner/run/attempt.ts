@@ -16,12 +16,6 @@ import {
   ensureGlobalUndiciStreamTimeouts,
 } from "../../../infra/net/undici-global-dispatcher.js";
 import { MAX_IMAGE_BYTES } from "../../../media/constants.js";
-import {
-  isOllamaCompatProvider,
-  resolveOllamaCompatNumCtxEnabled,
-  shouldInjectOllamaCompatNumCtx,
-  wrapOllamaCompatNumCtx,
-} from "../../../plugin-sdk/ollama-runtime.js";
 import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
 import { resolveToolCallArgumentsEncoding } from "../../../plugins/provider-model-compat.js";
 import {
@@ -1305,7 +1299,7 @@ export async function runEmbeddedAttempt(
             activeSession.agent.streamFn = wrapper(activeSession.agent.streamFn);
           } catch (err) {
             // Isolate wrapper failures — skip the failing wrapper rather than stalling the attempt.
-            log.warn("plugin streamFn wrapper failed; skipping", { err });
+            log.warn(`plugin streamFn wrapper failed; skipping: ${String(err)}`);
           }
         }
       }
