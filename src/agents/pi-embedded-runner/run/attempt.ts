@@ -23,13 +23,13 @@ import {
   wrapOllamaCompatNumCtx,
 } from "../../../plugin-sdk/ollama-runtime.js";
 import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
-import { getActivePluginRegistry } from "../../../plugins/runtime.js";
 import { resolveToolCallArgumentsEncoding } from "../../../plugins/provider-model-compat.js";
 import {
   resolveProviderSystemPromptContribution,
   resolveProviderTextTransforms,
   transformProviderSystemPrompt,
 } from "../../../plugins/provider-runtime.js";
+import { getActivePluginRegistry } from "../../../plugins/runtime.js";
 import { isSubagentSessionKey } from "../../../routing/session-key.js";
 import { normalizeOptionalLowercaseString } from "../../../shared/string-coerce.js";
 import { normalizeOptionalString } from "../../../shared/string-coerce.js";
@@ -1301,7 +1301,12 @@ export async function runEmbeddedAttempt(
       const pluginStreamFnWrappers = getActivePluginRegistry()?.streamFnWrappers;
       if (pluginStreamFnWrappers?.length) {
         for (const wrapper of pluginStreamFnWrappers) {
-          activeSession.agent.streamFn = wrapper(activeSession.agent.streamFn);
+          try {
+            activeSession.agent.streamFn = wrapper(activeSession.agent.streamFn);
+          } catch (err) {
+            // Isolate wrapper failures — skip the failing wrapper rather than stalling the attempt.
+            log.warn("plugin streamFn wrapper failed; skipping", { err });
+          }
         }
       }
 
