@@ -452,6 +452,8 @@ The action is gated by `channels.msteams.actions.memberInfo` (default: enabled w
 - `channels.msteams.historyLimit` controls how many recent channel/group messages are wrapped into the prompt.
 - Falls back to `messages.groupChat.historyLimit`. Set `0` to disable (default 50).
 - Fetched thread history is filtered by sender allowlists (`allowFrom` / `groupAllowFrom`), so thread context seeding only includes messages from allowed senders.
+- In channel threads, an explicit `@OpenClaw` reply with no additional text still triggers a reply. OpenClaw uses the thread context to infer what the user wants. Top-level channel posts that only mention the bot are still ignored.
+  - **Requires `ChannelMessage.Read.All` Graph Application permission** (admin-consented in Entra ID). Without it, thread history cannot be fetched and the bot will instead ask the user what they need help with.
 - Quoted attachment context (`ReplyTo*` derived from Teams reply HTML) is currently passed as received.
 - In other words, allowlists gate who can trigger the agent; only specific supplemental context paths are filtered today.
 - DM history can be limited with `channels.msteams.dmHistoryLimit` (user turns). Per-user overrides: `channels.msteams.dms["<user_id>"].historyLimit`.

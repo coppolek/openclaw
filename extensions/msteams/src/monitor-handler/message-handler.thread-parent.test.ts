@@ -234,4 +234,105 @@ describe("msteams thread parent context injection", () => {
     expect(fetchChannelMessageMock).not.toHaveBeenCalled();
     expect(findParentSystemEventCall(enqueueSystemEvent)).toBeUndefined();
   });
+
+  it("dispatches mention-only thread replies with thread context", async () => {
+    fetchChannelMessageMock.mockResolvedValue({
+      id: "thread-root-123",
+      from: { user: { displayName: "Alice", id: "alice-id" } },
+      body: { content: "Can someone investigate the latency spike?", contentType: "text" },
+    });
+    fetchThreadRepliesMock.mockResolvedValue([
+      {
+        id: "thread-reply-1",
+        from: { user: { displayName: "Bob", id: "bob-id" } },
+        body: { content: "The p95 is spiking again.", contentType: "text" },
+      },
+    ]);
+    runtimeApiMockState.dispatchReplyFromConfigWithSettledDispatcher.mockResolvedValueOnce({
+      queuedFinal: false,
+      counts: {},
+    });
+    const { deps } = createMessageHandlerDeps(cfg);
+    const handler = createMSTeamsMessageHandler(deps);
+
+    await handler({
+      activity: buildChannelActivity({
+        id: "msg-reply-mention-only",
+        text: "<at>Bot</at>",
+        replyToId: "thread-root-123",
+      }),
+      sendActivity: vi.fn(async () => undefined),
+    } as unknown as Parameters<typeof handler>[0]);
+
+    expect(runtimeApiMockState.dispatchReplyFromConfigWithSettledDispatcher).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(
+      runtimeApiMockState.dispatchReplyFromConfigWithSettledDispatcher.mock.calls[0]?.[0]
+        ?.ctxPayload,
+    ).toMatchObject({
+      RawBody: "",
+      WasMentioned: true,
+      ReplyToId: "thread-root-123",
+      BodyForAgent:
+        "[Thread history]\nAlice: Can someone investigate the latency spike?\nBob: The p95 is spiking again.\n[/Thread history]\n\nThe user mentioned you in this thread without additional text. Use the thread context to infer what they want and reply in the thread.",
+    });
+  });
+
+  it("still skips mention-only top-level channel posts", async () => {
+    const { deps, enqueueSystemEvent } = createMessageHandlerDeps(cfg);
+    const handler = createMSTeamsMessageHandler(deps);
+
+    await handler({
+      activity: buildChannelActivity({
+        id: "msg-root-mention-only",
+        text: "<at>Bot</at>",
+        replyToId: undefined,
+      }),
+      sendActivity: vi.fn(async () => undefined),
+    } as unknown as Parameters<typeof handler>[0]);
+
+    expect(fetchChannelMessageMock).not.toHaveBeenCalled();
+    expect(runtimeApiMockState.dispatchReplyFromConfigWithSettledDispatcher).not.toHaveBeenCalled();
+    expect(enqueueSystemEvent).not.toHaveBeenCalled();
+  });
+
+  it("uses fallback text when mention-only but Graph fetch fails", async () => {
+    fetchChannelMessageMock.mockRejectedValue(new Error("403 Forbidden"));
+    fetchThreadRepliesMock.mockRejectedValue(new Error("403 Forbidden"));
+    runtimeApiMockState.dispatchReplyFromConfigWithSettledDispatcher.mockResolvedValueOnce({
+      queuedFinal: false,
+      counts: {},
+    });
+    const { deps } = createMessageHandlerDeps(cfg);
+    const handler = createMSTeamsMessageHandler(deps);
+
+    await handler({
+      activity: buildChannelActivity({
+        id: "msg-reply-mention-only-noperm",
+        text: "<at>Bot</at>",
+        replyToId: "thread-root-123",
+      }),
+      sendActivity: vi.fn(async () => undefined),
+    } as unknown as Parameters<typeof handler>[0]);
+
+    expect(runtimeApiMockState.dispatchReplyFromConfigWithSettledDispatcher).toHaveBeenCalledTimes(
+      1,
+    );
+    const ctxPayload =
+      runtimeApiMockState.dispatchReplyFromConfigWithSettledDispatcher.mock.calls[0]?.[0]
+        ?.ctxPayload;
+    expect(ctxPayload).toMatchObject({
+      RawBody: "",
+      WasMentioned: true,
+      ReplyToId: "thread-root-123",
+    });
+    // Should use fallback text (no thread context), not the "use thread context" instruction.
+    expect((ctxPayload as { BodyForAgent?: string }).BodyForAgent).toContain(
+      "no thread history was accessible",
+    );
+    expect((ctxPayload as { BodyForAgent?: string }).BodyForAgent).not.toContain(
+      "[Thread history]",
+    );
+  });
 });

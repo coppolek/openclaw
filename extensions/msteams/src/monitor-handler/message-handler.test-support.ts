@@ -75,6 +75,7 @@ export function createMessageHandlerDeps(cfg: OpenClawConfig) {
     log: {
       info: vi.fn(),
       debug: vi.fn(),
+      warn: vi.fn(),
       error: vi.fn(),
     } as unknown as MSTeamsMessageHandlerDeps["log"],
   };

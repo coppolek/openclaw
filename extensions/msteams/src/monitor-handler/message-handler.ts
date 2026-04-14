@@ -184,6 +184,11 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
     implicitMentionKinds: Array<"reply_to_bot">;
   };
 
+  const mentionOnlyThreadInvokeText =
+    "The user mentioned you in this thread without additional text. Use the thread context to infer what they want and reply in the thread.";
+  const mentionOnlyThreadInvokeFallbackText =
+    "The user mentioned you in this thread but no thread history was accessible. Greet them and ask what you can help with.";
+
   const handleTeamsMessageNow = async (params: MSTeamsDebounceEntry) => {
     const context = params.context;
     const activity = context.activity;
@@ -449,53 +454,6 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
       return;
     }
 
-    if (!rawBody) {
-      log.debug?.("skipping empty message after stripping mentions");
-      return;
-    }
-
-    const teamsFrom = isDirectMessage
-      ? `msteams:${senderId}`
-      : isChannel
-        ? `msteams:channel:${conversationId}`
-        : `msteams:group:${conversationId}`;
-    const teamsTo = isDirectMessage ? `user:${senderId}` : `conversation:${conversationId}`;
-
-    const route = core.channel.routing.resolveAgentRoute({
-      cfg,
-      channel: "msteams",
-      teamId,
-      peer: {
-        kind: isDirectMessage ? "direct" : isChannel ? "channel" : "group",
-        id: isDirectMessage ? senderId : conversationId,
-      },
-    });
-
-    // Isolate channel thread sessions: each thread gets its own session key so
-    // context does not bleed across threads. Prefer conversationMessageId (the
-    // ;messageid= portion of conversation.id, i.e. the thread root) over
-    // activity.replyToId (which may point to a non-root parent in deep threads).
-    // DMs and group chats are unaffected — only channel thread replies fork.
-    const channelThreadId = isChannel
-      ? (conversationMessageId ?? activity.replyToId ?? undefined)
-      : undefined;
-    const threadKeys = resolveThreadSessionKeys({
-      baseSessionKey: route.sessionKey,
-      threadId: channelThreadId,
-      parentSessionKey: channelThreadId ? route.sessionKey : undefined,
-    });
-    route.sessionKey = threadKeys.sessionKey;
-
-    const preview = rawBody.replace(/\s+/g, " ").slice(0, 160);
-    const inboundLabel = isDirectMessage
-      ? `Teams DM from ${senderName}`
-      : `Teams message in ${conversationType} from ${senderName}`;
-
-    core.system.enqueueSystemEvent(`${inboundLabel}: ${preview}`, {
-      sessionKey: route.sessionKey,
-      contextKey: `msteams:message:${conversationId}:${activity.id ?? "unknown"}`,
-    });
-
     const channelId = conversationId;
     const { teamConfig, channelConfig } = channelGate;
     const { requireMention, replyStyle } = resolveMSTeamsReplyPolicy({
@@ -543,6 +501,58 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
         return;
       }
     }
+    const mentionOnlyThreadInvoke =
+      !rawBody && isChannel && Boolean(activity.replyToId) && mentionDecision.effectiveWasMentioned;
+
+    if (!rawBody && !mentionOnlyThreadInvoke) {
+      log.debug?.("skipping empty message after stripping mentions");
+      return;
+    }
+
+    const effectiveAgentBody = mentionOnlyThreadInvoke ? mentionOnlyThreadInvokeText : rawBody;
+    const previewBody = mentionOnlyThreadInvoke ? "@mentioned bot in thread" : rawBody;
+    const teamsFrom = isDirectMessage
+      ? `msteams:${senderId}`
+      : isChannel
+        ? `msteams:channel:${conversationId}`
+        : `msteams:group:${conversationId}`;
+    const teamsTo = isDirectMessage ? `user:${senderId}` : `conversation:${conversationId}`;
+
+    const route = core.channel.routing.resolveAgentRoute({
+      cfg,
+      channel: "msteams",
+      teamId,
+      peer: {
+        kind: isDirectMessage ? "direct" : isChannel ? "channel" : "group",
+        id: isDirectMessage ? senderId : conversationId,
+      },
+    });
+
+    // Isolate channel thread sessions: each thread gets its own session key so
+    // context does not bleed across threads. Prefer conversationMessageId (the
+    // ;messageid= portion of conversation.id, i.e. the thread root) over
+    // activity.replyToId (which may point to a non-root parent in deep threads).
+    // DMs and group chats are unaffected — only channel thread replies fork.
+    const channelThreadId = isChannel
+      ? (conversationMessageId ?? activity.replyToId ?? undefined)
+      : undefined;
+    const threadKeys = resolveThreadSessionKeys({
+      baseSessionKey: route.sessionKey,
+      threadId: channelThreadId,
+      parentSessionKey: channelThreadId ? route.sessionKey : undefined,
+    });
+    route.sessionKey = threadKeys.sessionKey;
+
+    const preview = previewBody.replace(/\s+/g, " ").slice(0, 160);
+    const inboundLabel = isDirectMessage
+      ? `Teams DM from ${senderName}`
+      : `Teams message in ${conversationType} from ${senderName}`;
+
+    core.system.enqueueSystemEvent(`${inboundLabel}: ${preview}`, {
+      sessionKey: route.sessionKey,
+      contextKey: `msteams:message:${conversationId}:${activity.id ?? "unknown"}`,
+    });
+
     let graphConversationId = translateMSTeamsDmConversationIdForGraph({
       isDirectMessage,
       conversationId,
@@ -624,14 +634,20 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
         const parentMsg = parentResult.status === "fulfilled" ? parentResult.value : undefined;
         const replies = repliesResult.status === "fulfilled" ? repliesResult.value : [];
         if (parentResult.status === "rejected") {
-          log.debug?.("failed to fetch parent message", {
-            error: formatUnknownError(parentResult.reason),
-          });
+          log.warn?.(
+            "failed to fetch parent message (check ChannelMessage.Read.All Graph permission)",
+            {
+              error: formatUnknownError(parentResult.reason),
+            },
+          );
         }
         if (repliesResult.status === "rejected") {
-          log.debug?.("failed to fetch thread replies", {
-            error: formatUnknownError(repliesResult.reason),
-          });
+          log.warn?.(
+            "failed to fetch thread replies (check ChannelMessage.Read.All Graph permission)",
+            {
+              error: formatUnknownError(repliesResult.reason),
+            },
+          );
         }
         const isThreadSenderAllowed = (msg: GraphThreadMessage) =>
           groupPolicy === "allowlist"
@@ -679,7 +695,12 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
           threadContext = formatted;
         }
       } catch (err) {
-        log.debug?.("failed to fetch thread history", { error: formatUnknownError(err) });
+        log.warn?.(
+          "failed to fetch thread history (check ChannelMessage.Read.All Graph permission)",
+          {
+            error: formatUnknownError(err),
+          },
+        );
         // Graceful degradation: thread history is an optional enhancement.
       }
     }
@@ -697,7 +718,7 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
       timestamp,
       previousTimestamp,
       envelope: envelopeOptions,
-      body: rawBody,
+      body: effectiveAgentBody,
     });
     let combinedBody = body;
     const isRoomish = !isDirectMessage;
@@ -748,9 +769,16 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
       });
 
     // Prepend thread history to the agent body so the agent has full thread context.
+    // For mention-only thread invocations with no thread context (e.g. missing
+    // ChannelMessage.Read.All Graph permission), use a fallback prompt so the agent
+    // greets the user instead of claiming it will use context it doesn't have.
+    const resolvedAgentBody =
+      mentionOnlyThreadInvoke && !threadContext
+        ? mentionOnlyThreadInvokeFallbackText
+        : effectiveAgentBody;
     const bodyForAgent = threadContext
-      ? `[Thread history]\n${threadContext}\n[/Thread history]\n\n${rawBody}`
-      : rawBody;
+      ? `[Thread history]\n${threadContext}\n[/Thread history]\n\n${resolvedAgentBody}`
+      : resolvedAgentBody;
 
     // For Teams *channel* messages (not group chats / DMs), preserve the
     // `teamId/channelId` pair on NativeChannelId so downstream action handlers
