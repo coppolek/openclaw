@@ -15,11 +15,23 @@ export function resolvePnpmRunner(params = {}) {
   const comSpec = params.comSpec ?? process.env.ComSpec ?? "cmd.exe";
 
   if (typeof npmExecPath === "string" && npmExecPath.length > 0 && isPnpmExecPath(npmExecPath)) {
-    return {
-      command: nodeExecPath,
-      args: [...nodeArgs, npmExecPath, ...pnpmArgs],
-      shell: false,
-    };
+    // On WSL/Linux, npm_execpath may point to a native ELF binary.
+    // Running it via node will fail — exec it directly instead.
+    const isJsScript = /\.c?js$/i.test(npmExecPath);
+    if (isJsScript) {
+      return {
+        command: nodeExecPath,
+        args: [...nodeArgs, npmExecPath, ...pnpmArgs],
+        shell: false,
+      };
+    } else {
+      // ELF binary or other executable — run directly, not via node
+      return {
+        command: npmExecPath,
+        args: pnpmArgs,
+        shell: false,
+      };
+    }
   }
 
   if (platform === "win32") {

@@ -90,6 +90,45 @@ describe("resolvePnpmRunner", () => {
     });
   });
 
+  it("runs the binary directly when npmExecPath has no .js/.cjs extension", () => {
+    const result = resolvePnpmRunner({
+      npmExecPath: "/home/user/.local/share/pnpm/pnpm",
+      pnpmArgs: ["build"],
+    });
+    expect(result.command).toBe("/home/user/.local/share/pnpm/pnpm");
+    expect(result.args).toEqual(["build"]);
+  });
+
+  it("runs via node when npmExecPath ends in .cjs", () => {
+    const result = resolvePnpmRunner({
+      npmExecPath: "/usr/lib/node_modules/pnpm/bin/pnpm-cli.cjs",
+      pnpmArgs: ["build"],
+      nodeExecPath: "/usr/bin/node",
+    });
+    expect(result.command).toBe("/usr/bin/node");
+    expect(result.args).toContain("/usr/lib/node_modules/pnpm/bin/pnpm-cli.cjs");
+  });
+
+  it("runs via node when npmExecPath ends in .js", () => {
+    const result = resolvePnpmRunner({
+      npmExecPath: "/usr/lib/node_modules/pnpm/bin/pnpm-cli.js",
+      pnpmArgs: ["build"],
+      nodeExecPath: "/usr/bin/node",
+    });
+    expect(result.command).toBe("/usr/bin/node");
+    expect(result.args).toContain("/usr/lib/node_modules/pnpm/bin/pnpm-cli.js");
+  });
+
+  it("ignores npmExecPath when it does not match the pnpm filename pattern", () => {
+    const result = resolvePnpmRunner({
+      npmExecPath: "/usr/bin/npm",
+      pnpmArgs: ["build"],
+      platform: "linux",
+    });
+    expect(result.command).toBe("pnpm");
+    expect(result.args).toEqual(["build"]);
+  });
+
   it("builds a shared spawn spec with inherited stdio and env overrides", () => {
     const env = { PATH: "/custom/bin", FOO: "bar" };
     expect(
