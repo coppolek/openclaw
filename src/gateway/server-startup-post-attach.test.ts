@@ -9,6 +9,7 @@ const hoisted = vi.hoisted(() => {
   const scheduleGatewayUpdateCheck = vi.fn(() => () => {});
   const startGatewayTailscaleExposure = vi.fn(async () => null);
   const logGatewayStartup = vi.fn();
+  const refreshLatestUpdateRestartSentinel = vi.fn(async () => null);
   const scheduleSubagentOrphanRecovery = vi.fn();
   const shouldWakeFromRestartSentinel = vi.fn(() => false);
   const scheduleRestartSentinelWake = vi.fn();
@@ -26,6 +27,7 @@ const hoisted = vi.hoisted(() => {
     scheduleGatewayUpdateCheck,
     startGatewayTailscaleExposure,
     logGatewayStartup,
+    refreshLatestUpdateRestartSentinel,
     scheduleSubagentOrphanRecovery,
     shouldWakeFromRestartSentinel,
     scheduleRestartSentinelWake,
@@ -85,6 +87,7 @@ vi.mock("../acp/control-plane/manager.js", () => ({
 }));
 
 vi.mock("./server-restart-sentinel.js", () => ({
+  refreshLatestUpdateRestartSentinel: hoisted.refreshLatestUpdateRestartSentinel,
   scheduleRestartSentinelWake: hoisted.scheduleRestartSentinelWake,
   shouldWakeFromRestartSentinel: hoisted.shouldWakeFromRestartSentinel,
 }));
@@ -122,6 +125,7 @@ describe("startGatewayPostAttachRuntime", () => {
     hoisted.scheduleGatewayUpdateCheck.mockClear();
     hoisted.startGatewayTailscaleExposure.mockClear();
     hoisted.logGatewayStartup.mockClear();
+    hoisted.refreshLatestUpdateRestartSentinel.mockClear();
     hoisted.scheduleSubagentOrphanRecovery.mockClear();
     hoisted.shouldWakeFromRestartSentinel.mockReturnValue(false);
     hoisted.scheduleRestartSentinelWake.mockClear();
@@ -139,6 +143,7 @@ describe("startGatewayPostAttachRuntime", () => {
     expect([...unavailableGatewayMethods]).toEqual([]);
     expect(hoisted.startPluginServices).toHaveBeenCalledTimes(1);
     expect(hoisted.setInternalHooksEnabled).toHaveBeenCalledWith(false);
+    expect(hoisted.refreshLatestUpdateRestartSentinel).toHaveBeenCalledTimes(1);
     expect(hoisted.logGatewayStartup).toHaveBeenCalledWith(
       expect.objectContaining({ loadedPluginIds: ["beta", "alpha"] }),
     );
@@ -186,6 +191,7 @@ function createPostAttachRuntimeDeps(
   return {
     getGlobalHookRunner: vi.fn(() => null),
     logGatewayStartup: hoisted.logGatewayStartup,
+    refreshLatestUpdateRestartSentinel: hoisted.refreshLatestUpdateRestartSentinel,
     scheduleGatewayUpdateCheck: hoisted.scheduleGatewayUpdateCheck,
     startGatewaySidecars: vi.fn(async () => ({ pluginServices: null })),
     startGatewayTailscaleExposure: hoisted.startGatewayTailscaleExposure,

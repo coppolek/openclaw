@@ -1155,7 +1155,7 @@ describe("runGatewayUpdate", () => {
     });
 
     expect(result.status).toBe("error");
-    expect(result.reason).toBe("global install verify");
+    expect(result.reason).toBe("global-install-failed");
     expect(result.after?.version).toBe("2.0.0");
     expect(result.steps.at(-1)?.stderrTail).toContain(
       "expected installed version 2026.3.23-2, found 2.0.0",
@@ -1183,7 +1183,7 @@ describe("runGatewayUpdate", () => {
     const result = await runWithCommand(runCommand, { cwd: pkgRoot });
 
     expect(result.status).toBe("error");
-    expect(result.reason).toBe("global install verify");
+    expect(result.reason).toBe("global-install-failed");
     expect(result.steps.at(-1)?.stderrTail).toContain(
       `missing bundled runtime sidecar ${WHATSAPP_LIGHT_RUNTIME_API}`,
     );

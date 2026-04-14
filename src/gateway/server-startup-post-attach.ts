@@ -38,6 +38,7 @@ import {
   type GatewayUpdateAvailableEventPayload,
 } from "./events.js";
 import {
+  refreshLatestUpdateRestartSentinel,
   scheduleRestartSentinelWake,
   shouldWakeFromRestartSentinel,
 } from "./server-restart-sentinel.js";
@@ -241,6 +242,7 @@ export async function startGatewaySidecars(params: {
 type GatewayPostAttachRuntimeDeps = {
   getGlobalHookRunner: typeof getGlobalHookRunner;
   logGatewayStartup: typeof logGatewayStartup;
+  refreshLatestUpdateRestartSentinel: typeof refreshLatestUpdateRestartSentinel;
   scheduleGatewayUpdateCheck: typeof scheduleGatewayUpdateCheck;
   startGatewaySidecars: typeof startGatewaySidecars;
   startGatewayTailscaleExposure: typeof startGatewayTailscaleExposure;
@@ -249,6 +251,7 @@ type GatewayPostAttachRuntimeDeps = {
 const defaultGatewayPostAttachRuntimeDeps: GatewayPostAttachRuntimeDeps = {
   getGlobalHookRunner,
   logGatewayStartup,
+  refreshLatestUpdateRestartSentinel,
   scheduleGatewayUpdateCheck,
   startGatewaySidecars,
   startGatewayTailscaleExposure,
@@ -293,6 +296,8 @@ export async function startGatewayPostAttachRuntime(
   },
   runtimeDeps: GatewayPostAttachRuntimeDeps = defaultGatewayPostAttachRuntimeDeps,
 ) {
+  await runtimeDeps.refreshLatestUpdateRestartSentinel();
+
   runtimeDeps.logGatewayStartup({
     cfg: params.cfgAtStart,
     bindHost: params.bindHost,
