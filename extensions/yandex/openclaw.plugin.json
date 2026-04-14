@@ -1,0 +1,37 @@
+{
+  "id": "yandex",
+  "enabledByDefault": true,
+  "providers": ["yandex"],
+  "providerAuthEnvVars": {
+    "yandex": ["YANDEX_API_KEY"]
+  },
+  "providerAuthChoices": [
+    {
+      "provider": "yandex",
+      "method": "api-key",
+      "choiceId": "yandex-api-key",
+      "choiceLabel": "Yandex AI Studio API key",
+      "groupId": "yandex",
+      "groupLabel": "Yandex",
+      "groupHint": "YandexGPT and other models via AI Studio",
+      "optionKey": "yandexApiKey",
+      "cliFlag": "--yandex-api-key",
+      "cliOption": "--yandex-api-key <key>",
+      "cliDescription": "Yandex AI Studio API key"
+    },
+    {
+      "provider": "yandex",
+      "method": "api-key",
+      "choiceId": "yandex-api-key",
+      "optionKey": "yandexFolderId",
+      "cliFlag": "--yandex-folder-id",
+      "cliOption": "--yandex-folder-id <id>",
+      "cliDescription": "Yandex Cloud folder ID (required alongside API key)"
+    }
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
