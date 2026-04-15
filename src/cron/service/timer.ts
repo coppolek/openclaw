@@ -616,12 +616,15 @@ export function applyJobResult(
   return shouldDelete;
 }
 
-function applyOutcomeToStoredJob(state: CronServiceState, result: TimedCronRunOutcome): void {
+function applyOutcomeToStoredJob(
+  state: CronServiceState,
+  result: TimedCronRunOutcome,
+): { jobId: string; scheduleComputeFailed: boolean } | undefined {
   clearCronJobActive(result.jobId);
   tryFinishCronTaskRun(state, result);
   const store = state.store;
   if (!store) {
-    return;
+    return undefined;
   }
   const jobs = store.jobs;
   const job = jobs.find((entry) => entry.id === result.jobId);
@@ -630,9 +633,10 @@ function applyOutcomeToStoredJob(state: CronServiceState, result: TimedCronRunOu
       { jobId: result.jobId },
       "cron: applyOutcomeToStoredJob — job not found after forceReload, result discarded",
     );
-    return;
+    return undefined;
   }
 
+  const scheduleErrorCountBefore = job.state.scheduleErrorCount ?? 0;
   const shouldDelete = applyJobResult(state, job, {
     status: result.status,
     error: result.error,
@@ -640,6 +644,7 @@ function applyOutcomeToStoredJob(state: CronServiceState, result: TimedCronRunOu
     startedAt: result.startedAt,
     endedAt: result.endedAt,
   });
+  const scheduleErrorCountAfter = job.state.scheduleErrorCount ?? 0;
 
   emitJobFinished(state, job, result, result.startedAt);
 
@@ -647,6 +652,14 @@ function applyOutcomeToStoredJob(state: CronServiceState, result: TimedCronRunOu
     store.jobs = jobs.filter((entry) => entry.id !== job.id);
     emit(state, { jobId: job.id, action: "removed" });
   }
+  return {
+    jobId: job.id,
+    scheduleComputeFailed:
+      !shouldDelete &&
+      isJobEnabled(job) &&
+      !hasScheduledNextRunAtMs(job.state.nextRunAtMs) &&
+      scheduleErrorCountAfter > scheduleErrorCountBefore,
+  };
 }
 
 export function armTimer(state: CronServiceState) {
@@ -833,8 +846,12 @@ export async function onTimer(state: CronServiceState) {
     if (completedResults.length > 0) {
       await locked(state, async () => {
         await ensureLoaded(state, { forceReload: true, skipRecompute: true });
+        const scheduleComputeFailedJobIds = new Set<string>();
         for (const result of completedResults) {
-          applyOutcomeToStoredJob(state, result);
+          const applied = applyOutcomeToStoredJob(state, result);
+          if (applied?.scheduleComputeFailed) {
+            scheduleComputeFailedJobIds.add(applied.jobId);
+          }
         }
 
         // Use maintenance-only recompute to avoid advancing past-due
@@ -842,7 +859,9 @@ export async function onTimer(state: CronServiceState) {
         // locked block.  The full recomputeNextRuns would silently skip
         // those jobs (advancing nextRunAtMs without execution), causing
         // daily cron schedules to jump 48 h instead of 24 h (#17852).
-        recomputeNextRunsForMaintenance(state);
+        recomputeNextRunsForMaintenance(state, {
+          skipMissingNextRunJobIds: scheduleComputeFailedJobIds,
+        });
         await persist(state);
       });
     }
