@@ -650,4 +650,61 @@ describe("tui-event-handlers: handleAgentEvent", () => {
 
     expect(loadHistory).toHaveBeenCalledTimes(1);
   });
+
+  it("safety-net resets status when wasActiveRun is false and no session runs remain (#63189)", () => {
+    // Regression test for the streaming-stuck bug: activeChatRunId points to
+    // a different run when the final event arrives, so wasActiveRun is false.
+    // After finalization removes the run from sessionRuns, the safety net
+    // detects no pending runs remain and resets status to idle.
+    const { state, setActivityStatus, handleChatEvent } = createHandlersHarness({
+      state: { activeChatRunId: "run-A" },
+    });
+
+    // 1. Send delta for run-A to make it the active run.
+    handleChatEvent({
+      runId: "run-A",
+      sessionKey: state.currentSessionKey,
+      state: "delta",
+      message: { content: [{ type: "text", text: "streaming A" }] },
+    } as ChatEvent);
+
+    // 2. Send delta for run-B. activeChatRunId stays "run-A" (already set).
+    handleChatEvent({
+      runId: "run-B",
+      sessionKey: state.currentSessionKey,
+      state: "delta",
+      message: { content: [{ type: "text", text: "streaming B" }] },
+    } as ChatEvent);
+    expect(state.activeChatRunId).toBe("run-A");
+
+    // 3. Finalize run-A (normal path, wasActiveRun = true).
+    handleChatEvent({
+      runId: "run-A",
+      sessionKey: state.currentSessionKey,
+      state: "final",
+      message: { content: [{ type: "text", text: "done A" }] },
+    } as ChatEvent);
+    expect(state.activeChatRunId).toBeNull();
+
+    // 4. Manually re-assign activeChatRunId to a phantom run so the
+    //    re-assignment guard in handleChatEvent (line ~237) is skipped
+    //    and wasActiveRun evaluates to false for run-B.
+    state.activeChatRunId = "run-phantom";
+    setActivityStatus.mockClear();
+
+    // 5. Finalize run-B. wasActiveRun = ("run-phantom" === "run-B") = false.
+    //    After noteFinalizedRun removes run-B from sessionRuns, no session
+    //    runs remain (sessionRuns.size === 0) → safety net fires.
+    handleChatEvent({
+      runId: "run-B",
+      sessionKey: state.currentSessionKey,
+      state: "final",
+      message: { content: [{ type: "text", text: "done B" }] },
+    } as ChatEvent);
+
+    const idleCalls = setActivityStatus.mock.calls.filter(
+      (args: unknown[]) => args[0] === "idle",
+    );
+    expect(idleCalls.length).toBe(1);
+  });
 });

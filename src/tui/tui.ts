@@ -239,6 +239,8 @@ export async function runTui(opts: TuiOptions) {
   let lastCtrlCAt = 0;
   let exitRequested = false;
   let activityStatus = "idle";
+  let streamingIdleTimer: NodeJS.Timeout | null = null;
+  const STREAMING_IDLE_TIMEOUT_MS = 30_000;
   let connectionStatus = "connecting";
   let statusTimeout: NodeJS.Timeout | null = null;
   let statusTimer: NodeJS.Timeout | null = null;
@@ -652,6 +654,31 @@ export async function runTui(opts: TuiOptions) {
 
   const setActivityStatus = (text: string) => {
     activityStatus = text;
+    // Reset any pending streaming-idle safety timer whenever status changes.
+    if (streamingIdleTimer) {
+      clearTimeout(streamingIdleTimer);
+      streamingIdleTimer = null;
+    }
+    // Arm a safety timer when entering streaming state. If no
+    // further status update arrives within the timeout window the UI resets to
+    // idle, preventing the "streaming forever" stuck state (#63189).
+    // We only apply this to "streaming" — "running" covers tool execution
+    // which can legitimately exceed the timeout (e.g. browser automation,
+    // long code execution). "sending" and "waiting" are also excluded.
+    if (text === "streaming") {
+      streamingIdleTimer = setTimeout(() => {
+        streamingIdleTimer = null;
+        if (activityStatus === "streaming") {
+          activityStatus = "idle";
+          // Intentionally do NOT clear state.activeChatRunId here — the run
+          // may still be in-flight (e.g. during a long tool call). Clearing
+          // it would break /abort and cause later lifecycle events to be
+          // dropped. We only reset the visual indicator.
+          renderStatus();
+        }
+      }, STREAMING_IDLE_TIMEOUT_MS);
+      streamingIdleTimer.unref?.();
+    }
     renderStatus();
   };
 
