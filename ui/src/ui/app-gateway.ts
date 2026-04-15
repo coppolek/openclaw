@@ -114,6 +114,19 @@ type GatewayHostWithSideResults = GatewayHost & {
   chatSideResultTerminalRuns?: Set<string>;
 };
 
+type GatewayHostWithSessionMessageSuppression = GatewayHost & {
+  suppressNextSessionMessageReloadForSessionKey?: string | null;
+};
+
+function isActiveChatFlow(host: GatewayHost & Partial<ChatState>): boolean {
+  return (
+    host.chatLoading === true ||
+    host.chatSending === true ||
+    Boolean(host.chatRunId) ||
+    (host.chatStream !== null && host.chatStream !== undefined)
+  );
+}
+
 function isTerminalChatState(
   state: ChatEventPayload["state"] | ReturnType<typeof handleChatEvent> | null | undefined,
 ): state is "final" | "aborted" | "error" {
@@ -398,6 +411,7 @@ function handleChatGatewayEvent(host: GatewayHost, payload: ChatEventPayload | u
       payload.sessionKey,
     );
   }
+  const trackedRunIdBeforeEvent = host.chatRunId;
   const sideResultHost = host as GatewayHostWithSideResults;
   const isTrackedSideResultTerminalEvent =
     isTerminalChatState(payload?.state) &&
@@ -409,8 +423,17 @@ function handleChatGatewayEvent(host: GatewayHost, payload: ChatEventPayload | u
   }
   const state = handleChatEvent(host as unknown as ChatState, payload);
   const historyReloaded = handleTerminalChatEvent(host, payload, state);
-  if (state === "final" && !historyReloaded && shouldReloadHistoryForFinalEvent(payload)) {
-    void loadChatHistory(host as unknown as ChatState);
+  if (state === "final" && !historyReloaded) {
+    const shouldReload = shouldReloadHistoryForFinalEvent(payload, {
+      trackedRunId: trackedRunIdBeforeEvent,
+    });
+    if (shouldReload) {
+      void loadChatHistory(host as unknown as ChatState);
+    } else {
+      const suppressionHost = host as GatewayHostWithSessionMessageSuppression;
+      suppressionHost.suppressNextSessionMessageReloadForSessionKey =
+        payload?.sessionKey?.trim() || host.sessionKey;
+    }
   }
 }
 
@@ -420,6 +443,14 @@ function handleSessionMessageGatewayEvent(
 ) {
   const sessionKey = payload?.sessionKey?.trim();
   if (!sessionKey || sessionKey !== host.sessionKey) {
+    return;
+  }
+  const suppressionHost = host as GatewayHostWithSessionMessageSuppression;
+  if (suppressionHost.suppressNextSessionMessageReloadForSessionKey === sessionKey) {
+    suppressionHost.suppressNextSessionMessageReloadForSessionKey = null;
+    return;
+  }
+  if (isActiveChatFlow(host as GatewayHost & Partial<ChatState>)) {
     return;
   }
   void loadChatHistory(host as unknown as ChatState);

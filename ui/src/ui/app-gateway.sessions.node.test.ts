@@ -142,6 +142,62 @@ describe("handleGatewayEvent session.message", () => {
     expect(loadChatHistoryMock).toHaveBeenCalledWith(host);
   });
 
+  it("does not reload chat history during active chat flow", () => {
+    loadChatHistoryMock.mockReset();
+    const host = createHost();
+    host.sessionKey = "agent:qa:main";
+    host.chatRunId = "run-123";
+
+    handleGatewayEvent(host, {
+      type: "event",
+      event: "session.message",
+      payload: { sessionKey: "agent:qa:main" },
+      seq: 1,
+    });
+
+    expect(loadChatHistoryMock).not.toHaveBeenCalled();
+  });
+
+  it("consumes the one-shot suppression on the next session.message", () => {
+    loadChatHistoryMock.mockReset();
+    const host = createHost() as Record<string, unknown>;
+    host.sessionKey = "agent:qa:main";
+    host.suppressNextSessionMessageReloadForSessionKey = "agent:qa:main";
+
+    handleGatewayEvent(host as Parameters<typeof handleGatewayEvent>[0], {
+      type: "event",
+      event: "session.message",
+      payload: { sessionKey: "agent:qa:main" },
+      seq: 1,
+    });
+
+    expect(loadChatHistoryMock).not.toHaveBeenCalled();
+    expect(host.suppressNextSessionMessageReloadForSessionKey).toBeNull();
+  });
+
+  it("reloads on a later session.message after the one-shot suppression is consumed", () => {
+    loadChatHistoryMock.mockReset();
+    const host = createHost() as Record<string, unknown>;
+    host.sessionKey = "agent:qa:main";
+    host.suppressNextSessionMessageReloadForSessionKey = "agent:qa:main";
+
+    handleGatewayEvent(host as Parameters<typeof handleGatewayEvent>[0], {
+      type: "event",
+      event: "session.message",
+      payload: { sessionKey: "agent:qa:main" },
+      seq: 1,
+    });
+    handleGatewayEvent(host as Parameters<typeof handleGatewayEvent>[0], {
+      type: "event",
+      event: "session.message",
+      payload: { sessionKey: "agent:qa:main" },
+      seq: 2,
+    });
+
+    expect(loadChatHistoryMock).toHaveBeenCalledTimes(1);
+    expect(loadChatHistoryMock).toHaveBeenCalledWith(host as Parameters<typeof handleGatewayEvent>[0]);
+  });
+
   it("ignores transcript updates for other sessions", () => {
     loadChatHistoryMock.mockReset();
     const host = createHost();
