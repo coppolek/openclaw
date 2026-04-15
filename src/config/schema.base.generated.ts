@@ -20,7 +20,9 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
               {
                 type: "string",
               },
-              {},
+              {
+                type: "string",
+              },
             ],
             title: "Config Last Touched At",
             description: "ISO timestamp of the last config write (auto-set).",
@@ -4669,7 +4671,9 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                           type: "string",
                         },
                       },
-                      setupCommand: {},
+                      setupCommand: {
+                        type: "string",
+                      },
                       pidsLimit: {
                         type: "integer",
                         exclusiveMinimum: 0,
@@ -5882,7 +5886,9 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                             type: "string",
                           },
                         },
-                        setupCommand: {},
+                        setupCommand: {
+                          type: "string",
+                        },
                         pidsLimit: {
                           type: "integer",
                           exclusiveMinimum: 0,
@@ -26584,6 +26590,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       tags: ["advanced", "url-secret"],
     },
   },
-  version: "2026.4.5",
+  version: "2026.4.6",
   generatedAt: "2026-03-22T21:17:33.302Z",
 };

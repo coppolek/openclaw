@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { validateConfigObject } from "./config.js";
+import { OpenClawSchema } from "./zod-schema.js";
 
 describe("meta.lastTouchedAt numeric timestamp coercion", () => {
   it("accepts a numeric Unix timestamp and coerces it to an ISO string", () => {
@@ -57,5 +58,23 @@ describe("meta.lastTouchedAt numeric timestamp coercion", () => {
       },
     });
     expect(res.ok).toBe(true);
+  });
+
+  it("generates JSON Schema without empty any-branches for lastTouchedAt", () => {
+    const schema = OpenClawSchema.toJSONSchema({
+      target: "draft-07",
+      unrepresentable: "any",
+    }) as Record<string, unknown>;
+    const props = schema.properties as Record<string, Record<string, unknown>>;
+    const metaProps = props.meta.properties as Record<string, Record<string, unknown>>;
+    const lastTouchedAt = metaProps.lastTouchedAt;
+
+    // The transform's output type should be representable — no empty {} branches.
+    if (lastTouchedAt.anyOf) {
+      for (const branch of lastTouchedAt.anyOf as Record<string, unknown>[]) {
+        expect(Object.keys(branch).length).toBeGreaterThan(0);
+        expect(branch).toHaveProperty("type");
+      }
+    }
   });
 });
