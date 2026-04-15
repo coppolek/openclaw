@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../runtime-api.js";
+import { _clearThreadCacheForTest } from "../thread-message-cache.js";
 import { _resetThreadParentContextCachesForTest } from "../thread-parent-context.js";
 import { createMSTeamsMessageHandler } from "./message-handler.js";
 import {
@@ -58,6 +59,7 @@ describe("msteams thread parent context injection", () => {
 
   beforeEach(() => {
     _resetThreadParentContextCachesForTest();
+    _clearThreadCacheForTest();
     fetchChannelMessageMock.mockReset();
     fetchThreadRepliesMock.mockReset();
     fetchThreadRepliesMock.mockImplementation(async () => []);
@@ -296,6 +298,53 @@ describe("msteams thread parent context injection", () => {
     expect(fetchChannelMessageMock).not.toHaveBeenCalled();
     expect(runtimeApiMockState.dispatchReplyFromConfigWithSettledDispatcher).not.toHaveBeenCalled();
     expect(enqueueSystemEvent).not.toHaveBeenCalled();
+  });
+
+  it("uses in-memory cache for thread context when Graph API fails", async () => {
+    fetchChannelMessageMock.mockRejectedValue(new Error("403 Forbidden"));
+    fetchThreadRepliesMock.mockRejectedValue(new Error("403 Forbidden"));
+    runtimeApiMockState.dispatchReplyFromConfigWithSettledDispatcher.mockResolvedValueOnce({
+      queuedFinal: false,
+      counts: {},
+      capturedCtxPayload: undefined,
+    });
+    const { deps } = createMessageHandlerDeps(cfg);
+    const handler = createMSTeamsMessageHandler(deps);
+
+    // First: a non-mention message arrives in the thread (e.g. from another bot via RSC).
+    await handler({
+      activity: buildChannelActivity({
+        id: "moltbot-msg-1",
+        text: "这是Moltbot发的消息",
+        replyToId: "thread-root-123",
+        entities: [], // no bot mention
+      }),
+      sendActivity: vi.fn(async () => undefined),
+    } as unknown as Parameters<typeof handler>[0]);
+
+    // Bot was not mentioned, so it should not dispatch a reply.
+    expect(runtimeApiMockState.dispatchReplyFromConfigWithSettledDispatcher).not.toHaveBeenCalled();
+
+    // Now the user @mentions PM Chen in the same thread.
+    await handler({
+      activity: buildChannelActivity({
+        id: "msg-mention-only",
+        text: "<at>Bot</at>",
+        replyToId: "thread-root-123",
+      }),
+      sendActivity: vi.fn(async () => undefined),
+    } as unknown as Parameters<typeof handler>[0]);
+
+    expect(runtimeApiMockState.dispatchReplyFromConfigWithSettledDispatcher).toHaveBeenCalledTimes(
+      1,
+    );
+    const ctxPayload =
+      runtimeApiMockState.dispatchReplyFromConfigWithSettledDispatcher.mock.calls[0]?.[0]
+        ?.ctxPayload;
+    // Should use the "use thread context" instruction (not fallback) because cache has a message.
+    expect((ctxPayload as { BodyForAgent?: string }).BodyForAgent).toContain(
+      "Use the thread context to infer what they want",
+    );
   });
 
   it("uses fallback text when mention-only but Graph fetch fails", async () => {

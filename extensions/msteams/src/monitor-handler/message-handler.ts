@@ -44,6 +44,11 @@ import {
   wasMSTeamsBotMentioned,
 } from "../inbound.js";
 import {
+  cacheThreadMessage,
+  clearExpiredThreadCacheEntries,
+  getThreadMessages,
+} from "../thread-message-cache.js";
+import {
   fetchParentMessageCached,
   formatParentContextEvent,
   markParentContextInjected,
@@ -236,7 +241,9 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
     const conversationId = normalizeMSTeamsConversationId(rawConversationId);
     const conversationMessageId = extractMSTeamsConversationMessageId(rawConversationId);
     const conversationType = conversation?.conversationType ?? "personal";
-    const teamId = activity.channelData?.team?.id;
+    // Prefer aadGroupId (the M365 Entra group GUID) over id (which may be a
+    // Teams-internal `19:xxx@thread.tacv2` string that the Graph API rejects).
+    const teamId = activity.channelData?.team?.aadGroupId ?? activity.channelData?.team?.id;
     // For channel thread messages, resolve the thread root message ID so outbound
     // replies land in the correct thread. The root ID comes from the `messageid=`
     // portion of conversation.id (preferred) or from activity.replyToId.
@@ -480,6 +487,20 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
       },
     });
 
+    // Cache all channel thread messages before the mention gate so context is
+    // available for @mention invocations even when Graph API is unavailable
+    // (e.g., developer tenants where Teams Graph APIs return 403).
+    if (isChannel && threadId && rawBody) {
+      clearExpiredThreadCacheEntries();
+      cacheThreadMessage(channelId, threadId, {
+        messageId: activity.id ?? "",
+        from: senderName,
+        fromId: senderId,
+        content: rawBody,
+        timestamp: timestamp?.getTime() ?? Date.now(),
+      });
+    }
+
     if (!isDirectMessage) {
       const mentioned = mentionDecision.effectiveWasMentioned;
       if (requireMention && mentionDecision.shouldSkip) {
@@ -504,7 +525,7 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
       }
     }
     const mentionOnlyThreadInvoke =
-      !rawBody && isChannel && Boolean(activity.replyToId) && mentionDecision.effectiveWasMentioned;
+      !rawBody && isChannel && Boolean(threadId) && mentionDecision.effectiveWasMentioned;
 
     if (!rawBody && !mentionOnlyThreadInvoke) {
       log.debug?.("skipping empty message after stripping mentions");
@@ -623,15 +644,18 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
     // Parent fetches are cached (5 min LRU, 100 entries) and per-session deduped so
     // consecutive replies in the same thread do not re-inject identical context.
     let threadContext: string | undefined;
-    if (activity.replyToId && isChannel && teamId) {
+    // threadId covers both reply-to (activity.replyToId) and channel thread messages where the
+    // root message ID is embedded in conversation.id as `;messageid=XXX` (conversationMessageId).
+    // Using threadId here ensures we fetch context even when activity.replyToId is absent.
+    if (threadId && isChannel && teamId) {
       try {
         const graphToken = await tokenProvider.getAccessToken("https://graph.microsoft.com");
         const groupId = await resolveTeamGroupId(graphToken, teamId);
         // Use allSettled so a failure in one fetch does not discard the other.
         // For example, reply-fetch 403 should not throw away a successful parent fetch.
         const [parentResult, repliesResult] = await Promise.allSettled([
-          fetchParentMessageCached(graphToken, groupId, conversationId, activity.replyToId),
-          fetchThreadReplies(graphToken, groupId, conversationId, activity.replyToId),
+          fetchParentMessageCached(graphToken, groupId, conversationId, threadId),
+          fetchThreadReplies(graphToken, groupId, conversationId, threadId),
         ]);
         const parentMsg = parentResult.status === "fulfilled" ? parentResult.value : undefined;
         const replies = repliesResult.status === "fulfilled" ? repliesResult.value : [];
@@ -672,13 +696,13 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
         if (
           parentSummary &&
           visibleParentMessages.length > 0 &&
-          shouldInjectParentContext(route.sessionKey, activity.replyToId)
+          shouldInjectParentContext(route.sessionKey, threadId)
         ) {
           core.system.enqueueSystemEvent(formatParentContextEvent(parentSummary), {
             sessionKey: route.sessionKey,
-            contextKey: `msteams:thread-parent:${conversationId}:${activity.replyToId}`,
+            contextKey: `msteams:thread-parent:${conversationId}:${threadId}`,
           });
-          markParentContextInjected(route.sessionKey, activity.replyToId);
+          markParentContextInjected(route.sessionKey, threadId);
         }
         const allMessages = parentMsg ? [parentMsg, ...replies] : replies;
         quoteSenderId = parentMsg?.from?.user?.id ?? parentMsg?.from?.application?.id ?? undefined;
@@ -704,6 +728,24 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
           },
         );
         // Graceful degradation: thread history is an optional enhancement.
+      }
+
+      // Fall back to in-memory cache when Graph API didn't produce context.
+      // This covers developer tenants where Teams Graph APIs return 403, and
+      // any case where the bot received prior messages via RSC but Graph is blocked.
+      if (threadContext === undefined) {
+        const cachedMsgs = getThreadMessages(channelId, threadId);
+        const cacheLines = cachedMsgs
+          .filter((m) => m.messageId !== (activity.id ?? ""))
+          .map((m) => `${m.from}: ${m.content}`)
+          .filter(Boolean);
+        if (cacheLines.length > 0) {
+          log.debug?.("using in-memory thread cache for context (Graph API unavailable)", {
+            threadId,
+            messageCount: cacheLines.length,
+          });
+          threadContext = cacheLines.join("\n");
+        }
       }
     }
     quoteSenderName ??= quoteInfo?.sender;
