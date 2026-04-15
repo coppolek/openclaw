@@ -506,17 +506,21 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
       expectBroadcast: false,
     });
 
-    const assistantUpdate = mockState.emittedTranscriptUpdates.find(
-      (update) =>
-        typeof update.message === "object" &&
-        update.message !== null &&
-        (update.message as { role?: unknown }).role === "assistant" &&
-        Array.isArray((update.message as { content?: unknown }).content) &&
-        ((update.message as { content: Array<{ type?: string }> }).content.some(
-          (block) => block?.type === "audio",
-        ) ??
-          false),
-    );
+    let assistantUpdate: (typeof mockState.emittedTranscriptUpdates)[number] | undefined;
+    await waitForAssertion(() => {
+      assistantUpdate = mockState.emittedTranscriptUpdates.find(
+        (update) =>
+          typeof update.message === "object" &&
+          update.message !== null &&
+          (update.message as { role?: unknown }).role === "assistant" &&
+          Array.isArray((update.message as { content?: unknown }).content) &&
+          ((update.message as { content: Array<{ type?: string }> }).content.some(
+            (block) => block?.type === "audio",
+          ) ??
+            false),
+      );
+      expect(assistantUpdate).toBeDefined();
+    });
     expect(assistantUpdate).toMatchObject({
       message: {
         role: "assistant",
