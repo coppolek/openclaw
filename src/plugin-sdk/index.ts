@@ -93,7 +93,10 @@ export type { RuntimeEnv } from "../runtime.js";
 export type { HookEntry } from "../hooks/types.js";
 export type { ReplyPayload } from "../auto-reply/reply-payload.js";
 export type { WizardPrompter } from "../wizard/prompts.js";
-export type { ContextEngineFactory } from "../context-engine/registry.js";
+export type {
+  ContextEngineFactory,
+  ContextEngineFactoryContext,
+} from "../context-engine/registry.js";
 export type { DiagnosticEventPayload } from "../infra/diagnostic-events.js";
 export type {
   AssembleResult,

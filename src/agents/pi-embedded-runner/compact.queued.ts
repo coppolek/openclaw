@@ -56,7 +56,11 @@ export async function compactEmbeddedPiSession(
         allowGatewaySubagentBinding: params.allowGatewaySubagentBinding,
       });
       ensureContextEnginesInitialized();
-      const contextEngine = await resolveContextEngine(params.config);
+      const contextEngine = await resolveContextEngine(params.config, {
+        agentDir: params.agentDir,
+        workspaceDir: params.workspaceDir,
+        sessionKey: params.sessionKey,
+      });
       let checkpointSnapshot: CapturedCompactionCheckpointSnapshot | null = null;
       let checkpointSnapshotRetained = false;
       try {
