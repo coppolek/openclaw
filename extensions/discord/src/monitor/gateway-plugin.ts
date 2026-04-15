@@ -32,6 +32,9 @@ type DiscordGatewayFetch = (
 
 type DiscordGatewayMetadataError = Error & { transient?: boolean };
 type DiscordGatewayWebSocketCtor = new (url: string, options?: { agent?: unknown }) => ws.WebSocket;
+type FirstHeartbeatTimeoutState = {
+  firstHeartbeatTimeout?: ReturnType<typeof setTimeout>;
+};
 
 export function resolveDiscordGatewayIntents(
   intentsConfig?: import("openclaw/plugin-sdk/config-runtime").DiscordIntentsConfig,
@@ -264,9 +267,10 @@ function createGatewayPlugin(params: {
         clearInterval(this.heartbeatInterval);
         this.heartbeatInterval = undefined;
       }
-      if (this.firstHeartbeatTimeout !== undefined) {
-        clearTimeout(this.firstHeartbeatTimeout);
-        this.firstHeartbeatTimeout = undefined;
+      const heartbeatState = this as FirstHeartbeatTimeoutState;
+      if (heartbeatState.firstHeartbeatTimeout !== undefined) {
+        clearTimeout(heartbeatState.firstHeartbeatTimeout);
+        heartbeatState.firstHeartbeatTimeout = undefined;
       }
       super.connect(resume);
     }
