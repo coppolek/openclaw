@@ -499,9 +499,15 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
   it("persists agent-run audio replies emitted as media-bearing block payloads", async () => {
     createTranscriptFixture("openclaw-chat-send-agent-audio-");
     const transcriptDir = path.dirname(mockState.transcriptPath);
-    mockState.config = { agents: { defaults: { workspace: transcriptDir } } };
     const audioPath = path.join(transcriptDir, "reply.mp3");
     fs.writeFileSync(audioPath, Buffer.from([0xff, 0xfb, 0x90, 0x00]));
+    mockState.config = {
+      agents: {
+        defaults: {
+          workspace: transcriptDir,
+        },
+      },
+    };
     mockState.triggerAgentRunStart = true;
     mockState.dispatchedReplies = [
       {
