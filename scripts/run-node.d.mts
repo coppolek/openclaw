@@ -11,6 +11,8 @@ export function resolveBuildRequirement(deps: {
   buildStampPath: string;
   sourceRoots: Array<{ name: string; path: string }>;
   configFiles: string[];
+  privateQaDistEntry?: string;
+  privateQaDistEntries?: string[];
 }): { shouldBuild: boolean; reason: string };
 
 export function runNodeMain(params?: {
@@ -34,4 +36,5 @@ export function runNodeMain(params?: {
   args?: string[];
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
+  runRuntimePostBuild?: (params?: { cwd?: string; env?: NodeJS.ProcessEnv }) => void;
 }): Promise<number>;

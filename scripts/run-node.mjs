@@ -208,10 +208,11 @@ export const resolveBuildRequirement = (deps) => {
   if (deps.env.OPENCLAW_FORCE_BUILD === "1") {
     return { shouldBuild: true, reason: "force_build" };
   }
+  const privateQaDistEntries =
+    deps.privateQaDistEntries ?? (deps.privateQaDistEntry ? [deps.privateQaDistEntry] : []);
   if (
     deps.env.OPENCLAW_BUILD_PRIVATE_QA === "1" &&
-    deps.privateQaDistEntry &&
-    statMtime(deps.privateQaDistEntry, deps.fs) == null
+    privateQaDistEntries.some((entry) => statMtime(entry, deps.fs) == null)
   ) {
     return { shouldBuild: true, reason: "missing_private_qa_dist" };
   }
@@ -272,6 +273,12 @@ const SIGNAL_EXIT_CODES = {
   SIGINT: 130,
   SIGTERM: 143,
 };
+const privateQaDistRelativeEntries = [
+  ["plugin-sdk", "qa-lab.js"],
+  ["extensions", "qa-lab", "cli.js"],
+  ["extensions", "qa-lab", "runtime-api.js"],
+  ["extensions", "qa-channel", "runtime-api.js"],
+];
 
 const isSignalKey = (signal) => Object.hasOwn(SIGNAL_EXIT_CODES, signal);
 
@@ -349,7 +356,7 @@ const runOpenClaw = async (deps) => {
 
 const syncRuntimeArtifacts = (deps) => {
   try {
-    deps.runRuntimePostBuild({ cwd: deps.cwd });
+    deps.runRuntimePostBuild({ cwd: deps.cwd, env: deps.env });
   } catch (error) {
     logRunner(
       `Failed to write runtime build artifacts: ${error?.message ?? "unknown error"}`,
@@ -397,7 +404,9 @@ export async function runNodeMain(params = {}) {
     path: path.join(deps.cwd, sourceRoot),
   }));
   deps.configFiles = runNodeConfigFiles.map((filePath) => path.join(deps.cwd, filePath));
-  deps.privateQaDistEntry = path.join(deps.distRoot, "extensions", "qa-lab", "cli.js");
+  deps.privateQaDistEntries = privateQaDistRelativeEntries.map((entry) =>
+    path.join(deps.distRoot, ...entry),
+  );
   if (deps.args[0] === "qa") {
     deps.env.OPENCLAW_BUILD_PRIVATE_QA = "1";
     deps.env.OPENCLAW_ENABLE_PRIVATE_QA_CLI = "1";
