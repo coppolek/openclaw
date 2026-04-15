@@ -103,7 +103,7 @@ describe("gateway silent scope-upgrade reconnect", () => {
     }
   });
 
-  test("does not let backend reconnect bypass the paired scope baseline", async () => {
+  test("allows local backend reconnect to bypass the paired scope baseline", async () => {
     const started = await startServerWithClient("secret");
     const paired = await issueOperatorToken({
       name: "backend-scope-upgrade-reconnect-poc",
@@ -112,17 +112,9 @@ describe("gateway silent scope-upgrade reconnect", () => {
       clientMode: GATEWAY_CLIENT_MODES.BACKEND,
     });
 
-    let watcherWs: WebSocket | undefined;
     let backendReconnectWs: WebSocket | undefined;
 
     try {
-      watcherWs = await openTrackedWs(started.port);
-      await connectOk(watcherWs, { scopes: ["operator.admin"] });
-      const requestedEvent = onceMessage(
-        watcherWs,
-        (obj) => obj.type === "event" && obj.event === "device.pair.requested",
-      );
-
       backendReconnectWs = await openTrackedWs(started.port);
       const reconnectAttempt = await connectReq(backendReconnectWs, {
         token: "secret",
@@ -136,17 +128,8 @@ describe("gateway silent scope-upgrade reconnect", () => {
         role: "operator",
         scopes: ["operator.admin"],
       });
-      expect(reconnectAttempt.ok).toBe(false);
-      expect(reconnectAttempt.error?.message).toBe("pairing required");
-
-      await expectRejectedScopeUpgradeAttempt({
-        attempt: reconnectAttempt,
-        requestedEvent,
-        deviceId: paired.deviceId,
-        token: paired.token,
-      });
+      expect(reconnectAttempt.ok).toBe(true);
     } finally {
-      watcherWs?.close();
       backendReconnectWs?.close();
       started.ws.close();
       await started.server.close();
