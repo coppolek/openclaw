@@ -860,7 +860,7 @@ export async function onTimer(state: CronServiceState) {
         // those jobs (advancing nextRunAtMs without execution), causing
         // daily cron schedules to jump 48 h instead of 24 h (#17852).
         recomputeNextRunsForMaintenance(state, {
-          suppressMissingNextRunScheduleErrorJobIds: scheduleComputeFailedJobIds,
+          suppressScheduleComputeErrorJobIds: scheduleComputeFailedJobIds,
           preserveScheduleErrorCountJobIds: scheduleComputeFailedJobIds,
         });
         await persist(state);
@@ -1016,14 +1016,14 @@ function collectRunnableJobs(
 export async function runMissedJobs(
   state: CronServiceState,
   opts?: { skipJobIds?: ReadonlySet<string> },
-) {
+): Promise<ReadonlySet<string>> {
   const plan = await planStartupCatchup(state, opts);
   if (plan.candidates.length === 0 && plan.deferredJobIds.length === 0) {
-    return;
+    return new Set();
   }
 
   const outcomes = await executeStartupCatchupPlan(state, plan);
-  await applyStartupCatchupOutcomes(state, plan, outcomes);
+  return await applyStartupCatchupOutcomes(state, plan, outcomes);
 }
 
 async function planStartupCatchup(
@@ -1138,8 +1138,9 @@ async function applyStartupCatchupOutcomes(
   state: CronServiceState,
   plan: StartupCatchupPlan,
   outcomes: TimedCronRunOutcome[],
-): Promise<void> {
+): Promise<ReadonlySet<string>> {
   const staggerMs = Math.max(0, state.deps.missedJobStaggerMs ?? DEFAULT_MISSED_JOB_STAGGER_MS);
+  const scheduleComputeFailedJobIds = new Set<string>();
   await locked(state, async () => {
     // Startup catch-up runs during service bootstrap, before the timer loop is
     // armed. Reuse the in-memory store instead of forcing a second reload.
@@ -1149,7 +1150,10 @@ async function applyStartupCatchupOutcomes(
     }
 
     for (const result of outcomes) {
-      applyOutcomeToStoredJob(state, result);
+      const applied = applyOutcomeToStoredJob(state, result);
+      if (applied?.scheduleComputeFailed) {
+        scheduleComputeFailedJobIds.add(applied.jobId);
+      }
     }
 
     if (plan.deferredJobIds.length > 0) {
@@ -1168,9 +1172,13 @@ async function applyStartupCatchupOutcomes(
     // Preserve any new past-due nextRunAtMs values that became due while
     // startup catch-up was running. They should execute on a future tick
     // instead of being silently advanced.
-    recomputeNextRunsForMaintenance(state);
+    recomputeNextRunsForMaintenance(state, {
+      suppressScheduleComputeErrorJobIds: scheduleComputeFailedJobIds,
+      preserveScheduleErrorCountJobIds: scheduleComputeFailedJobIds,
+    });
     await persist(state);
   });
+  return scheduleComputeFailedJobIds;
 }
 
 export async function runDueJobs(state: CronServiceState) {
