@@ -49,6 +49,7 @@ export type BuildPluginApiParams = {
       | "registerCompactionProvider"
       | "registerAgentHarness"
       | "registerMemoryCapability"
+      | "registerStreamFnWrapper"
       | "registerMemoryPromptSection"
       | "registerMemoryPromptSupplement"
       | "registerMemoryCorpusSupplement"
@@ -99,6 +100,7 @@ const noopRegisterContextEngine: OpenClawPluginApi["registerContextEngine"] = ()
 const noopRegisterCompactionProvider: OpenClawPluginApi["registerCompactionProvider"] = () => {};
 const noopRegisterAgentHarness: OpenClawPluginApi["registerAgentHarness"] = () => {};
 const noopRegisterMemoryCapability: OpenClawPluginApi["registerMemoryCapability"] = () => {};
+const noopRegisterStreamFnWrapper: OpenClawPluginApi["registerStreamFnWrapper"] = () => {};
 const noopRegisterMemoryPromptSection: OpenClawPluginApi["registerMemoryPromptSection"] = () => {};
 const noopRegisterMemoryPromptSupplement: OpenClawPluginApi["registerMemoryPromptSupplement"] =
   () => {};
@@ -165,6 +167,7 @@ export function buildPluginApi(params: BuildPluginApiParams): OpenClawPluginApi 
       handlers.registerCompactionProvider ?? noopRegisterCompactionProvider,
     registerAgentHarness: handlers.registerAgentHarness ?? noopRegisterAgentHarness,
     registerMemoryCapability: handlers.registerMemoryCapability ?? noopRegisterMemoryCapability,
+    registerStreamFnWrapper: handlers.registerStreamFnWrapper ?? noopRegisterStreamFnWrapper,
     registerMemoryPromptSection:
       handlers.registerMemoryPromptSection ?? noopRegisterMemoryPromptSection,
     registerMemoryPromptSupplement:

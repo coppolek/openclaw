@@ -1266,6 +1266,9 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
                 }
                 registerMemoryCapability(record.id, capability);
               },
+              registerStreamFnWrapper: (wrapper: PluginRegistry["streamFnWrappers"][number]) => {
+                registry.streamFnWrappers.push(wrapper);
+              },
               registerMemoryPromptSection: (builder) => {
                 if (!hasKind(record.kind, "memory")) {
                   pushDiagnostic({

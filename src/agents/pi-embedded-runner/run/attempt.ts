@@ -16,12 +16,6 @@ import {
   ensureGlobalUndiciStreamTimeouts,
 } from "../../../infra/net/undici-global-dispatcher.js";
 import { MAX_IMAGE_BYTES } from "../../../media/constants.js";
-import {
-  isOllamaCompatProvider,
-  resolveOllamaCompatNumCtxEnabled,
-  shouldInjectOllamaCompatNumCtx,
-  wrapOllamaCompatNumCtx,
-} from "../../../plugin-sdk/ollama-runtime.js";
 import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
 import { resolveToolCallArgumentsEncoding } from "../../../plugins/provider-model-compat.js";
 import {
@@ -29,6 +23,7 @@ import {
   resolveProviderTextTransforms,
   transformProviderSystemPrompt,
 } from "../../../plugins/provider-runtime.js";
+import { getActivePluginRegistry } from "../../../plugins/runtime.js";
 import { isSubagentSessionKey } from "../../../routing/session-key.js";
 import { normalizeOptionalLowercaseString } from "../../../shared/string-coerce.js";
 import { normalizeOptionalString } from "../../../shared/string-coerce.js";
@@ -1297,6 +1292,19 @@ export async function runEmbeddedAttempt(
       activeSession.agent.streamFn = wrapStreamFnHandleSensitiveStopReason(
         activeSession.agent.streamFn,
       );
+
+      // Apply plugin-registered streamFn wrappers (e.g. per-call model routing).
+      const pluginStreamFnWrappers = getActivePluginRegistry()?.streamFnWrappers;
+      if (pluginStreamFnWrappers?.length) {
+        for (const wrapper of pluginStreamFnWrappers) {
+          try {
+            activeSession.agent.streamFn = wrapper(activeSession.agent.streamFn);
+          } catch (err) {
+            // Isolate wrapper failures — skip the failing wrapper rather than stalling the attempt.
+            log.warn(`plugin streamFn wrapper failed; skipping: ${String(err)}`);
+          }
+        }
+      }
 
       let idleTimeoutTrigger: ((error: Error) => void) | undefined;
 
