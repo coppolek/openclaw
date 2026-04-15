@@ -878,7 +878,7 @@ describe("QmdMemoryManager", () => {
     expect(logWarnMock).toHaveBeenCalledWith(expect.stringContaining("rebinding"));
   });
 
-  it("rebinds legacy memory-alt when it still owns the root slot for MEMORY.md", async () => {
+  it("prefers --mask for fresh-manager default collection adds", async () => {
     await fs.writeFile(path.join(workspaceDir, "MEMORY.md"), "# canonical root");
     cfg = {
       ...cfg,
@@ -898,8 +898,8 @@ describe("QmdMemoryManager", () => {
         path: string;
         pattern: string;
       }
-    >([["memory-alt", { path: workspaceDir, pattern: "memory.md" }]]);
-    const removeCalls: string[] = [];
+    >();
+    const addFlagCalls: string[] = [];
 
     spawnMock.mockImplementation((_cmd: string, args: string[]) => {
       if (args[0] === "collection" && args[1] === "list") {
@@ -917,32 +917,13 @@ describe("QmdMemoryManager", () => {
         );
         return child;
       }
-      if (args[0] === "collection" && args[1] === "remove") {
-        const child = createMockChild({ autoClose: false });
-        const name = args[2] ?? "";
-        removeCalls.push(name);
-        listedCollections.delete(name);
-        queueMicrotask(() => child.closeWith(0));
-        return child;
-      }
       if (args[0] === "collection" && args[1] === "add") {
         const child = createMockChild({ autoClose: false });
         const pathArg = args[2] ?? "";
         const name = args[args.indexOf("--name") + 1] ?? "";
+        const flag = args.includes("--glob") ? "--glob" : args.includes("--mask") ? "--mask" : "";
+        addFlagCalls.push(flag);
         const pattern = args[args.indexOf("--glob") + 1] ?? args[args.indexOf("--mask") + 1] ?? "";
-        const hasConflict = [...listedCollections.entries()].some(([existingName, info]) => {
-          if (existingName === name || info.path !== pathArg) {
-            return false;
-          }
-          const isRootPatternPair =
-            (info.pattern === "MEMORY.md" || info.pattern === "memory.md") &&
-            (pattern === "MEMORY.md" || pattern === "memory.md");
-          return info.pattern === pattern || isRootPatternPair;
-        });
-        if (hasConflict) {
-          emitAndClose(child, "stderr", "A collection already exists for this path and pattern", 1);
-          return child;
-        }
         listedCollections.set(name, { path: pathArg, pattern });
         queueMicrotask(() => child.closeWith(0));
         return child;
@@ -953,10 +934,12 @@ describe("QmdMemoryManager", () => {
     const { manager } = await createManager({ mode: "full" });
     await manager.close();
 
-    expect(removeCalls).toContain("memory-alt");
+    expect(addFlagCalls).toEqual(["--mask", "--mask"]);
     expect(listedCollections.has("memory-root-main")).toBe(true);
-    expect(listedCollections.has("memory-alt")).toBe(false);
-    expect(logWarnMock).toHaveBeenCalledWith(expect.stringContaining("rebinding"));
+    expect(listedCollections.has("memory-dir-main")).toBe(true);
+    expect(logWarnMock).not.toHaveBeenCalledWith(
+      expect.stringContaining("retrying with legacy compatibility flag"),
+    );
   });
 
   it("warns instead of silently succeeding when add conflict metadata is unavailable", async () => {
@@ -1029,7 +1012,11 @@ describe("QmdMemoryManager", () => {
       return createMockChild();
     });
 
-    const { manager } = await createManager({ mode: "full" });
+    const { manager } = await createManager({ mode: "status" });
+    (
+      manager as unknown as { collectionPatternFlag: "--glob" | "--mask" | null }
+    ).collectionPatternFlag = "--glob";
+    await (manager as unknown as { ensureCollections: () => Promise<void> }).ensureCollections();
     await manager.close();
 
     expect(addFlagCalls).toEqual(["--glob", "--mask", "--mask"]);
