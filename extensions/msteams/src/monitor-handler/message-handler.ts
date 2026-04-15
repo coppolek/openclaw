@@ -1,8 +1,4 @@
 import {
-  resolveInboundMentionDecision,
-  resolveThreadSessionKeys,
-} from "openclaw/plugin-sdk/msteams";
-import {
   buildPendingHistoryContextFromMap,
   clearHistoryEntriesIfEnabled,
   dispatchReplyFromConfigWithSettledDispatcher,
@@ -13,7 +9,9 @@ import {
   recordPendingHistoryEntryIfEnabled,
   resolveChannelContextVisibilityMode,
   resolveDualTextControlCommandGate,
+  resolveInboundMentionDecision,
   resolveInboundSessionEnvelopeContext,
+  resolveThreadSessionKeys,
   shouldIncludeSupplementalContext,
   formatAllowlistMatchMeta,
   type HistoryEntry,
@@ -153,12 +151,15 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
     appId,
     adapter,
     tokenProvider,
+    graphTokenProvider,
     textLimit,
     mediaMaxBytes,
     conversationStore,
     pollStore,
     log,
   } = deps;
+  // Use a dedicated Graph token provider when available (different tenant scenario).
+  const effectiveGraphTokenProvider = graphTokenProvider ?? tokenProvider;
   const core = getMSTeamsRuntime();
   const logVerboseMessage = (message: string) => {
     if (core.logging.shouldLogVerbose()) {
@@ -649,7 +650,9 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
     // Using threadId here ensures we fetch context even when activity.replyToId is absent.
     if (threadId && isChannel && teamId) {
       try {
-        const graphToken = await tokenProvider.getAccessToken("https://graph.microsoft.com");
+        const graphToken = await effectiveGraphTokenProvider.getAccessToken(
+          "https://graph.microsoft.com",
+        );
         const groupId = await resolveTeamGroupId(graphToken, teamId);
         // Use allSettled so a failure in one fetch does not discard the other.
         // For example, reply-fetch 403 should not throw away a successful parent fetch.
