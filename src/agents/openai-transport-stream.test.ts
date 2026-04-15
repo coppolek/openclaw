@@ -1,5 +1,6 @@
 import type { Model } from "@mariozechner/pi-ai";
 import { describe, expect, it } from "vitest";
+import { estimateOpenAIResponsesInputTokens } from "./openai-responses-preflight-estimator.js";
 import {
   buildOpenAIResponsesParams,
   buildOpenAICompletionsParams,
@@ -1726,6 +1727,107 @@ describe("openai transport stream", () => {
     expect(output.content.some((block) => (block as { type?: string }).type === "toolCall")).toBe(
       false,
     );
+  });
+
+  it("throws a context-overflow precheck for oversized openai-codex responses payloads", () => {
+    const model = {
+      id: "gpt-5.4",
+      name: "GPT-5.4",
+      api: "openai-codex-responses",
+      provider: "openai-codex",
+      baseUrl: "https://api.openai.com/v1",
+      reasoning: true,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 1000,
+      maxTokens: 256,
+    } satisfies Model<"openai-codex-responses">;
+
+    const payload = {
+      model: "gpt-5.4",
+      stream: true,
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "payload token ".repeat(2500) }],
+        },
+      ],
+    };
+
+    expect(() =>
+      __testing.enforceOpenAICodexResponsesPreflightGuard(model as never, payload as never),
+    ).toThrow(__testing.CODEX_RESPONSES_PREFLIGHT_OVERFLOW_MESSAGE);
+  });
+
+  it("estimates content-bearing input tokens across nested response shapes without counting wrapper metadata", () => {
+    const minimal = estimateOpenAIResponsesInputTokens([
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "hello world" }],
+      },
+    ]);
+    const nestedVariants = estimateOpenAIResponsesInputTokens([
+      {
+        type: "message",
+        role: "user",
+        id: "msg_123",
+        status: "completed",
+        metadata: { a: "b", trace: "x".repeat(5000) },
+        content: [
+          { type: "input_text", text: "hello world" },
+          { type: "input_text", text: "nested text" },
+        ],
+      },
+      {
+        type: "function_call",
+        arguments: JSON.stringify({ query: "search me" }),
+      },
+      {
+        type: "function_call_output",
+        output: [{ text: "tool output" }, { note: "ignored" }],
+      },
+      {
+        type: "reasoning",
+        summary: "reason summary",
+        encrypted_content: "encrypted payload",
+      },
+    ]);
+
+    expect(minimal).toBeGreaterThan(0);
+    expect(nestedVariants).toBeGreaterThan(minimal);
+  });
+
+  it("does not throw the codex precheck for non-codex providers", () => {
+    const model = {
+      id: "gpt-5.4",
+      name: "GPT-5.4",
+      api: "openai-responses",
+      provider: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      reasoning: true,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 1000,
+      maxTokens: 256,
+    } satisfies Model<"openai-responses">;
+
+    const payload = {
+      model: "gpt-5.4",
+      stream: true,
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "x".repeat(3000) }],
+        },
+      ],
+    };
+
+    expect(() =>
+      __testing.enforceOpenAICodexResponsesPreflightGuard(model as never, payload as never),
+    ).not.toThrow();
   });
 
   it("handles reasoning_details from OpenRouter/Qwen3 in completions stream", async () => {
