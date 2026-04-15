@@ -2,6 +2,7 @@ import { sendMediaWithLeadingCaption } from "openclaw/plugin-sdk/reply-payload";
 import {
   chunkByParagraph,
   chunkMarkdownTextWithMode,
+  chunkText,
   resolveChunkMode,
   resolveTextChunkLimit,
 } from "../../auto-reply/chunk.js";
@@ -585,15 +586,25 @@ async function deliverOutboundPayloadsCore(
     mediaAccess,
     gatewayClientScopes: params.gatewayClientScopes,
   });
-  const configuredTextLimit = handler.chunker
-    ? resolveTextChunkLimit(cfg, channel, accountId, {
-        fallbackLimit: handler.textChunkLimit,
-      })
-    : undefined;
+  // Always resolve the text chunk limit when the channel declares one, even without
+  // a custom chunker.  This ensures messages that exceed the channel's character cap
+  // are auto-split using a default chunker instead of being sent as-is (which causes
+  // silent failures on Telegram, Discord, etc.).
+  // See: https://github.com/openclaw/openclaw/issues/47909
+  const configuredTextLimit =
+    handler.chunker || handler.textChunkLimit
+      ? resolveTextChunkLimit(cfg, channel, accountId, {
+          fallbackLimit: handler.textChunkLimit,
+        })
+      : undefined;
   const textLimit = handler.resolveEffectiveTextChunkLimit
     ? handler.resolveEffectiveTextChunkLimit(configuredTextLimit)
     : configuredTextLimit;
   const chunkMode = handler.chunker ? resolveChunkMode(cfg, channel, accountId) : "length";
+  // Use the channel's chunker when available, otherwise fall back to a plain
+  // length-aware text chunker so every channel gets auto-splitting.
+  const effectiveChunker: Chunker | null =
+    handler.chunker ?? (textLimit !== undefined ? chunkText : null);
 
   const sendTextChunks = async (
     text: string,
@@ -604,7 +615,7 @@ async function deliverOutboundPayloadsCore(
     },
   ) => {
     throwIfAborted(abortSignal);
-    if (!handler.chunker || textLimit === undefined) {
+    if (!effectiveChunker || textLimit === undefined) {
       results.push(await handler.sendText(text, overrides));
       return;
     }
@@ -619,7 +630,7 @@ async function deliverOutboundPayloadsCore(
         blockChunks.push(text);
       }
       for (const blockChunk of blockChunks) {
-        const chunks = handler.chunker(blockChunk, textLimit);
+        const chunks = effectiveChunker(blockChunk, textLimit);
         if (!chunks.length && blockChunk) {
           chunks.push(blockChunk);
         }
@@ -630,7 +641,7 @@ async function deliverOutboundPayloadsCore(
       }
       return;
     }
-    const chunks = handler.chunker(text, textLimit);
+    const chunks = effectiveChunker(text, textLimit);
     for (const chunk of chunks) {
       throwIfAborted(abortSignal);
       results.push(await handler.sendText(chunk, overrides));
