@@ -350,7 +350,12 @@ export async function runPreparedReply(
     sessionCtx.MediaPath || (sessionCtx.MediaPaths && sessionCtx.MediaPaths.length > 0),
   );
   if (!baseBodyTrimmed && !hasMediaAttachment) {
-    await typing.onReplyStart();
+    // Skip onReplyStart when typing is suppressed (e.g. sendPolicy deny) —
+    // otherwise channels that wire onReplyStart to typing indicators leak
+    // visible signals even though outbound delivery is suppressed.
+    if (!suppressTyping) {
+      await typing.onReplyStart();
+    }
     logVerbose("Inbound body empty after normalization; skipping agent run");
     typing.cleanup();
     return {
@@ -634,6 +639,9 @@ export async function runPreparedReply(
       senderUsername: normalizeOptionalString(sessionCtx.SenderUsername),
       senderE164: normalizeOptionalString(sessionCtx.SenderE164),
       senderIsOwner: forceSenderIsOwnerFalseFromSystemEvents ? false : command.senderIsOwner,
+      traceAuthorized:
+        (forceSenderIsOwnerFalseFromSystemEvents ? false : command.senderIsOwner) ||
+        (ctx.GatewayClientScopes ?? []).includes("operator.admin"),
       sessionFile: preparedSessionState.sessionFile,
       workspaceDir,
       config: cfg,
