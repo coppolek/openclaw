@@ -207,6 +207,7 @@ export type HookAgentPayload = {
   wakeMode: "now" | "next-heartbeat";
   sessionKey?: string;
   deliver: boolean;
+  blocking?: boolean;
   channel: HookMessageChannel;
   to?: string;
   model?: string;
@@ -389,6 +390,7 @@ export function normalizeAgentPayload(payload: Record<string, unknown>):
     typeof timeoutRaw === "number" && Number.isFinite(timeoutRaw) && timeoutRaw > 0
       ? Math.floor(timeoutRaw)
       : undefined;
+  const blocking = payload.blocking === true;
   return {
     ok: true,
     value: {
@@ -399,6 +401,7 @@ export function normalizeAgentPayload(payload: Record<string, unknown>):
       wakeMode,
       sessionKey,
       deliver,
+      blocking,
       channel,
       to,
       model,

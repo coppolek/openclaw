@@ -137,7 +137,9 @@ function getToolsInvokeHttpModule() {
 
 type HookDispatchers = {
   dispatchWakeHook: (value: { text: string; mode: "now" | "next-heartbeat" }) => void;
-  dispatchAgentHook: (value: HookAgentDispatchPayload) => string;
+  dispatchAgentHook: (
+    value: HookAgentDispatchPayload,
+  ) => Promise<{ runId: string; outputText?: string }>;
 };
 
 function resolveMappedHookExternalContentSource(params: {
@@ -708,7 +710,7 @@ export function createHooksRequestHandler(
         sendJson(res, 400, { ok: false, error: getHookSessionKeyPrefixError(allowedPrefixes) });
         return true;
       }
-      const runId = dispatchAgentHook({
+      const { runId, outputText } = await dispatchAgentHook({
         ...normalized.value,
         idempotencyKey,
         sessionKey: normalizedDispatchSessionKey,
@@ -716,7 +718,11 @@ export function createHooksRequestHandler(
         externalContentSource: "webhook",
       });
       rememberHookRunId(replayKey, runId, now);
-      sendJson(res, 200, { ok: true, runId });
+      sendJson(res, 200, {
+        ok: true,
+        runId,
+        ...(outputText !== undefined && { text: outputText }),
+      });
       return true;
     }
 
@@ -801,7 +807,7 @@ export function createHooksRequestHandler(
             sendJson(res, 200, { ok: true, runId: cachedRunId });
             return true;
           }
-          const runId = dispatchAgentHook({
+          const { runId, outputText } = await dispatchAgentHook({
             message: mapped.action.message,
             name: mapped.action.name ?? "Hook",
             idempotencyKey,
@@ -822,7 +828,11 @@ export function createHooksRequestHandler(
             }),
           });
           rememberHookRunId(replayKey, runId, now);
-          sendJson(res, 200, { ok: true, runId });
+          sendJson(res, 200, {
+            ok: true,
+            runId,
+            ...(outputText !== undefined && { text: outputText }),
+          });
           return true;
         }
       } catch (err) {

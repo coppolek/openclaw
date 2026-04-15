@@ -40,7 +40,9 @@ export function createGatewayHooksRequestHandler(params: {
     }
   };
 
-  const dispatchAgentHook = (value: HookAgentDispatchPayload) => {
+  const dispatchAgentHook = async (
+    value: HookAgentDispatchPayload,
+  ): Promise<{ runId: string; outputText?: string }> => {
     const sessionKey = value.sessionKey;
     const mainSessionKey = resolveMainSessionKeyFromConfig();
     const safeName = sanitizeInboundSystemTags(value.name);
@@ -77,7 +79,8 @@ export function createGatewayHooksRequestHandler(params: {
     };
 
     const runId = randomUUID();
-    void (async () => {
+
+    if (value.blocking) {
       try {
         const cfg = loadConfig();
         const result = await runCronIsolatedAgentTurn({
@@ -104,6 +107,7 @@ export function createGatewayHooksRequestHandler(params: {
             requestHeartbeatNow({ reason: `hook:${jobId}` });
           }
         }
+        return { runId, outputText: result.outputText };
       } catch (err) {
         logHooks.warn(`hook agent failed: ${String(err)}`);
         enqueueSystemEvent(`Hook ${safeName} (error): ${String(err)}`, {
@@ -113,10 +117,48 @@ export function createGatewayHooksRequestHandler(params: {
         if (value.wakeMode === "now") {
           requestHeartbeatNow({ reason: `hook:${jobId}:error` });
         }
+        return { runId };
       }
-    })();
+    } else {
+      void (async () => {
+        try {
+          const cfg = loadConfig();
+          const result = await runCronIsolatedAgentTurn({
+            cfg,
+            deps,
+            job,
+            message: value.message,
+            sessionKey,
+            lane: "cron",
+            deliveryContract: "shared",
+          });
+          const summary =
+            normalizeOptionalString(result.summary) ||
+            normalizeOptionalString(result.error) ||
+            result.status;
+          const prefix =
+            result.status === "ok" ? `Hook ${value.name}` : `Hook ${value.name} (${result.status})`;
+          if (!result.delivered) {
+            enqueueSystemEvent(`${prefix}: ${summary}`.trim(), {
+              sessionKey: mainSessionKey,
+            });
+            if (value.wakeMode === "now") {
+              requestHeartbeatNow({ reason: `hook:${jobId}` });
+            }
+          }
+        } catch (err) {
+          logHooks.warn(`hook agent failed: ${String(err)}`);
+          enqueueSystemEvent(`Hook ${value.name} (error): ${String(err)}`, {
+            sessionKey: mainSessionKey,
+          });
+          if (value.wakeMode === "now") {
+            requestHeartbeatNow({ reason: `hook:${jobId}:error` });
+          }
+        }
+      })();
 
-    return runId;
+      return { runId };
+    }
   };
 
   return createHooksRequestHandler({

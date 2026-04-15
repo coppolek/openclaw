@@ -204,6 +204,9 @@ export function createHooksHandler(
       },
 ) {
   const options = typeof params === "string" ? { bindHost: params } : params;
+  const defaultDispatchAgentHook: HooksHandlerDeps["dispatchAgentHook"] = async () => ({
+    runId: "run-1",
+  });
   return createHooksRequestHandler({
     getHooksConfig: () => createHooksConfig(),
     bindHost: options.bindHost ?? "127.0.0.1",
@@ -216,7 +219,7 @@ export function createHooksHandler(
     } as unknown as ReturnType<typeof createSubsystemLogger>,
     getClientIpConfig: options.getClientIpConfig,
     dispatchWakeHook: options.dispatchWakeHook ?? (() => {}),
-    dispatchAgentHook: options.dispatchAgentHook ?? (() => "run-1"),
+    dispatchAgentHook: options.dispatchAgentHook ?? defaultDispatchAgentHook,
   });
 }
 
