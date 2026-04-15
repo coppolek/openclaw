@@ -355,6 +355,7 @@ export async function resolveImplicitProviders(
     resolveProviderApiKey: createProviderApiKeyResolver(env, getAuthStore, params.config),
     resolveProviderAuth: createProviderAuthResolver(env, getAuthStore, params.config),
   };
+
   const discoveryProviders = await resolvePluginDiscoveryProviders({
     config: params.config,
     workspaceDir: params.workspaceDir,

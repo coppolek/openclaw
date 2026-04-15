@@ -4,7 +4,10 @@ import {
   ensureAuthProfileStore,
   listProfilesForProvider,
 } from "openclaw/plugin-sdk/provider-auth";
+import type { ModelDefinitionConfig } from "openclaw/plugin-sdk/provider-model-shared";
 import { normalizeOptionalLowercaseString } from "openclaw/plugin-sdk/text-runtime";
+import { discoverCopilotModels, COPILOT_IDE_HEADERS } from "./discovery.js";
+import { getDefaultCopilotModelIds } from "./models-defaults.js";
 import { PROVIDER_ID, resolveCopilotForwardCompatModel } from "./models.js";
 import { buildGithubCopilotReplayPolicy } from "./replay-policy.js";
 import { wrapCopilotProviderStream } from "./stream.js";
@@ -148,6 +151,7 @@ export default definePluginEntry({
             return null;
           }
           let baseUrl = DEFAULT_COPILOT_API_BASE_URL;
+          let copilotToken: string | undefined;
           if (githubToken) {
             try {
               const token = await resolveCopilotApiToken({
@@ -155,14 +159,59 @@ export default definePluginEntry({
                 env: ctx.env,
               });
               baseUrl = token.baseUrl;
+              copilotToken = token.token;
             } catch {
               baseUrl = DEFAULT_COPILOT_API_BASE_URL;
             }
           }
+
+          // Skip discovery when the user has explicitly configured models for
+          // this provider — the network call (up to 10s timeout) would be wasted
+          // since mergeImplicitProviderConfig keeps existing models.
+          const explicitModels = ctx.config?.models?.providers?.["github-copilot"]?.models;
+          const hasExplicitModels = Array.isArray(explicitModels)
+            ? explicitModels.length > 0
+            : explicitModels != null && typeof explicitModels === "object"
+              ? Object.keys(explicitModels).length > 0
+              : false;
+
+          // Use the user-configured baseUrl for discovery when present (e.g.
+          // enterprise proxies) so that discovered models match the endpoint
+          // they will actually run against.
+          const configuredBaseUrl = ctx.config?.models?.providers?.["github-copilot"]?.baseUrl;
+          const discoveryBaseUrl =
+            typeof configuredBaseUrl === "string" && configuredBaseUrl
+              ? configuredBaseUrl
+              : baseUrl;
+
+          // Forward any user-configured provider headers (e.g. enterprise
+          // proxy auth) so discovery uses the same credentials as runtime.
+          const configuredHeaders = ctx.config?.models?.providers?.["github-copilot"]?.headers;
+          const extraHeaders =
+            configuredHeaders && typeof configuredHeaders === "object"
+              ? (configuredHeaders as Record<string, string>)
+              : undefined;
+
+          let discoveredModels: ModelDefinitionConfig[] = [];
+          if (copilotToken && !hasExplicitModels) {
+            try {
+              const knownModelIds = new Set(getDefaultCopilotModelIds());
+              discoveredModels = await discoverCopilotModels({
+                baseUrl: discoveryBaseUrl,
+                copilotToken,
+                knownModelIds,
+                extraHeaders,
+              });
+            } catch {
+              // best-effort: discovery failure is not fatal
+            }
+          }
+
           return {
             provider: {
               baseUrl,
-              models: [],
+              headers: COPILOT_IDE_HEADERS,
+              models: discoveredModels,
             },
           };
         },

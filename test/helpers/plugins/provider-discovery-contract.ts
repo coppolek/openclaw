@@ -348,6 +348,12 @@ export function describeGithubCopilotProviderDiscoveryContract() {
       ).resolves.toEqual({
         provider: {
           baseUrl: "https://api.individual.githubcopilot.com",
+          headers: {
+            "User-Agent": "GitHubCopilotChat/0.35.0",
+            "Editor-Version": "vscode/1.107.0",
+            "Editor-Plugin-Version": "copilot-chat/0.35.0",
+            "Copilot-Integration-Id": "vscode-chat",
+          },
           models: [],
         },
       });
@@ -371,6 +377,12 @@ export function describeGithubCopilotProviderDiscoveryContract() {
       ).resolves.toEqual({
         provider: {
           baseUrl: "https://copilot-proxy.example.com",
+          headers: {
+            "User-Agent": "GitHubCopilotChat/0.35.0",
+            "Editor-Version": "vscode/1.107.0",
+            "Editor-Plugin-Version": "copilot-chat/0.35.0",
+            "Copilot-Integration-Id": "vscode-chat",
+          },
           models: [],
         },
       });
@@ -726,6 +738,7 @@ export function describeModelStudioProviderDiscoveryContract() {
           models: expect.arrayContaining([
             expect.objectContaining({ id: "qwen3.5-plus" }),
             expect.objectContaining({ id: "qwen3-max-2026-01-23" }),
+            expect.objectContaining({ id: "qwen3.6-plus" }),
             expect.objectContaining({ id: "MiniMax-M2.5" }),
           ]),
         },
