@@ -182,6 +182,7 @@
           - "docker-compose.yml"
           - "docker-setup.sh"
           - "setup-podman.sh"
+          - ".devcontainer/**"
           - ".dockerignore"
           - "scripts/docker/setup.sh"
           - "scripts/podman/setup.sh"
@@ -196,6 +197,7 @@
           - "docs/cli/sandbox.md"
           - "docs/gateway/sandbox*.md"
           - "docs/install/docker.md"
+          - "docs/install/devcontainer.md"
           - "docs/multi-agent-sandbox-tools.md"
 
 "agents":
