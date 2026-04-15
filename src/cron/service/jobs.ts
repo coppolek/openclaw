@@ -439,6 +439,7 @@ function recomputeJobNextRunAtMs(params: {
   nowMs: number;
   suppressScheduleComputeError?: boolean;
   preserveScheduleErrorCount?: boolean;
+  recordedScheduleComputeErrorJobIds?: Set<string>;
 }) {
   let changed = false;
   try {
@@ -447,6 +448,7 @@ function recomputeJobNextRunAtMs(params: {
       if (params.suppressScheduleComputeError) {
         return changed;
       }
+      params.recordedScheduleComputeErrorJobIds?.add(params.job.id);
       return recordScheduleComputeError({
         state: params.state,
         job: params.job,
@@ -486,6 +488,7 @@ function recomputeJobNextRunAtMs(params: {
     if (params.suppressScheduleComputeError) {
       return changed;
     }
+    params.recordedScheduleComputeErrorJobIds?.add(params.job.id);
     if (recordScheduleComputeError({ state: params.state, job: params.job, err })) {
       changed = true;
     }
@@ -498,6 +501,7 @@ export function recomputeNextRuns(
   opts?: {
     suppressScheduleComputeErrorJobIds?: ReadonlySet<string>;
     preserveScheduleErrorCountJobIds?: ReadonlySet<string>;
+    recordedScheduleComputeErrorJobIds?: Set<string>;
   },
 ): boolean {
   return walkSchedulableJobs(state, ({ job, nowMs: now }) => {
@@ -516,6 +520,7 @@ export function recomputeNextRuns(
           suppressScheduleComputeError:
             opts?.suppressScheduleComputeErrorJobIds?.has(job.id) ?? false,
           preserveScheduleErrorCount: opts?.preserveScheduleErrorCountJobIds?.has(job.id) ?? false,
+          recordedScheduleComputeErrorJobIds: opts?.recordedScheduleComputeErrorJobIds,
         })
       ) {
         changed = true;
@@ -539,6 +544,7 @@ export function recomputeNextRunsForMaintenance(
     nowMs?: number;
     suppressScheduleComputeErrorJobIds?: ReadonlySet<string>;
     preserveScheduleErrorCountJobIds?: ReadonlySet<string>;
+    recordedScheduleComputeErrorJobIds?: Set<string>;
   },
 ): boolean {
   const recomputeExpired = opts?.recomputeExpired ?? false;
@@ -556,6 +562,7 @@ export function recomputeNextRunsForMaintenance(
               opts?.suppressScheduleComputeErrorJobIds?.has(job.id) ?? false,
             preserveScheduleErrorCount:
               opts?.preserveScheduleErrorCountJobIds?.has(job.id) ?? false,
+            recordedScheduleComputeErrorJobIds: opts?.recordedScheduleComputeErrorJobIds,
           })
         ) {
           changed = true;
@@ -579,6 +586,7 @@ export function recomputeNextRunsForMaintenance(
                 opts?.suppressScheduleComputeErrorJobIds?.has(job.id) ?? false,
               preserveScheduleErrorCount:
                 opts?.preserveScheduleErrorCountJobIds?.has(job.id) ?? false,
+              recordedScheduleComputeErrorJobIds: opts?.recordedScheduleComputeErrorJobIds,
             })
           ) {
             changed = true;

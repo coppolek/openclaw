@@ -1175,6 +1175,7 @@ async function applyStartupCatchupOutcomes(
     recomputeNextRunsForMaintenance(state, {
       suppressScheduleComputeErrorJobIds: scheduleComputeFailedJobIds,
       preserveScheduleErrorCountJobIds: scheduleComputeFailedJobIds,
+      recordedScheduleComputeErrorJobIds: scheduleComputeFailedJobIds,
     });
     await persist(state);
   });
