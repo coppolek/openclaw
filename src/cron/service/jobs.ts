@@ -438,7 +438,6 @@ function recomputeJobNextRunAtMs(params: {
   job: CronJob;
   nowMs: number;
   suppressScheduleComputeError?: boolean;
-  preserveScheduleErrorCount?: boolean;
   recordedScheduleComputeErrorJobIds?: Set<string>;
 }) {
   let changed = false;
@@ -480,7 +479,7 @@ function recomputeJobNextRunAtMs(params: {
       changed = true;
     }
     // Clear schedule error count on successful computation.
-    if (params.job.state.scheduleErrorCount && !params.preserveScheduleErrorCount) {
+    if (params.job.state.scheduleErrorCount) {
       params.job.state.scheduleErrorCount = undefined;
       changed = true;
     }
@@ -500,7 +499,6 @@ export function recomputeNextRuns(
   state: CronServiceState,
   opts?: {
     suppressScheduleComputeErrorJobIds?: ReadonlySet<string>;
-    preserveScheduleErrorCountJobIds?: ReadonlySet<string>;
     recordedScheduleComputeErrorJobIds?: Set<string>;
   },
 ): boolean {
@@ -519,7 +517,6 @@ export function recomputeNextRuns(
           nowMs: now,
           suppressScheduleComputeError:
             opts?.suppressScheduleComputeErrorJobIds?.has(job.id) ?? false,
-          preserveScheduleErrorCount: opts?.preserveScheduleErrorCountJobIds?.has(job.id) ?? false,
           recordedScheduleComputeErrorJobIds: opts?.recordedScheduleComputeErrorJobIds,
         })
       ) {
@@ -543,7 +540,6 @@ export function recomputeNextRunsForMaintenance(
     recomputeExpired?: boolean;
     nowMs?: number;
     suppressScheduleComputeErrorJobIds?: ReadonlySet<string>;
-    preserveScheduleErrorCountJobIds?: ReadonlySet<string>;
     recordedScheduleComputeErrorJobIds?: Set<string>;
   },
 ): boolean {
@@ -560,8 +556,6 @@ export function recomputeNextRunsForMaintenance(
             nowMs: now,
             suppressScheduleComputeError:
               opts?.suppressScheduleComputeErrorJobIds?.has(job.id) ?? false,
-            preserveScheduleErrorCount:
-              opts?.preserveScheduleErrorCountJobIds?.has(job.id) ?? false,
             recordedScheduleComputeErrorJobIds: opts?.recordedScheduleComputeErrorJobIds,
           })
         ) {
@@ -584,8 +578,6 @@ export function recomputeNextRunsForMaintenance(
               nowMs: now,
               suppressScheduleComputeError:
                 opts?.suppressScheduleComputeErrorJobIds?.has(job.id) ?? false,
-              preserveScheduleErrorCount:
-                opts?.preserveScheduleErrorCountJobIds?.has(job.id) ?? false,
               recordedScheduleComputeErrorJobIds: opts?.recordedScheduleComputeErrorJobIds,
             })
           ) {
