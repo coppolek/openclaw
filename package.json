@@ -35,6 +35,7 @@
     "dist/extensions/qa-lab/runtime-api.js",
     "!dist/extensions/qa-matrix/**",
     "docs/",
+    "docs/reference/templates/",
     "!docs/.generated/**",
     "!docs/.i18n/zh-CN.tm.jsonl",
     "qa/scenarios/",
