@@ -572,7 +572,6 @@ export async function runEmbeddedPiAgent(
       const contextEngine = await resolveContextEngine(params.config, {
         agentDir: params.agentDir,
         workspaceDir: params.workspaceDir,
-        sessionKey: params.sessionKey,
       });
       try {
         // When the engine owns compaction, compactEmbeddedPiSessionDirect is

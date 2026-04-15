@@ -13,7 +13,6 @@ export type ContextEngineFactoryContext = {
   config: OpenClawConfig;
   agentDir?: string;
   workspaceDir?: string;
-  sessionKey?: string;
 };
 
 /**
@@ -479,7 +478,6 @@ function describeResolvedContextEngineContractError(
 export type ResolveContextEngineOptions = {
   agentDir?: string;
   workspaceDir?: string;
-  sessionKey?: string;
 };
 
 /**
@@ -515,7 +513,6 @@ export async function resolveContextEngine(
     config: config ?? ({} as OpenClawConfig),
     agentDir: options?.agentDir,
     workspaceDir: options?.workspaceDir,
-    sessionKey: options?.sessionKey,
   };
 
   const entry = getContextEngineRegistryState().engines.get(engineId);
