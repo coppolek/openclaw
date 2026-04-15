@@ -32,6 +32,7 @@ type DiscordGatewayFetch = (
   input: string,
   init?: DiscordGatewayFetchInit,
 ) => Promise<DiscordGatewayMetadataResponse>;
+type DiscordGatewayFetchCapture = Parameters<typeof fetchWithSsrFGuard>[0]["capture"];
 
 type DiscordGatewayMetadataError = Error & { transient?: boolean };
 type DiscordGatewayWebSocketCtor = new (url: string, options?: { agent?: unknown }) => ws.WebSocket;
@@ -42,11 +43,12 @@ type FirstHeartbeatTimeoutState = {
 async function fetchDiscordGatewayMetadataWithGuard(
   input: string,
   init?: DiscordGatewayFetchInit,
+  capture: DiscordGatewayFetchCapture = false,
 ): Promise<DiscordGatewayMetadataResponse> {
   const { response, release } = await fetchWithSsrFGuard({
     url: input,
     init: init as RequestInit | undefined,
-    capture: false,
+    capture,
     auditContext: "discord-gateway-metadata",
   });
   return Object.assign(response, { release });
@@ -406,19 +408,16 @@ export function createDiscordGatewayPlugin(params: {
     return createGatewayPlugin({
       options,
       fetchImpl: async (input, init) => {
-        const response = await fetchDiscordGatewayMetadataWithGuard(input, init);
-        if (!debugProxySettings.enabled) {
-          captureHttpExchange({
-            url: input,
-            method: (init?.method as string | undefined) ?? "GET",
-            requestHeaders: init?.headers as Headers | Record<string, string> | undefined,
-            requestBody: (init as RequestInit & { body?: BodyInit | null })?.body ?? null,
-            response: response as Response,
-            flowId: randomUUID(),
-            meta: { subsystem: "discord-gateway-metadata" },
-          });
-        }
-        return response;
+        return fetchDiscordGatewayMetadataWithGuard(
+          input,
+          init,
+          debugProxySettings.enabled
+            ? {
+                flowId: randomUUID(),
+                meta: { subsystem: "discord-gateway-metadata" },
+              }
+            : false,
+        );
       },
       runtime: params.runtime,
       testing: params.__testing
