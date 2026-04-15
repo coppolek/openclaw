@@ -400,6 +400,15 @@ function createCronTaskRunId(jobId: string, startedAt: number): string {
   return `cron:${jobId}:${startedAt}`;
 }
 
+function collectNewScheduleComputeFailureJobIds(
+  job: CronJob,
+  scheduleErrorCountBefore: number,
+): ReadonlySet<string> | undefined {
+  return (job.state.scheduleErrorCount ?? 0) > scheduleErrorCountBefore
+    ? new Set([job.id])
+    : undefined;
+}
+
 async function skipInvalidPersistedManualRun(params: {
   state: CronServiceState;
   job: CronJob;
@@ -408,6 +417,7 @@ async function skipInvalidPersistedManualRun(params: {
 }) {
   const endedAt = params.state.deps.nowMs();
   const errorText = normalizeCronRunErrorText(params.error);
+  const scheduleErrorCountBefore = params.job.state.scheduleErrorCount ?? 0;
   const shouldDelete = applyJobResult(
     params.state,
     params.job,
@@ -418,6 +428,10 @@ async function skipInvalidPersistedManualRun(params: {
       endedAt,
     },
     { preserveSchedule: params.mode === "force" },
+  );
+  const suppressScheduleComputeErrorJobIds = collectNewScheduleComputeFailureJobIds(
+    params.job,
+    scheduleErrorCountBefore,
   );
 
   emit(params.state, {
@@ -437,7 +451,10 @@ async function skipInvalidPersistedManualRun(params: {
     emit(params.state, { jobId: params.job.id, action: "removed" });
   }
 
-  recomputeNextRunsForMaintenance(params.state, { recomputeExpired: true });
+  recomputeNextRunsForMaintenance(params.state, {
+    recomputeExpired: true,
+    suppressScheduleComputeErrorJobIds,
+  });
   await persist(params.state);
   armTimer(params.state);
 }
@@ -530,7 +547,9 @@ async function inspectManualRunPreflight(
     // Normalize job tick state (clears stale runningAtMs markers) before
     // checking if already running, so a stale marker from a crashed Phase-1
     // persist does not block manual triggers for up to STUCK_RUN_MS (#17554).
-    recomputeNextRunsForMaintenance(state);
+    recomputeNextRunsForMaintenance(state, {
+      suppressScheduleComputeErrorJobIds: mode === "force" ? new Set([id]) : undefined,
+    });
     const job = findJobOrThrow(state, id);
     try {
       assertSupportedJobSpec(job);
@@ -641,6 +660,7 @@ async function finishPreparedManualRun(
       return;
     }
 
+    const scheduleErrorCountBefore = job.state.scheduleErrorCount ?? 0;
     const shouldDelete = applyJobResult(
       state,
       job,
@@ -652,6 +672,10 @@ async function finishPreparedManualRun(
         endedAt,
       },
       { preserveSchedule: mode === "force" },
+    );
+    const suppressScheduleComputeErrorJobIds = collectNewScheduleComputeFailureJobIds(
+      job,
+      scheduleErrorCountBefore,
     );
 
     emit(state, {
@@ -698,7 +722,10 @@ async function finishPreparedManualRun(
       snapshot: postRunSnapshot,
       removed: postRunRemoved,
     });
-    recomputeNextRunsForMaintenance(state, { recomputeExpired: true });
+    recomputeNextRunsForMaintenance(state, {
+      recomputeExpired: true,
+      suppressScheduleComputeErrorJobIds,
+    });
     await persist(state);
     armTimer(state);
   });
