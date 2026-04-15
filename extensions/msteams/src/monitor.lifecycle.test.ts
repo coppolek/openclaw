@@ -250,12 +250,13 @@ describe("monitorMSTeamsProvider lifecycle", () => {
 
     const app = expressControl.apps.at(-1);
     expect(app).toBeDefined();
-    expect(app!.use).toHaveBeenCalledTimes(4);
+    expect(app!.use).toHaveBeenCalledTimes(5);
 
-    const jsonMiddleware = vi.mocked((await import("express")).json).mock.results[0]?.value;
-    expect(jsonMiddleware).toBeDefined();
-    expect(app!.use.mock.calls[1]?.[0]).not.toBe(jsonMiddleware);
-    expect(app!.use.mock.calls[2]?.[0]).toBe(jsonMiddleware);
+    const rawMiddleware = vi.mocked((await import("express")).raw).mock.results[0]?.value;
+    expect(rawMiddleware).toBeDefined();
+    // Index 0: pre-parse Bearer gate, index 1: JWT, index 2: express.raw(), index 3: repair fn, index 4: error handler
+    expect(app!.use.mock.calls[1]?.[0]).not.toBe(rawMiddleware);
+    expect(app!.use.mock.calls[2]?.[0]).toBe(rawMiddleware);
 
     const jwtMiddleware = app!.use.mock.calls[1]?.[0] as (
       req: Request,
