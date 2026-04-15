@@ -133,6 +133,7 @@ function buildHeartbeatSection(params: { isMinimal: boolean; heartbeatPrompt?: s
 }
 
 function buildExecApprovalPromptGuidance(params: {
+  shellToolName: string;
   runtimeChannel?: string;
   inlineButtonsEnabled?: boolean;
 }) {
@@ -143,12 +144,17 @@ function buildExecApprovalPromptGuidance(params: {
       ? Boolean(resolveChannelApprovalCapability(getChannelPlugin(runtimeChannel))?.native)
       : false);
   if (usesNativeApprovalUi) {
-    return "When exec returns approval-pending on this channel, rely on native approval card/buttons when they appear and do not also send plain chat /approve instructions. Only include the concrete /approve command if the tool result says chat approvals are unavailable or only manual approval is possible.";
+    return `When ${params.shellToolName} returns approval-pending on this channel, rely on native approval card/buttons when they appear and do not also send plain chat /approve instructions. Only include the concrete /approve command if the tool result says chat approvals are unavailable or only manual approval is possible.`;
   }
-  return "When exec returns approval-pending, include the concrete /approve command from tool output as plain chat text for the user, and do not ask for a different or rotated code.";
+  return `When ${params.shellToolName} returns approval-pending, include the concrete /approve command from tool output as plain chat text for the user, and do not ask for a different or rotated code.`;
 }
 
-function buildSkillsSection(params: { skillsPrompt?: string; readToolName: string }) {
+function buildSkillsSection(params: {
+  skillsPrompt?: string;
+  readToolName: string;
+  shellToolName: string;
+  skillReadMode: "read-tool" | "shell-tool" | "catalog-only";
+}) {
   const trimmed = params.skillsPrompt?.trim();
   if (!trimmed) {
     return [];
@@ -156,10 +162,26 @@ function buildSkillsSection(params: { skillsPrompt?: string; readToolName: strin
   return [
     "## Skills (mandatory)",
     "Before replying: scan <available_skills> <description> entries.",
-    `- If exactly one skill clearly applies: read its SKILL.md at <location> with \`${params.readToolName}\`, then follow it.`,
-    "- If multiple could apply: choose the most specific one, then read/follow it.",
-    "- If none clearly apply: do not read any SKILL.md.",
-    "Constraints: never read more than one skill up front; only read after selecting.",
+    ...(params.skillReadMode === "read-tool"
+      ? [
+          `- If exactly one skill clearly applies: read its SKILL.md at <location> with \`${params.readToolName}\`, then follow it.`,
+          "- If multiple could apply: choose the most specific one, then read/follow it.",
+          "- If none clearly apply: do not read any SKILL.md.",
+          "Constraints: never read more than one skill up front; only read after selecting.",
+        ]
+      : params.skillReadMode === "shell-tool"
+        ? [
+            `- If exactly one skill clearly applies: inspect its SKILL.md at <location> with \`${params.shellToolName}\`, then follow it.`,
+            "- If multiple could apply: choose the most specific one, then inspect/follow it.",
+            "- If none clearly apply: do not inspect any SKILL.md.",
+            "Constraints: never inspect more than one skill up front; only inspect after selecting.",
+          ]
+        : [
+            "- If exactly one skill clearly applies: treat the catalog entry below as a hint only, do not claim you can open or follow SKILL.md in this session, and continue with the best non-skill fallback.",
+            "- If multiple could apply: choose the most specific one as context only and continue with the best non-skill fallback.",
+            "- If none clearly apply: do not claim a skill applies.",
+            "Constraints: do not claim you can open SKILL.md files in this session.",
+          ]),
     "- When a skill drives external API writes, assume rate limits: prefer fewer larger writes, avoid tight one-item loops, serialize bursts when possible, and respect 429/Retry-After.",
     trimmed,
     "",
@@ -263,9 +285,18 @@ function buildWebchatCanvasSection(params: {
   ];
 }
 
-function buildExecutionBiasSection(params: { isMinimal: boolean }) {
+function buildExecutionBiasSection(params: { isMinimal: boolean; toolsAvailable: boolean }) {
   if (params.isMinimal) {
     return [];
+  }
+  if (!params.toolsAvailable) {
+    return [
+      "## Execution Bias",
+      "If the user asks you to do the work, answer directly with the best result you can provide in this session.",
+      "Do not promise unavailable tool calls or pretend you can act outside the session's capabilities.",
+      "If the work needs tools you do not have, explain the limitation briefly and give the best direct fallback.",
+      "",
+    ];
   }
   return [
     "## Execution Bias",
@@ -273,6 +304,47 @@ function buildExecutionBiasSection(params: { isMinimal: boolean }) {
     "Use a real tool call or concrete action first when the task is actionable; do not stop at a plan or promise-to-act reply.",
     "Commentary-only turns are incomplete when tools are available and the next action is clear.",
     "If the work will take multiple steps or a while to finish, send one short progress update before or while acting.",
+    "",
+  ];
+}
+
+function buildToolCallStyleSection(params: {
+  hasFirstClassToolCalls: boolean;
+  hasOpenClawExecTool: boolean;
+  shellToolName: string;
+  runtimeChannel?: string;
+  inlineButtonsEnabled: boolean;
+}) {
+  const common = [
+    "## Tool Call Style",
+    "Narrate only when it helps: multi-step work, complex/challenging problems, sensitive actions (e.g., deletions), or when the user explicitly asks.",
+    "Keep narration brief and value-dense; avoid repeating obvious steps.",
+    "Use plain human language for narration unless in a technical context.",
+  ];
+  if (!params.hasFirstClassToolCalls) {
+    return [
+      ...common,
+      "This session has no first-class tools; answer directly instead of describing tool invocations.",
+      "",
+    ];
+  }
+  return [
+    "## Tool Call Style",
+    "Default: do not narrate routine, low-risk tool calls (just call the tool).",
+    ...common.slice(1),
+    "When a first-class tool exists for an action, use the tool directly instead of asking the user to run equivalent CLI or slash commands.",
+    ...(params.hasOpenClawExecTool
+      ? [
+          buildExecApprovalPromptGuidance({
+            shellToolName: params.shellToolName,
+            runtimeChannel: params.runtimeChannel,
+            inlineButtonsEnabled: params.inlineButtonsEnabled,
+          }),
+          `Never execute /approve through ${params.shellToolName} or any other shell/tool path; /approve is a user-facing approval command, not a shell command.`,
+          "Treat allow-once as single-command only: if another elevated command needs approval, request a fresh /approve and do not claim prior approval covered it.",
+          "When approvals are required, preserve and show the full command/script exactly as provided (including chained operators like &&, ||, |, ;, or multiline shells) so the user can approve what will actually run.",
+        ]
+      : []),
     "",
   ];
 }
@@ -347,20 +419,33 @@ function buildVoiceSection(params: { isMinimal: boolean; ttsHint?: string }) {
   return ["## Voice (TTS)", hint, ""];
 }
 
-function buildDocsSection(params: { docsPath?: string; isMinimal: boolean; readToolName: string }) {
-  const docsPath = params.docsPath?.trim();
-  if (!docsPath || params.isMinimal) {
+function buildDocsSection(params: {
+  docsPath?: string;
+  isMinimal: boolean;
+  hasPromptFileAccess: boolean;
+  hasExecTool: boolean;
+}) {
+  const rawDocsPath = params.docsPath?.trim();
+  if (!rawDocsPath || params.isMinimal) {
     return [];
   }
   return [
     "## Documentation",
-    `OpenClaw docs: ${docsPath}`,
+    ...(params.hasPromptFileAccess
+      ? [`OpenClaw docs: ${rawDocsPath}`]
+      : ["Local OpenClaw docs path is unavailable in this session."]),
     "Mirror: https://docs.openclaw.ai",
     "Source: https://github.com/openclaw/openclaw",
     "Community: https://discord.com/invite/clawd",
-    "Find new skills: https://clawhub.ai",
-    "For OpenClaw behavior, commands, config, or architecture: consult local docs first.",
-    "When diagnosing issues, run `openclaw status` yourself when possible; only ask the user if you lack access (e.g., sandboxed).",
+    ...(params.hasPromptFileAccess ? ["Find new skills: https://clawhub.ai"] : []),
+    ...(params.hasPromptFileAccess
+      ? ["For OpenClaw behavior, commands, config, or architecture: consult local docs first."]
+      : []),
+    ...(params.hasExecTool
+      ? [
+          "When diagnosing issues, run `openclaw status` yourself when possible; only ask the user if you lack access (e.g., sandboxed).",
+        ]
+      : []),
     "",
   ];
 }
@@ -387,7 +472,9 @@ export function buildAgentSystemPrompt(params: {
   ownerDisplaySecret?: string;
   reasoningTagHint?: boolean;
   toolNames?: string[];
-  toolSummaries?: Record<string, string>;
+  openClawToolNames?: string[];
+  explicitEmptyToolListMeansNoTools?: boolean;
+  hasHostedTools?: boolean;
   modelAliasLines?: string[];
   userTimezone?: string;
   userTime?: string;
@@ -438,6 +525,7 @@ export function buildAgentSystemPrompt(params: {
     grep: "Search file contents for patterns",
     find: "Find files by glob pattern",
     ls: "List directory contents",
+    bash: "Run shell commands (pty available for TTY-required CLIs)",
     exec: "Run shell commands (pty available for TTY-required CLIs)",
     process: "Manage background exec sessions",
     web_search: "Search the web (Brave API)",
@@ -494,48 +582,98 @@ export function buildAgentSystemPrompt(params: {
   ];
 
   const rawToolNames = (params.toolNames ?? []).map((tool) => tool.trim());
-  const canonicalToolNames = rawToolNames.filter(Boolean);
-  // Preserve caller casing while deduping tool names by lowercase.
-  const canonicalByNormalized = new Map<string, string>();
-  for (const name of canonicalToolNames) {
-    const normalized = name.toLowerCase();
-    if (!canonicalByNormalized.has(normalized)) {
-      canonicalByNormalized.set(normalized, name);
-    }
-  }
-  const resolveToolName = (normalized: string) =>
-    canonicalByNormalized.get(normalized) ?? normalized;
-
-  const normalizedTools = canonicalToolNames.map((tool) => tool.toLowerCase());
-  const availableTools = new Set(normalizedTools);
-  const hasSessionsSpawn = availableTools.has("sessions_spawn");
-  const acpHarnessSpawnAllowed = hasSessionsSpawn && acpSpawnRuntimeEnabled;
-  const externalToolSummaries = new Map<string, string>();
-  for (const [key, value] of Object.entries(params.toolSummaries ?? {})) {
-    const normalized = key.trim().toLowerCase();
-    if (!normalized || !value?.trim()) {
-      continue;
-    }
-    externalToolSummaries.set(normalized, value.trim());
-  }
-  const extraTools = Array.from(
-    new Set(normalizedTools.filter((tool) => !toolOrder.includes(tool))),
+  const canonicalToolNames = Array.from(new Set(rawToolNames.filter(Boolean)));
+  const resolvePreferredToolName = (normalized: string) =>
+    canonicalToolNames.find((name) => name.toLowerCase() === normalized) ?? normalized;
+  const rawOpenClawToolNames = (params.openClawToolNames ?? params.toolNames ?? []).map((tool) =>
+    tool.trim(),
   );
-  const enabledTools = toolOrder.filter((tool) => availableTools.has(tool));
-  const toolLines = enabledTools.map((tool) => {
-    const summary = coreToolSummaries[tool] ?? externalToolSummaries.get(tool);
-    const name = resolveToolName(tool);
+  const canonicalOpenClawToolNames = Array.from(new Set(rawOpenClawToolNames.filter(Boolean)));
+  const effectiveOpenClawToolNames = canonicalOpenClawToolNames;
+  const exactOpenClawToolNames = new Set(effectiveOpenClawToolNames);
+  const availableOpenClawTools = new Set(
+    effectiveOpenClawToolNames.map((tool) => tool.toLowerCase()),
+  );
+  const hasOpenClawSessionsSpawn = availableOpenClawTools.has("sessions_spawn");
+  const acpHarnessSpawnAllowed = hasOpenClawSessionsSpawn && acpSpawnRuntimeEnabled;
+  const resolveToolSummary = (name: string) => {
+    const normalized = name.toLowerCase();
+    if (exactOpenClawToolNames.has(name)) {
+      return coreToolSummaries[normalized];
+    }
+    return coreToolSummaries[normalized];
+  };
+  const orderedToolNames = toolOrder.flatMap((toolId) =>
+    canonicalToolNames.filter((name) => name.toLowerCase() === toolId),
+  );
+  const extraTools = canonicalToolNames
+    .filter((name) => !toolOrder.includes(name.toLowerCase()))
+    .toSorted();
+  const toolLines = orderedToolNames.map((name) => {
+    const summary = resolveToolSummary(name);
     return summary ? `- ${name}: ${summary}` : `- ${name}`;
   });
-  for (const tool of extraTools.toSorted()) {
-    const summary = coreToolSummaries[tool] ?? externalToolSummaries.get(tool);
-    const name = resolveToolName(tool);
+  for (const name of extraTools) {
+    const summary = resolveToolSummary(name);
     toolLines.push(summary ? `- ${name}: ${summary}` : `- ${name}`);
   }
+  const resolveToolName = (normalized: string) => {
+    const openClawExact = effectiveOpenClawToolNames.find(
+      (name) => name.toLowerCase() === normalized,
+    );
+    if (openClawExact) {
+      return openClawExact;
+    }
+    return resolvePreferredToolName(normalized);
+  };
 
-  const hasGateway = availableTools.has("gateway");
+  const hasExplicitToolList = params.toolNames !== undefined;
+  const explicitEmptyToolListMeansNoTools = params.explicitEmptyToolListMeansNoTools === true;
+  const hasHostedTools = params.hasHostedTools === true;
+  const hasExplicitEmptyToolList =
+    hasExplicitToolList &&
+    toolLines.length === 0 &&
+    !hasHostedTools &&
+    explicitEmptyToolListMeansNoTools;
+  const hasAvailableTools = toolLines.length > 0 || hasHostedTools;
+  const usesLegacyToolFallback =
+    params.toolNames === undefined ||
+    (hasExplicitToolList && toolLines.length === 0 && !explicitEmptyToolListMeansNoTools);
+  const hasFirstClassToolCalls = usesLegacyToolFallback || hasAvailableTools;
+  const usesLegacyOpenClawToolFallback =
+    params.openClawToolNames === undefined
+      ? usesLegacyToolFallback
+      : params.openClawToolNames.length === 0 && !explicitEmptyToolListMeansNoTools;
+  const hasOpenClawToolAccess = usesLegacyOpenClawToolFallback || availableOpenClawTools.size > 0;
+  const hasGateway = availableOpenClawTools.has("gateway");
+  const hasReadTool = usesLegacyOpenClawToolFallback || availableOpenClawTools.has("read");
+  const hasExecTool =
+    usesLegacyOpenClawToolFallback ||
+    availableOpenClawTools.has("exec") ||
+    availableOpenClawTools.has("bash");
+  const hasProcessTool = usesLegacyOpenClawToolFallback || availableOpenClawTools.has("process");
+  const hasWorkspaceFileTools =
+    usesLegacyOpenClawToolFallback ||
+    availableOpenClawTools.has("read") ||
+    availableOpenClawTools.has("write") ||
+    availableOpenClawTools.has("edit") ||
+    availableOpenClawTools.has("apply_patch") ||
+    availableOpenClawTools.has("grep") ||
+    availableOpenClawTools.has("find") ||
+    availableOpenClawTools.has("ls");
+  const hasSessionStatusTool =
+    usesLegacyOpenClawToolFallback || availableOpenClawTools.has("session_status");
+  const hasSpawnTool = usesLegacyOpenClawToolFallback || hasOpenClawSessionsSpawn;
+  const hasSessionPollingTool =
+    usesLegacyOpenClawToolFallback ||
+    availableOpenClawTools.has("subagents") ||
+    availableOpenClawTools.has("sessions_list");
   const readToolName = resolveToolName("read");
-  const execToolName = resolveToolName("exec");
+  const execToolName = availableOpenClawTools.has("exec")
+    ? resolveToolName("exec")
+    : availableOpenClawTools.has("bash")
+      ? resolveToolName("bash")
+      : resolveToolName("exec");
   const processToolName = resolveToolName("process");
   const extraSystemPrompt = params.extraSystemPrompt?.trim();
   const promptContribution = params.promptContribution;
@@ -595,10 +733,14 @@ export function buildAgentSystemPrompt(params: {
     params.sandboxInfo?.enabled && sanitizedSandboxContainerWorkspace
       ? sanitizedSandboxContainerWorkspace
       : sanitizedWorkspaceDir;
-  const workspaceGuidance =
-    params.sandboxInfo?.enabled && sanitizedSandboxContainerWorkspace
+  const hasWorkspaceToolAccess = hasWorkspaceFileTools || hasExecTool;
+  const hasShellPromptFileAccess = hasExecTool && !params.sandboxInfo?.enabled;
+  const hasPromptFileAccess = hasReadTool || hasShellPromptFileAccess;
+  const workspaceGuidance = hasWorkspaceToolAccess
+    ? params.sandboxInfo?.enabled && sanitizedSandboxContainerWorkspace
       ? `For read/write/edit/apply_patch, file paths resolve against host workspace: ${sanitizedWorkspaceDir}. For bash/exec commands, use sandbox container paths under ${sanitizedSandboxContainerWorkspace} (or relative paths from that workdir), not host paths. Prefer relative paths so both sandboxed exec and file tools work consistently.`
-      : "Treat this directory as the single global workspace for file operations unless explicitly instructed otherwise.";
+      : "Treat this directory as the single global workspace for file operations unless explicitly instructed otherwise."
+    : "A workspace path is provided for context only. Do not claim you can inspect, edit, or execute inside it unless the session policy changes.";
   const safetySection = [
     "## Safety",
     "You have no independent goals: do not pursue self-preservation, replication, resource acquisition, or power-seeking; avoid long-term plans beyond the user's request.",
@@ -609,18 +751,26 @@ export function buildAgentSystemPrompt(params: {
   const skillsSection = buildSkillsSection({
     skillsPrompt,
     readToolName,
+    shellToolName: execToolName,
+    skillReadMode: hasReadTool
+      ? "read-tool"
+      : hasShellPromptFileAccess
+        ? "shell-tool"
+        : "catalog-only",
   });
   const memorySection = buildMemorySection({
     isMinimal,
     includeMemorySection: params.includeMemorySection,
-    availableTools,
+    availableTools: availableOpenClawTools,
     citationsMode: params.memoryCitationsMode,
   });
   const docsSection = buildDocsSection({
     docsPath: params.docsPath,
     isMinimal,
-    readToolName,
+    hasPromptFileAccess,
+    hasExecTool,
   });
+  const hasCliCommandAccess = !isMinimal && hasExecTool;
   const workspaceNotes = (params.workspaceNotes ?? []).map((note) => note.trim()).filter(Boolean);
 
   // For "none" mode, return just the basic identity line
@@ -633,39 +783,71 @@ export function buildAgentSystemPrompt(params: {
     "",
     "## Tooling",
     "Tool availability (filtered by policy):",
-    "Tool names are case-sensitive. Call tools exactly as listed.",
-    toolLines.length > 0
-      ? toolLines.join("\n")
-      : [
-          "Pi lists the standard tools above. This runtime enables:",
-          "- grep: search file contents for patterns",
-          "- find: find files by glob pattern",
-          "- ls: list directory contents",
-          "- apply_patch: apply multi-file patches",
-          `- ${execToolName}: run shell commands (supports background via yieldMs/background)`,
-          `- ${processToolName}: manage background exec sessions`,
-          "- browser: control OpenClaw's dedicated browser",
-          "- canvas: present/eval/snapshot the Canvas",
-          "- nodes: list/describe/notify/camera/screen on paired nodes",
-          "- cron: manage cron jobs and wake events (use for reminders; when scheduling a reminder, write the systemEvent text as something that will read like a reminder when it fires, and mention that it is a reminder depending on the time gap between setting and firing; include recent context in reminder text if appropriate)",
-          "- sessions_list: list sessions",
-          "- sessions_history: fetch session history",
-          "- sessions_send: send to another session",
-          "- subagents: list/steer/kill sub-agent runs",
-          '- session_status: show usage/time/model state and answer "what model are we using?"',
-        ].join("\n"),
-    "TOOLS.md does not control tool availability; it is user guidance for how to use external tools.",
-    `For long waits, avoid rapid poll loops: use ${execToolName} with enough yieldMs or ${processToolName}(action=poll, timeout=<ms>).`,
-    "If a task is more complex or takes longer, spawn a sub-agent. Completion is push-based: it will auto-announce when done.",
-    ...(acpHarnessSpawnAllowed
+    ...(hasExplicitEmptyToolList
       ? [
-          'For requests like "do this in codex/claude code/cursor/gemini" or similar ACP harnesses, treat it as ACP harness intent and call `sessions_spawn` with `runtime: "acp"`.',
-          'On Discord, default ACP harness requests to thread-bound persistent sessions (`thread: true`, `mode: "session"`) unless the user asks otherwise.',
-          "Set `agentId` explicitly unless `acp.defaultAgent` is configured, and do not route ACP harness requests through `subagents`/`agents_list` or local PTY exec flows.",
-          'For ACP harness thread spawns, do not call `message` with `action=thread-create`; use `sessions_spawn` (`runtime: "acp"`, `thread: true`) as the single thread creation path.',
+          "No tools are available in this session.",
+          "Do not claim you can call tools, run shell commands, browse, message via tools, or read/write files unless the session policy changes.",
+        ]
+      : [
+          "Tool names are case-sensitive. Call tools exactly as listed.",
+          toolLines.length > 0
+            ? toolLines.join("\n")
+            : hasHostedTools
+              ? [
+                  "Hosted client tools are available for this session.",
+                  "Use the exact hosted tool schemas and names provided by the runtime; do not invent or rename tools.",
+                ].join("\n")
+              : [
+                  "Pi lists the standard tools above. This runtime enables:",
+                  "- grep: search file contents for patterns",
+                  "- find: find files by glob pattern",
+                  "- ls: list directory contents",
+                  "- apply_patch: apply multi-file patches",
+                  `- ${execToolName}: run shell commands (supports background via yieldMs/background)`,
+                  `- ${processToolName}: manage background exec sessions`,
+                  "- browser: control OpenClaw's dedicated browser",
+                  "- canvas: present/eval/snapshot the Canvas",
+                  "- nodes: list/describe/notify/camera/screen on paired nodes",
+                  "- cron: manage cron jobs and wake events (use for reminders; when scheduling a reminder, write the systemEvent text as something that will read like a reminder when it fires, and mention that it is a reminder depending on the time gap between setting and firing; include recent context in reminder text if appropriate)",
+                  "- sessions_list: list sessions",
+                  "- sessions_history: fetch session history",
+                  "- sessions_send: send to another session",
+                  "- subagents: list/steer/kill sub-agent runs",
+                  '- session_status: show usage/time/model state and answer "what model are we using?"',
+                ].join("\n"),
+        ]),
+    "TOOLS.md does not control tool availability; it is user guidance for how to use external tools.",
+    ...(hasExecTool || hasProcessTool || hasSpawnTool || hasSessionPollingTool
+      ? [
+          ...(hasExecTool || hasProcessTool
+            ? [
+                hasExecTool && hasProcessTool
+                  ? `For long waits, avoid rapid poll loops: use ${execToolName} with enough yieldMs or ${processToolName}(action=poll, timeout=<ms>).`
+                  : hasExecTool
+                    ? `For long waits, avoid rapid poll loops: use ${execToolName} with enough yieldMs for longer-running commands.`
+                    : `For long waits, avoid rapid poll loops: use ${processToolName}(action=poll, timeout=<ms>).`,
+              ]
+            : []),
+          ...(hasSpawnTool
+            ? [
+                "If a task is more complex or takes longer, spawn a sub-agent. Completion is push-based: it will auto-announce when done.",
+              ]
+            : []),
+          ...(acpHarnessSpawnAllowed
+            ? [
+                'For requests like "do this in codex/claude code/cursor/gemini" or similar ACP harnesses, treat it as ACP harness intent and call `sessions_spawn` with `runtime: "acp"`.',
+                'On Discord, default ACP harness requests to thread-bound persistent sessions (`thread: true`, `mode: "session"`) unless the user asks otherwise.',
+                "Set `agentId` explicitly unless `acp.defaultAgent` is configured, and do not route ACP harness requests through `subagents`/`agents_list` or local PTY exec flows.",
+                'For ACP harness thread spawns, do not call `message` with `action=thread-create`; use `sessions_spawn` (`runtime: "acp"`, `thread: true`) as the single thread creation path.',
+              ]
+            : []),
+          ...(hasSessionPollingTool
+            ? [
+                "Do not poll `subagents list` / `sessions_list` in a loop; only check status on-demand (for intervention, debugging, or when explicitly asked).",
+              ]
+            : []),
         ]
       : []),
-    "Do not poll `subagents list` / `sessions_list` in a loop; only check status on-demand (for intervention, debugging, or when explicitly asked).",
     "",
     ...buildOverridablePromptSection({
       override: providerSectionOverrides.interaction_style,
@@ -673,27 +855,19 @@ export function buildAgentSystemPrompt(params: {
     }),
     ...buildOverridablePromptSection({
       override: providerSectionOverrides.tool_call_style,
-      fallback: [
-        "## Tool Call Style",
-        "Default: do not narrate routine, low-risk tool calls (just call the tool).",
-        "Narrate only when it helps: multi-step work, complex/challenging problems, sensitive actions (e.g., deletions), or when the user explicitly asks.",
-        "Keep narration brief and value-dense; avoid repeating obvious steps.",
-        "Use plain human language for narration unless in a technical context.",
-        "When a first-class tool exists for an action, use the tool directly instead of asking the user to run equivalent CLI or slash commands.",
-        buildExecApprovalPromptGuidance({
-          runtimeChannel: params.runtimeInfo?.channel,
-          inlineButtonsEnabled,
-        }),
-        "Never execute /approve through exec or any other shell/tool path; /approve is a user-facing approval command, not a shell command.",
-        "Treat allow-once as single-command only: if another elevated command needs approval, request a fresh /approve and do not claim prior approval covered it.",
-        "When approvals are required, preserve and show the full command/script exactly as provided (including chained operators like &&, ||, |, ;, or multiline shells) so the user can approve what will actually run.",
-        "",
-      ],
+      fallback: buildToolCallStyleSection({
+        hasFirstClassToolCalls,
+        hasOpenClawExecTool: hasExecTool,
+        shellToolName: execToolName,
+        runtimeChannel: params.runtimeInfo?.channel,
+        inlineButtonsEnabled,
+      }),
     }),
     ...buildOverridablePromptSection({
-      override: providerSectionOverrides.execution_bias,
+      override: hasFirstClassToolCalls ? providerSectionOverrides.execution_bias : undefined,
       fallback: buildExecutionBiasSection({
         isMinimal,
+        toolsAvailable: hasFirstClassToolCalls,
       }),
     }),
     ...buildOverridablePromptSection({
@@ -701,15 +875,19 @@ export function buildAgentSystemPrompt(params: {
       fallback: [],
     }),
     ...safetySection,
-    "## OpenClaw CLI Quick Reference",
-    "OpenClaw is controlled via subcommands. Do not invent commands.",
-    "To manage the Gateway daemon service (start/stop/restart):",
-    "- openclaw gateway status",
-    "- openclaw gateway start",
-    "- openclaw gateway stop",
-    "- openclaw gateway restart",
-    "If unsure, ask the user to run `openclaw help` (or `openclaw gateway --help`) and paste the output.",
-    "",
+    ...(hasCliCommandAccess
+      ? [
+          "## OpenClaw CLI Quick Reference",
+          "OpenClaw is controlled via subcommands. Do not invent commands.",
+          "To manage the Gateway daemon service (start/stop/restart):",
+          "- openclaw gateway status",
+          "- openclaw gateway start",
+          "- openclaw gateway stop",
+          "- openclaw gateway restart",
+          "If unsure, ask the user to run `openclaw help` (or `openclaw gateway --help`) and paste the output.",
+          "",
+        ]
+      : []),
     ...skillsSection,
     ...memorySection,
     // Skip self-update for subagent/none modes
@@ -736,7 +914,7 @@ export function buildAgentSystemPrompt(params: {
       ? params.modelAliasLines.join("\n")
       : "",
     params.modelAliasLines && params.modelAliasLines.length > 0 && !isMinimal ? "" : "",
-    userTimezone
+    userTimezone && hasSessionStatusTool
       ? "If you need the current date, time, or day of week, run session_status (📊 session_status)."
       : "",
     "## Workspace",
@@ -751,7 +929,7 @@ export function buildAgentSystemPrompt(params: {
           "You are running in a sandboxed runtime (tools execute in Docker).",
           "Some tools may be unavailable due to sandbox policy.",
           "Sub-agents stay sandboxed (no elevated/host access). Need outside-sandbox read/write? Don't spawn; ask first.",
-          hasSessionsSpawn && acpEnabled
+          hasOpenClawSessionsSpawn && acpEnabled
             ? 'ACP harness spawns are blocked from sandboxed sessions (`sessions_spawn` with `runtime: "acp"`). Use `runtime: "subagent"` instead.'
             : "",
           params.sandboxInfo.containerWorkspaceDir
@@ -821,14 +999,16 @@ export function buildAgentSystemPrompt(params: {
       runtimeChannel,
       canvasRootDir: params.runtimeInfo?.canvasRootDir,
     }),
-    ...buildMessagingSection({
-      isMinimal,
-      availableTools,
-      messageChannelOptions,
-      inlineButtonsEnabled,
-      runtimeChannel,
-      messageToolHints: params.messageToolHints,
-    }),
+    ...(hasOpenClawToolAccess
+      ? buildMessagingSection({
+          isMinimal,
+          availableTools: availableOpenClawTools,
+          messageChannelOptions,
+          inlineButtonsEnabled,
+          runtimeChannel,
+          messageToolHints: params.messageToolHints,
+        })
+      : []),
     ...buildVoiceSection({ isMinimal, ttsHint: params.ttsHint }),
   ];
 

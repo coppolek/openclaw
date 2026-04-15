@@ -15,7 +15,11 @@ import type {
   ToolResultFormat,
 } from "../../pi-embedded-subscribe.shared-types.js";
 import type { SkillSnapshot } from "../../skills.js";
-export type { ClientToolDefinition } from "../../command/shared-types.js";
+export {
+  normalizeClientToolDefinitions,
+  normalizeClientToolName,
+  type ClientToolDefinition,
+} from "../../command/shared-types.js";
 
 export type EmbeddedRunTrigger = "cron" | "heartbeat" | "manual" | "memory" | "overflow" | "user";
 
