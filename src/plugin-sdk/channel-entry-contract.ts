@@ -318,6 +318,7 @@ function loadBundledEntryModuleSync(importMetaUrl: string, specifier: string): u
     return cached;
   }
   let loaded: unknown;
+  let loadError: unknown;
   if (
     process.platform === "win32" &&
     modulePath.includes(`${path.sep}dist${path.sep}`) &&
@@ -325,11 +326,25 @@ function loadBundledEntryModuleSync(importMetaUrl: string, specifier: string): u
   ) {
     try {
       loaded = nodeRequire(modulePath);
-    } catch {
-      loaded = getJiti(modulePath)(modulePath);
+    } catch (err) {
+      loadError = err;
+      // Fall through to jiti loader
     }
-  } else {
-    loaded = getJiti(modulePath)(modulePath);
+  }
+  if (loaded === undefined) {
+    try {
+      loaded = getJiti(modulePath)(modulePath);
+    } catch (err) {
+      loadError = err;
+      // If both native require and jiti failed, clear cache and throw
+      loadedModuleExports.delete(modulePath);
+      throw loadError;
+    }
+  }
+  // Defensive: if loaded is undefined or null, clear cache and throw
+  if (loaded === undefined || loaded === null) {
+    loadedModuleExports.delete(modulePath);
+    throw new Error(`Bundled module loaded but returned null/undefined: ${modulePath}`);
   }
   loadedModuleExports.set(modulePath, loaded);
   return loaded;
