@@ -336,7 +336,6 @@ function stripToolCallTagsFromText(text: string): string {
   }
   return stripToolCallXmlTags(text, {
     collapseRemovedInlineWhitespace: true,
-    stripPlainToolResultPayload: true,
   });
 }
 

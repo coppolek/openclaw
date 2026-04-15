@@ -167,7 +167,6 @@ function parseToolCallTagAt(text: string, start: number): ParsedToolCallTag | nu
 
 interface StripToolCallXmlTagsOptions {
   collapseRemovedInlineWhitespace?: boolean;
-  stripPlainToolResultPayload?: boolean;
 }
 
 function appendVisibleToolText(
@@ -240,9 +239,7 @@ export function stripToolCallXmlTags(text: string, options?: StripToolCallXmlTag
       const hasToolCallPayloadStart =
         tag.tagName === "tool_call"
           ? looksLikeToolCallPayloadStart(text, payloadStart)
-          : options?.stripPlainToolResultPayload && tag.tagName === "tool_result"
-            ? true
-            : TOOL_CALL_JSON_PAYLOAD_START_RE.test(text.slice(payloadStart));
+          : TOOL_CALL_JSON_PAYLOAD_START_RE.test(text.slice(payloadStart));
       if (!tag.isClose && hasToolCallPayloadStart) {
         inToolCallBlock = true;
         toolCallContentStart = tag.end;
