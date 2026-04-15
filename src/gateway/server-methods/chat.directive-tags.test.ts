@@ -213,6 +213,21 @@ async function waitForAssertion(assertion: () => void, timeoutMs = 1000, stepMs 
   }
 }
 
+async function waitForRealTimeAssertion(assertion: () => void, timeoutMs = 1000, stepMs = 5) {
+  let lastError: unknown;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    try {
+      assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, stepMs));
+  }
+  throw lastError ?? new Error("assertion did not pass in time");
+}
+
 function createTranscriptFixture(prefix: string) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   const transcriptPath = path.join(dir, "sess.jsonl");
@@ -484,6 +499,7 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
   it("persists agent-run audio replies emitted as media-bearing block payloads", async () => {
     createTranscriptFixture("openclaw-chat-send-agent-audio-");
     const transcriptDir = path.dirname(mockState.transcriptPath);
+    mockState.config = { agents: { defaults: { workspace: transcriptDir } } };
     const audioPath = path.join(transcriptDir, "reply.mp3");
     fs.writeFileSync(audioPath, Buffer.from([0xff, 0xfb, 0x90, 0x00]));
     mockState.triggerAgentRunStart = true;
@@ -503,11 +519,11 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
       context,
       respond,
       idempotencyKey: "idem-agent-audio",
-      expectBroadcast: false,
+      waitFor: "none",
     });
 
     let assistantUpdate: (typeof mockState.emittedTranscriptUpdates)[number] | undefined;
-    await waitForAssertion(() => {
+    await waitForRealTimeAssertion(() => {
       assistantUpdate = mockState.emittedTranscriptUpdates.find(
         (update) =>
           typeof update.message === "object" &&
@@ -520,7 +536,7 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
             false),
       );
       expect(assistantUpdate).toBeDefined();
-    });
+    }, 5000);
     expect(assistantUpdate).toMatchObject({
       message: {
         role: "assistant",
