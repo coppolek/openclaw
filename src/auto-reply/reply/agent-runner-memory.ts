@@ -100,6 +100,29 @@ export function estimatePromptTokensForMemoryFlush(prompt?: string): number | un
   return Math.ceil(tokens);
 }
 
+/**
+ * Resolve the effective model target for the memory flush turn.
+ * When `compaction.memoryFlush.model` is configured, the flush uses this model
+ * instead of the session model. Falls back to the session provider/model when unset.
+ */
+export function resolveMemoryFlushModelOverride(params: {
+  cfg?: OpenClawConfig;
+  sessionProvider: string;
+  sessionModel: string;
+}): { provider: string; model: string } {
+  const override = params.cfg?.agents?.defaults?.compaction?.memoryFlush?.model?.trim();
+  if (!override) {
+    return { provider: params.sessionProvider, model: params.sessionModel };
+  }
+  const slashIdx = override.indexOf("/");
+  if (slashIdx > 0) {
+    const overrideProvider = override.slice(0, slashIdx).trim();
+    const overrideModel = override.slice(slashIdx + 1).trim() || params.sessionModel;
+    return { provider: overrideProvider, model: overrideModel };
+  }
+  return { provider: params.sessionProvider, model: override };
+}
+
 export function resolveEffectivePromptTokens(
   basePromptTokens?: number,
   lastOutputTokens?: number,
@@ -538,15 +561,23 @@ export async function runMemoryFlushIfNeeded(params: {
     return sandboxCfg.workspaceAccess === "rw";
   })();
 
-  const isCli = isCliProvider(params.followupRun.run.provider, params.cfg);
+  // Resolve the flush model override early so that contextWindowTokens and
+  // the CLI eligibility check both reflect the actual flush model.
+  const flushModelOverride = resolveMemoryFlushModelOverride({
+    cfg: params.cfg,
+    sessionProvider: params.followupRun.run.provider,
+    sessionModel: params.followupRun.run.model,
+  });
+  // Use the resolved flush provider for CLI eligibility, not the session provider.
+  const isCli = isCliProvider(flushModelOverride.provider, params.cfg);
   const canAttemptFlush = memoryFlushWritable && !params.isHeartbeat && !isCli;
   let entry =
     params.sessionEntry ??
     (params.sessionKey ? params.sessionStore?.[params.sessionKey] : undefined);
   const contextWindowTokens = resolveMemoryFlushContextWindowTokens({
     cfg: params.cfg,
-    provider: params.followupRun.run.provider,
-    modelId: params.followupRun.run.model ?? params.defaultModel,
+    provider: flushModelOverride.provider,
+    modelId: flushModelOverride.model ?? params.defaultModel,
     agentCfgContextTokens: params.agentCfgContextTokens,
   });
 
@@ -738,6 +769,8 @@ export async function runMemoryFlushIfNeeded(params: {
   try {
     await memoryDeps.runWithModelFallback({
       ...resolveModelFallbackOptions(params.followupRun.run),
+      provider: flushModelOverride.provider,
+      model: flushModelOverride.model,
       runId: flushRunId,
       run: async (provider, model, runOptions) => {
         const { embeddedContext, senderContext, runBaseParams } = buildEmbeddedRunExecutionParams({
