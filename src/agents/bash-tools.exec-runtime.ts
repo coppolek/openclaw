@@ -1,5 +1,7 @@
 import path from "node:path";
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
+import { Type } from "@sinclair/typebox";
+import { loadConfig } from "../config/config.js";
 import {
   DEFAULT_EXEC_APPROVAL_TIMEOUT_MS,
   resolveExecApprovalAllowedDecisions,
@@ -297,12 +299,15 @@ function maybeNotifyOnExit(session: ProcessSession, status: "completed" | "faile
   const summary = output
     ? `Exec ${status} (${session.id.slice(0, 8)}, ${exitLabel}) :: ${output}`
     : `Exec ${status} (${session.id.slice(0, 8)}, ${exitLabel})`;
+  const mainKey = loadConfig().session?.mainKey;
   enqueueSystemEvent(summary, {
-    sessionKey,
+    sessionKey: resolveEventSessionKey(sessionKey, mainKey),
     deliveryContext: session.notifyDeliveryContext,
     trusted: false,
   });
-  requestHeartbeatNow(scopedHeartbeatWakeOptions(sessionKey, { reason: "exec-event" }));
+  requestHeartbeatNow(
+    scopedHeartbeatWakeOptions(sessionKey, { reason: `exec:${session.id}:exit` }, mainKey),
+  );
 }
 
 export function createApprovalSlug(id: string) {
@@ -373,12 +378,13 @@ export function emitExecSystemEvent(
   if (!sessionKey) {
     return;
   }
+  const mainKey = loadConfig().session?.mainKey;
   enqueueSystemEvent(text, {
-    sessionKey,
+    sessionKey: resolveEventSessionKey(sessionKey, mainKey),
     contextKey: opts.contextKey,
     deliveryContext: opts.deliveryContext,
   });
-  requestHeartbeatNow(scopedHeartbeatWakeOptions(sessionKey, { reason: "exec-event" }));
+  requestHeartbeatNow(scopedHeartbeatWakeOptions(sessionKey, { reason: "exec-event" }, mainKey));
 }
 
 function joinExecFailureOutput(aggregated: string, reason: string) {

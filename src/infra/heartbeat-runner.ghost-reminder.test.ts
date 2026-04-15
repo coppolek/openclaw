@@ -274,10 +274,10 @@ describe("Ghost reminder bug (issue #13317)", () => {
     expect(sendTelegram).not.toHaveBeenCalled();
   });
 
-  it("uses an internal-only exec prompt when delivery target is none", async () => {
+  it("relays exec prompt to last channel when delivery target is none", async () => {
     const { result, sendTelegram, calledCtx } = await runHeartbeatCase({
       tmpPrefix: "openclaw-exec-internal-",
-      replyText: "Handled internally",
+      replyText: "Exec completed successfully",
       reason: "exec-event",
       target: "none",
       enqueue: (sessionKey) => {
@@ -288,8 +288,9 @@ describe("Ghost reminder bug (issue #13317)", () => {
     expect(result.status).toBe("ran");
     expect(calledCtx?.Provider).toBe("exec-event");
     expect(calledCtx?.ForceSenderIsOwnerFalse).toBe(true);
-    expect(calledCtx?.Body).toContain("Handle the result internally");
-    expect(sendTelegram).not.toHaveBeenCalled();
+    expect(calledCtx?.Body).toContain("Please relay the command output to the user");
+    expect(calledCtx?.Body).not.toContain("Handle the result internally");
+    expect(sendTelegram).toHaveBeenCalled();
   });
 
   it("classifies hook:wake exec completions as exec-event prompts", async () => {

@@ -419,9 +419,18 @@ export async function executePreparedCliRun(
                 "It may have been waiting for interactive input or an approval prompt.",
                 "For Claude Code, prefer --permission-mode bypassPermissions --print.",
               ].join(" ");
-              executeDeps.enqueueSystemEvent(stallNotice, { sessionKey: params.sessionKey });
+              executeDeps.enqueueSystemEvent(stallNotice, {
+                sessionKey: resolveEventSessionKey(
+                  params.sessionKey,
+                  params.config?.session?.mainKey,
+                ),
+              });
               executeDeps.requestHeartbeatNow(
-                scopedHeartbeatWakeOptions(params.sessionKey, { reason: "cli:watchdog:stall" }),
+                scopedHeartbeatWakeOptions(
+                  params.sessionKey,
+                  { reason: "cli:watchdog:stall" },
+                  params.config?.session?.mainKey,
+                ),
               );
             }
             throw new FailoverError(timeoutReason, {
@@ -467,7 +476,10 @@ export async function executePreparedCliRun(
           ...parsed,
           rawText,
           finalPromptText: prompt,
-          text: applyPluginTextReplacements(rawText, context.backendResolved.textTransforms?.output),
+          text: applyPluginTextReplacements(
+            rawText,
+            context.backendResolved.textTransforms?.output,
+          ),
         };
       } finally {
         restoreSkillEnv?.();

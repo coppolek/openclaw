@@ -772,69 +772,6 @@ export async function runHeartbeatOnce(opts: {
   // sending the full conversation history (~100K tokens) to the LLM.
   // Delivery routing still uses the main session entry (lastChannel, lastTo).
   const useIsolatedSession = heartbeat?.isolatedSession === true;
-  const delivery = resolveHeartbeatDeliveryTarget({
-    cfg,
-    entry,
-    heartbeat,
-    // Isolated heartbeat runs drain system events from their dedicated
-    // `:heartbeat` session, not from the base session we peek during preflight.
-    // Reusing base-session turnSource routing here can pin later isolated runs
-    // to stale channels/threads because that base-session event context remains queued.
-    turnSource: useIsolatedSession ? undefined : preflight.turnSourceDeliveryContext,
-  });
-  const heartbeatAccountId = heartbeat?.accountId?.trim();
-  if (delivery.reason === "unknown-account") {
-    log.warn("heartbeat: unknown accountId", {
-      accountId: delivery.accountId ?? heartbeatAccountId ?? null,
-      target: heartbeat?.target ?? "none",
-    });
-  } else if (heartbeatAccountId) {
-    log.info("heartbeat: using explicit accountId", {
-      accountId: delivery.accountId ?? heartbeatAccountId,
-      target: heartbeat?.target ?? "none",
-      channel: delivery.channel,
-    });
-  }
-  const visibility =
-    delivery.channel !== "none"
-      ? resolveHeartbeatVisibility({
-          cfg,
-          channel: delivery.channel,
-          accountId: delivery.accountId,
-        })
-      : { showOk: false, showAlerts: true, useIndicator: true };
-  const { sender } = resolveHeartbeatSenderContext({ cfg, entry, delivery });
-  const responsePrefix = resolveEffectiveMessagesConfig(cfg, agentId, {
-    channel: delivery.channel !== "none" ? delivery.channel : undefined,
-    accountId: delivery.accountId,
-  }).responsePrefix;
-
-  const canRelayToUser = Boolean(
-    delivery.channel !== "none" && delivery.to && visibility.showAlerts,
-  );
-  const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
-  const { prompt, hasExecCompletion, hasCronEvents } = resolveHeartbeatRunPrompt({
-    cfg,
-    heartbeat,
-    preflight,
-    canRelayToUser,
-    workspaceDir,
-    startedAt,
-    heartbeatFileContent: preflight.heartbeatFileContent,
-  });
-
-  // If no tasks are due, skip heartbeat entirely
-  if (prompt === null) {
-    // Wake-triggered events should stay queued when the run short-circuits:
-    // no reply turn ran, so there is nothing that actually consumed that wake payload.
-    const shouldConsumeInspectedEvents =
-      !preflight.isWakeReason && preflight.shouldInspectPendingEvents;
-    if (shouldConsumeInspectedEvents && preflight.pendingEventEntries.length > 0) {
-      consumeSystemEventEntries(sessionKey, preflight.pendingEventEntries);
-    }
-    return { status: "skipped", reason: "no-tasks-due" };
-  }
-
   let runSessionKey = sessionKey;
   if (useIsolatedSession) {
     const configuredSession = resolveHeartbeatSession(cfg, agentId, heartbeat);
@@ -896,6 +833,65 @@ export async function runHeartbeatOnce(opts: {
     runSessionKey === sessionKey
       ? preflight.pendingEventEntries
       : peekSystemEventEntries(runSessionKey);
+  const hasExecCompletionPending =
+    preflight.isExecEventReason &&
+    activeSessionPendingEventEntries.some((event) => isExecCompletionEvent(event.text));
+  const delivery = resolveHeartbeatDeliveryTarget({
+    cfg,
+    entry,
+    heartbeat,
+    turnSource: useIsolatedSession ? undefined : preflight.turnSourceDeliveryContext,
+    forceLastTargetWhenNone: hasExecCompletionPending,
+  });
+  const heartbeatAccountId = heartbeat?.accountId?.trim();
+  if (delivery.reason === "unknown-account") {
+    log.warn("heartbeat: unknown accountId", {
+      accountId: delivery.accountId ?? heartbeatAccountId ?? null,
+      target: heartbeat?.target ?? "none",
+    });
+  } else if (heartbeatAccountId) {
+    log.info("heartbeat: using explicit accountId", {
+      accountId: delivery.accountId ?? heartbeatAccountId,
+      target: heartbeat?.target ?? "none",
+      channel: delivery.channel,
+    });
+  }
+  const visibility =
+    delivery.channel !== "none"
+      ? resolveHeartbeatVisibility({
+          cfg,
+          channel: delivery.channel,
+          accountId: delivery.accountId,
+        })
+      : { showOk: false, showAlerts: true, useIndicator: true };
+  const { sender } = resolveHeartbeatSenderContext({ cfg, entry, delivery });
+  const responsePrefix = resolveEffectiveMessagesConfig(cfg, agentId, {
+    channel: delivery.channel !== "none" ? delivery.channel : undefined,
+    accountId: delivery.accountId,
+  }).responsePrefix;
+
+  const canRelayToUser = Boolean(
+    delivery.channel !== "none" && delivery.to && visibility.showAlerts,
+  );
+  const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
+  const { prompt, hasExecCompletion, hasCronEvents } = resolveHeartbeatRunPrompt({
+    cfg,
+    heartbeat,
+    preflight: { ...preflight, pendingEventEntries: activeSessionPendingEventEntries },
+    canRelayToUser,
+    workspaceDir,
+    startedAt,
+    heartbeatFileContent: preflight.heartbeatFileContent,
+  });
+
+  if (prompt === null) {
+    const shouldConsumeInspectedEvents =
+      !preflight.isWakeReason && preflight.shouldInspectPendingEvents;
+    if (shouldConsumeInspectedEvents && preflight.pendingEventEntries.length > 0) {
+      consumeSystemEventEntries(sessionKey, preflight.pendingEventEntries);
+    }
+    return { status: "skipped", reason: "no-tasks-due" };
+  }
   const hasUntrustedInspectedEvents =
     preflight.shouldInspectPendingEvents &&
     preflight.pendingEventEntries.some((event) => event.trusted === false);
