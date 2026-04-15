@@ -95,18 +95,24 @@ export function getRegisteredChannelPluginMeta(
 }
 
 export function formatChannelPrimerLine(meta: ChannelMeta): string {
-  return `${meta.label}: ${meta.blurb}`;
+  const label =
+    normalizeOptionalString(meta.label) ?? normalizeOptionalString(meta.id) ?? "channel";
+  const blurb = normalizeOptionalString(meta.blurb) ?? "";
+  return `${label}: ${blurb}`;
 }
 
 export function formatChannelSelectionLine(
   meta: ChannelMeta,
-  docsLink: (path: string, label?: string) => string,
+  docsLink: (path?: string | null, label?: string) => string,
 ): string {
+  const label =
+    normalizeOptionalString(meta.label) ?? normalizeOptionalString(meta.id) ?? "channel";
+  const blurb = normalizeOptionalString(meta.blurb) ?? "";
+  const docsPath = normalizeOptionalString(meta.docsPath) ?? "/";
   const docsPrefix = meta.selectionDocsPrefix ?? "Docs:";
-  const docsLabel = meta.docsLabel ?? meta.id;
-  const docs = meta.selectionDocsOmitLabel
-    ? docsLink(meta.docsPath)
-    : docsLink(meta.docsPath, docsLabel);
+  const docsLabel =
+    normalizeOptionalString(meta.docsLabel) ?? normalizeOptionalString(meta.id) ?? "docs";
+  const docs = meta.selectionDocsOmitLabel ? docsLink(docsPath) : docsLink(docsPath, docsLabel);
   const extras = (meta.selectionExtras ?? []).filter(Boolean).join(" ");
-  return `${meta.label} — ${meta.blurb} ${docsPrefix ? `${docsPrefix} ` : ""}${docs}${extras ? ` ${extras}` : ""}`;
+  return `${label} — ${blurb} ${docsPrefix ? `${docsPrefix} ` : ""}${docs}${extras ? ` ${extras}` : ""}`;
 }

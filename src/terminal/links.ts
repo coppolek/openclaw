@@ -1,3 +1,4 @@
+import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { formatTerminalLink } from "./terminal-link.js";
 
 function resolveDocsRoot(): string {
@@ -5,11 +6,11 @@ function resolveDocsRoot(): string {
 }
 
 export function formatDocsLink(
-  path: string,
+  path?: string | null,
   label?: string,
   opts?: { fallback?: string; force?: boolean },
 ): string {
-  const trimmed = path.trim();
+  const trimmed = normalizeOptionalString(path) ?? "";
   const docsRoot = resolveDocsRoot();
   const url = trimmed.startsWith("http")
     ? trimmed

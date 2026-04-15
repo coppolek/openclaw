@@ -6,7 +6,9 @@ import {
   setActivePluginRegistry,
 } from "../plugins/runtime.js";
 import { listChatChannels } from "./chat-meta.js";
+import type { ChannelMeta } from "./plugins/types.core.js";
 import {
+  formatChannelPrimerLine,
   formatChannelSelectionLine,
   listRegisteredChannelPluginIds,
   normalizeAnyChannelId,
@@ -38,6 +40,32 @@ describe("channel registry helpers", () => {
     expect(line).not.toContain("Docs:");
     expect(line).toContain("/channels/telegram");
     expect(line).toContain("https://openclaw.ai");
+  });
+
+  it("formats primer lines when plugin metadata is incomplete at runtime", () => {
+    const broken = {
+      id: "broken-channel",
+      label: undefined,
+      blurb: undefined,
+      selectionLabel: "x",
+      docsPath: "/x",
+    } as unknown as ChannelMeta;
+    expect(formatChannelPrimerLine(broken)).toBe("broken-channel: ");
+  });
+
+  it("formats selection lines when docsPath is missing at runtime", () => {
+    const broken = {
+      id: "broken-channel",
+      label: "Broken",
+      blurb: "Test",
+      selectionLabel: "Broken",
+      docsPath: undefined,
+    } as unknown as ChannelMeta;
+    const line = formatChannelSelectionLine(broken, (path, label) =>
+      [label, path ?? ""].filter(Boolean).join(":"),
+    );
+    expect(line).toContain("Broken");
+    expect(line).toContain("/");
   });
 
   it("prefers the pinned channel registry when resolving registered plugin channels", () => {
