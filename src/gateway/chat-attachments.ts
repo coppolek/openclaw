@@ -1,3 +1,4 @@
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { estimateBase64DecodedBytes } from "../media/base64.js";
 import { extensionForMime, mimeTypeFromFilePath } from "../media/mime.js";
@@ -51,6 +52,23 @@ type SavedMedia = {
 };
 
 const OFFLOAD_THRESHOLD_BYTES = 2_000_000;
+
+// Gateway RPC entrypoints (chat.send, agent.run, node-events) have no channel
+// or account in scope, so they cannot walk the usual per-channel mediaMaxMb
+// chain. They follow the global `agents.defaults.mediaMaxMb` so a user who
+// raises their per-agent cap sees the same cap on direct RPC inputs. Fallback
+// is 20MB — the middle of the per-channel defaults (Slack/GoogleChat/iMessage
+// are 16–20MB), not the legacy 5MB which was a pre-"any MIME" image-era value.
+export const DEFAULT_CHAT_ATTACHMENT_MAX_MB = 20;
+
+export function resolveChatAttachmentMaxBytes(cfg: OpenClawConfig): number {
+  const configured = cfg.agents?.defaults?.mediaMaxMb;
+  const mb =
+    typeof configured === "number" && Number.isFinite(configured) && configured > 0
+      ? configured
+      : DEFAULT_CHAT_ATTACHMENT_MAX_MB;
+  return Math.floor(mb * 1024 * 1024);
+}
 
 // `unsupported-non-image` is transitional: agent.run + node-events callers
 // will be removed once they wire ctx.MediaPaths.
@@ -216,7 +234,7 @@ export async function parseMessageWithAttachments(
     acceptNonImage?: boolean;
   },
 ): Promise<ParsedMessageWithImages> {
-  const maxBytes = opts?.maxBytes ?? 5_000_000;
+  const maxBytes = opts?.maxBytes ?? DEFAULT_CHAT_ATTACHMENT_MAX_MB * 1024 * 1024;
   const log = opts?.log;
   const supportsInlineImages = opts?.supportsInlineImages !== false;
   const acceptNonImage = opts?.acceptNonImage !== false;
@@ -268,11 +286,6 @@ export async function parseMessageWithAttachments(
       const providedMime = normalizeMime(mime);
       const sniffedMime = normalizeMime(await sniffMimeFromBase64(b64));
       const labelMime = normalizeMime(mimeTypeFromFilePath(label));
-      if (sniffedMime && providedMime && sniffedMime !== providedMime) {
-        log?.warn(
-          `attachment ${label}: mime mismatch (${providedMime} -> ${sniffedMime}), using sniffed`,
-        );
-      }
 
       // Prefer specific MIME signals over generic container types. OOXML
       // documents (docx/xlsx/pptx) sniff as application/zip; without this
@@ -286,6 +299,13 @@ export async function parseMessageWithAttachments(
         providedMime ||
         labelMime ||
         "application/octet-stream";
+
+      if (sniffedMime && providedMime && sniffedMime !== providedMime) {
+        const usedSource = finalMime === sniffedMime ? "sniffed" : "provided";
+        log?.warn(
+          `attachment ${label}: mime mismatch (${providedMime} -> ${sniffedMime}), using ${usedSource}`,
+        );
+      }
       const isImage = isImageMime(finalMime);
 
       if (isImage && !supportsInlineImages) {
