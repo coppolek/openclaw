@@ -90,6 +90,14 @@ const statMtime = (filePath, fsImpl = fs) => {
   }
 };
 
+const resolvePrivateQaRequiredDistEntries = (distRoot) => [
+  path.join(distRoot, "plugin-sdk", "qa-lab.js"),
+  path.join(distRoot, "plugin-sdk", "qa-runtime.js"),
+  path.join(distRoot, "extensions", "qa-lab", "cli.js"),
+  path.join(distRoot, "extensions", "qa-lab", "runtime-api.js"),
+  path.join(distRoot, "extensions", "qa-channel", "runtime-api.js"),
+];
+
 const isExcludedSource = (filePath, sourceRoot, sourceRootName) => {
   const relativePath = normalizePath(path.relative(sourceRoot, filePath));
   if (relativePath.startsWith("..")) {
@@ -208,11 +216,11 @@ export const resolveBuildRequirement = (deps) => {
   if (deps.env.OPENCLAW_FORCE_BUILD === "1") {
     return { shouldBuild: true, reason: "force_build" };
   }
-  const privateQaDistEntries =
-    deps.privateQaDistEntries ?? (deps.privateQaDistEntry ? [deps.privateQaDistEntry] : []);
   if (
     deps.env.OPENCLAW_BUILD_PRIVATE_QA === "1" &&
-    privateQaDistEntries.some((entry) => statMtime(entry, deps.fs) == null)
+    (deps.privateQaRequiredDistEntries ?? resolvePrivateQaRequiredDistEntries(deps.distRoot)).some(
+      (entry) => statMtime(entry, deps.fs) == null,
+    )
   ) {
     return { shouldBuild: true, reason: "missing_private_qa_dist" };
   }
@@ -273,13 +281,6 @@ const SIGNAL_EXIT_CODES = {
   SIGINT: 130,
   SIGTERM: 143,
 };
-const privateQaDistRelativeEntries = [
-  ["plugin-sdk", "qa-lab.js"],
-  ["extensions", "qa-lab", "cli.js"],
-  ["extensions", "qa-lab", "runtime-api.js"],
-  ["extensions", "qa-channel", "runtime-api.js"],
-];
-
 const isSignalKey = (signal) => Object.hasOwn(SIGNAL_EXIT_CODES, signal);
 
 const getSignalExitCode = (signal) => (isSignalKey(signal) ? SIGNAL_EXIT_CODES[signal] : 1);
@@ -404,9 +405,7 @@ export async function runNodeMain(params = {}) {
     path: path.join(deps.cwd, sourceRoot),
   }));
   deps.configFiles = runNodeConfigFiles.map((filePath) => path.join(deps.cwd, filePath));
-  deps.privateQaDistEntries = privateQaDistRelativeEntries.map((entry) =>
-    path.join(deps.distRoot, ...entry),
-  );
+  deps.privateQaRequiredDistEntries = resolvePrivateQaRequiredDistEntries(deps.distRoot);
   if (deps.args[0] === "qa") {
     deps.env.OPENCLAW_BUILD_PRIVATE_QA = "1";
     deps.env.OPENCLAW_ENABLE_PRIVATE_QA_CLI = "1";

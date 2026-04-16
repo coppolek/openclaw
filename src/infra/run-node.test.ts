@@ -19,16 +19,17 @@ const GENERATED_A2UI_BUNDLE = "src/canvas-host/a2ui/a2ui.bundle.js";
 const GENERATED_A2UI_BUNDLE_HASH = "src/canvas-host/a2ui/.bundle.hash";
 const DIST_ENTRY = "dist/entry.js";
 const BUILD_STAMP = "dist/.buildstamp";
-const DIST_PLUGIN_SDK_QA_LAB = path.join("dist", "plugin-sdk", "qa-lab.js");
+const QA_LAB_PLUGIN_SDK_ENTRY = "dist/plugin-sdk/qa-lab.js";
+const QA_RUNTIME_PLUGIN_SDK_ENTRY = "dist/plugin-sdk/qa-runtime.js";
+const QA_CHANNEL_RUNTIME_API_ENTRY = bundledDistPluginFile("qa-channel", "runtime-api.js");
+const QA_LAB_CLI_ENTRY = bundledDistPluginFile("qa-lab", "cli.js");
+const QA_LAB_RUNTIME_API_ENTRY = bundledDistPluginFile("qa-lab", "runtime-api.js");
 const EXTENSION_SRC = bundledPluginFile("demo", "src/index.ts");
 const EXTENSION_MANIFEST = bundledPluginFile("demo", "openclaw.plugin.json");
 const EXTENSION_PACKAGE = bundledPluginFile("demo", "package.json");
 const EXTENSION_README = bundledPluginFile("demo", "README.md");
 const DIST_EXTENSION_MANIFEST = bundledDistPluginFile("demo", "openclaw.plugin.json");
 const DIST_EXTENSION_PACKAGE = bundledDistPluginFile("demo", "package.json");
-const DIST_QA_CHANNEL_RUNTIME_API = bundledDistPluginFile("qa-channel", "runtime-api.js");
-const DIST_QA_LAB_CLI = bundledDistPluginFile("qa-lab", "cli.js");
-const DIST_QA_LAB_RUNTIME_API = bundledDistPluginFile("qa-lab", "runtime-api.js");
 
 const OLD_TIME = new Date("2026-03-13T10:00:00.000Z");
 const BUILD_TIME = new Date("2026-03-13T12:00:00.000Z");
@@ -176,11 +177,34 @@ async function runStatusCommand(params: {
   spawn: (cmd: string, args: string[]) => ReturnType<typeof createExitedProcess>;
   spawnSync?: (cmd: string, args: string[]) => { status: number; stdout: string };
   env?: Record<string, string>;
-  runRuntimePostBuild?: (params?: { cwd?: string; env?: NodeJS.ProcessEnv }) => void;
+  runRuntimePostBuild?: (params?: { cwd?: string }) => void;
 }) {
   return await runNodeMain({
     cwd: params.tmp,
     args: ["status"],
+    env: {
+      ...process.env,
+      OPENCLAW_RUNNER_LOG: "0",
+      ...params.env,
+    },
+    spawn: params.spawn,
+    ...(params.spawnSync ? { spawnSync: params.spawnSync } : {}),
+    ...(params.runRuntimePostBuild ? { runRuntimePostBuild: params.runRuntimePostBuild } : {}),
+    execPath: process.execPath,
+    platform: process.platform,
+  });
+}
+
+async function runQaCommand(params: {
+  tmp: string;
+  spawn: (cmd: string, args: string[]) => ReturnType<typeof createExitedProcess>;
+  spawnSync?: (cmd: string, args: string[]) => { status: number; stdout: string };
+  env?: Record<string, string>;
+  runRuntimePostBuild?: (params?: { cwd?: string }) => void;
+}) {
+  return await runNodeMain({
+    cwd: params.tmp,
+    args: ["qa", "suite", "--transport", "qa-channel", "--provider-mode", "mock-openai"],
     env: {
       ...process.env,
       OPENCLAW_RUNNER_LOG: "0",
@@ -322,126 +346,130 @@ describe("run-node script", () => {
     });
   });
 
-  it("rebuilds private QA artifacts before qa subcommands", async () => {
+  it("skips rebuilding for private QA commands when the private QA facades are present", async () => {
     await withTempDir({ prefix: "openclaw-run-node-" }, async (tmp) => {
       await setupTrackedProject(tmp, {
         files: {
           [ROOT_SRC]: "export const value = 1;\n",
+          [QA_LAB_PLUGIN_SDK_ENTRY]: "export const qaLab = true;\n",
+          [QA_RUNTIME_PLUGIN_SDK_ENTRY]: "export const qaRuntime = true;\n",
+          [QA_CHANNEL_RUNTIME_API_ENTRY]: "export const qaChannelRuntime = true;\n",
+          [QA_LAB_CLI_ENTRY]: "export const qaLabCli = true;\n",
+          [QA_LAB_RUNTIME_API_ENTRY]: "export const qaLabRuntime = true;\n",
         },
-        oldPaths: [ROOT_SRC, ROOT_TSCONFIG, ROOT_PACKAGE],
+        oldPaths: [
+          ROOT_SRC,
+          ROOT_TSCONFIG,
+          ROOT_PACKAGE,
+          QA_LAB_PLUGIN_SDK_ENTRY,
+          QA_RUNTIME_PLUGIN_SDK_ENTRY,
+          QA_CHANNEL_RUNTIME_API_ENTRY,
+          QA_LAB_CLI_ENTRY,
+          QA_LAB_RUNTIME_API_ENTRY,
+        ],
         buildPaths: [DIST_ENTRY, BUILD_STAMP],
       });
 
-      const { spawnSync } = createSpawnRecorder({
+      const { spawnCalls, spawn, spawnSync } = createSpawnRecorder({
         gitHead: "abc123\n",
         gitStatus: "",
       });
-      const runRuntimePostBuild = vi.fn();
-      const spawnCalls: Array<{
-        args: string[];
-        cmd: string;
-        env?: NodeJS.ProcessEnv;
-      }> = [];
-      const spawn = (cmd: string, args: string[], options: unknown) => {
-        const env =
-          typeof options === "object" && options !== null && "env" in options
-            ? (options as { env?: NodeJS.ProcessEnv }).env
-            : undefined;
-        spawnCalls.push({ cmd, args, env });
-        return createExitedProcess(0);
-      };
-
-      const exitCode = await runNodeMain({
-        cwd: tmp,
-        args: ["qa", "suite"],
-        env: {
-          ...process.env,
-          OPENCLAW_RUNNER_LOG: "0",
-        },
-        spawn,
-        spawnSync,
-        execPath: process.execPath,
-        platform: process.platform,
-        runRuntimePostBuild,
-      });
+      const exitCode = await runQaCommand({ tmp, spawn, spawnSync });
 
       expect(exitCode).toBe(0);
-      expect(spawnCalls.map(({ cmd, args }) => [cmd, ...args])).toEqual([
-        expectedBuildSpawn(),
-        [process.execPath, "openclaw.mjs", "qa", "suite"],
+      expect(spawnCalls).toEqual([
+        [
+          process.execPath,
+          "openclaw.mjs",
+          "qa",
+          "suite",
+          "--transport",
+          "qa-channel",
+          "--provider-mode",
+          "mock-openai",
+        ],
       ]);
-      expect(spawnCalls[0]?.env?.OPENCLAW_BUILD_PRIVATE_QA).toBe("1");
-      expect(spawnCalls[0]?.env?.OPENCLAW_ENABLE_PRIVATE_QA_CLI).toBe("1");
-      expect(spawnCalls[1]?.env?.OPENCLAW_BUILD_PRIVATE_QA).toBe("1");
-      expect(spawnCalls[1]?.env?.OPENCLAW_ENABLE_PRIVATE_QA_CLI).toBe("1");
-      expect(runRuntimePostBuild).toHaveBeenCalledWith({
-        cwd: tmp,
-        env: expect.objectContaining({
-          OPENCLAW_BUILD_PRIVATE_QA: "1",
-          OPENCLAW_ENABLE_PRIVATE_QA_CLI: "1",
-        }),
-      });
     });
   });
 
-  it("rebuilds private QA when required transport artifacts are missing", async () => {
+  it("rebuilds private QA commands when the private QA runtime facade is missing", async () => {
     await withTempDir({ prefix: "openclaw-run-node-" }, async (tmp) => {
       await setupTrackedProject(tmp, {
         files: {
           [ROOT_SRC]: "export const value = 1;\n",
-          [DIST_PLUGIN_SDK_QA_LAB]: "export {};\n",
-          [DIST_QA_LAB_CLI]: "export {};\n",
-          [DIST_QA_LAB_RUNTIME_API]: "export {};\n",
+          [QA_LAB_PLUGIN_SDK_ENTRY]: "export const qaLab = true;\n",
+          [QA_CHANNEL_RUNTIME_API_ENTRY]: "export const qaChannelRuntime = true;\n",
+          [QA_LAB_CLI_ENTRY]: "export const qaLabCli = true;\n",
+          [QA_LAB_RUNTIME_API_ENTRY]: "export const qaLabRuntime = true;\n",
         },
-        oldPaths: [ROOT_SRC, ROOT_TSCONFIG, ROOT_PACKAGE],
-        buildPaths: [
-          DIST_ENTRY,
-          BUILD_STAMP,
-          DIST_PLUGIN_SDK_QA_LAB,
-          DIST_QA_LAB_CLI,
-          DIST_QA_LAB_RUNTIME_API,
+        oldPaths: [
+          ROOT_SRC,
+          ROOT_TSCONFIG,
+          ROOT_PACKAGE,
+          QA_LAB_PLUGIN_SDK_ENTRY,
+          QA_CHANNEL_RUNTIME_API_ENTRY,
+          QA_LAB_CLI_ENTRY,
+          QA_LAB_RUNTIME_API_ENTRY,
         ],
+        buildPaths: [DIST_ENTRY, BUILD_STAMP],
       });
 
-      const { spawnSync } = createSpawnRecorder({
+      const { spawnCalls, spawn, spawnSync } = createSpawnRecorder({
         gitHead: "abc123\n",
         gitStatus: "",
       });
-      const runRuntimePostBuild = vi.fn();
-      const spawnCalls: string[][] = [];
-      const spawn = (cmd: string, args: string[]) => {
-        spawnCalls.push([cmd, ...args]);
-        return createExitedProcess(0);
-      };
-      await expect(fs.stat(resolvePath(tmp, DIST_QA_CHANNEL_RUNTIME_API))).rejects.toMatchObject({
-        code: "ENOENT",
-      });
-
-      const exitCode = await runNodeMain({
-        cwd: tmp,
-        args: ["qa", "suite"],
-        env: {
-          ...process.env,
-          OPENCLAW_RUNNER_LOG: "0",
-        },
-        spawn,
-        spawnSync,
-        execPath: process.execPath,
-        platform: process.platform,
-        runRuntimePostBuild,
-      });
+      const exitCode = await runQaCommand({ tmp, spawn, spawnSync });
 
       expect(exitCode).toBe(0);
       expect(spawnCalls).toEqual([
         expectedBuildSpawn(),
-        [process.execPath, "openclaw.mjs", "qa", "suite"],
+        [
+          process.execPath,
+          "openclaw.mjs",
+          "qa",
+          "suite",
+          "--transport",
+          "qa-channel",
+          "--provider-mode",
+          "mock-openai",
+        ],
       ]);
-      expect(runRuntimePostBuild).toHaveBeenCalledWith({
-        cwd: tmp,
-        env: expect.objectContaining({
-          OPENCLAW_BUILD_PRIVATE_QA: "1",
-          OPENCLAW_ENABLE_PRIVATE_QA_CLI: "1",
+    });
+  });
+
+  it("derives private QA facade checks from distRoot for direct freshness checks", async () => {
+    await withTempDir({ prefix: "openclaw-run-node-" }, async (tmp) => {
+      await setupTrackedProject(tmp, {
+        files: {
+          [ROOT_SRC]: "export const value = 1;\n",
+          [QA_LAB_PLUGIN_SDK_ENTRY]: "export const qaLab = true;\n",
+          [QA_RUNTIME_PLUGIN_SDK_ENTRY]: "export const qaRuntime = true;\n",
+          [QA_LAB_CLI_ENTRY]: "export const qaLabCli = true;\n",
+          [QA_LAB_RUNTIME_API_ENTRY]: "export const qaLabRuntime = true;\n",
+        },
+        oldPaths: [
+          ROOT_SRC,
+          ROOT_TSCONFIG,
+          ROOT_PACKAGE,
+          QA_LAB_PLUGIN_SDK_ENTRY,
+          QA_RUNTIME_PLUGIN_SDK_ENTRY,
+          QA_LAB_CLI_ENTRY,
+          QA_LAB_RUNTIME_API_ENTRY,
+        ],
+        buildPaths: [DIST_ENTRY, BUILD_STAMP],
+      });
+
+      const requirement = resolveBuildRequirement(
+        createBuildRequirementDeps(tmp, {
+          env: { OPENCLAW_BUILD_PRIVATE_QA: "1" },
+          gitHead: "abc123\n",
+          gitStatus: "",
         }),
+      );
+
+      expect(requirement).toEqual({
+        shouldBuild: true,
+        reason: "missing_private_qa_dist",
       });
     });
   });
