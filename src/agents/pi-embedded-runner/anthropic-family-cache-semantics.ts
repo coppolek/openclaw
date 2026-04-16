@@ -15,7 +15,7 @@ export function isAnthropicModelRef(modelId: string): boolean {
 /** Matches Application Inference Profile ARNs across all AWS partitions with Bedrock. */
 const BEDROCK_APP_INFERENCE_PROFILE_ARN_RE = /^arn:aws(-cn|-us-gov)?:bedrock:/;
 
-export function isAnthropicBedrockModel(modelId: string): boolean {
+export function isAnthropicBedrockModel(modelId: string, modelName?: string): boolean {
   const normalized = normalizeLowercaseStringOrEmpty(modelId);
 
   // Direct Anthropic Claude model IDs and regional inference profiles
@@ -39,7 +39,14 @@ export function isAnthropicBedrockModel(modelId: string): boolean {
     normalized.includes(":application-inference-profile/")
   ) {
     const profileId = normalized.split(":application-inference-profile/")[1] ?? "";
-    return profileId.includes("claude");
+    if (profileId.includes("claude")) {
+      return true;
+    }
+    // Fall back to configured model name (e.g., "Claude Sonnet 4.6 via Inference Profile")
+    if (modelName) {
+      return normalizeLowercaseStringOrEmpty(modelName).includes("claude");
+    }
+    return false;
   }
 
   return false;
@@ -55,13 +62,14 @@ export function isAnthropicFamilyCacheTtlEligible(params: {
   provider: string;
   modelApi?: string;
   modelId: string;
+  modelName?: string;
 }): boolean {
   const normalizedProvider = normalizeOptionalLowercaseString(params.provider);
   if (normalizedProvider === "anthropic" || normalizedProvider === "anthropic-vertex") {
     return true;
   }
   if (normalizedProvider === "amazon-bedrock") {
-    return isAnthropicBedrockModel(params.modelId);
+    return isAnthropicBedrockModel(params.modelId, params.modelName);
   }
   return params.modelApi === "anthropic-messages";
 }
@@ -70,6 +78,7 @@ export function resolveAnthropicCacheRetentionFamily(params: {
   provider: string;
   modelApi?: string;
   modelId?: string;
+  modelName?: string;
   hasExplicitCacheConfig: boolean;
 }): AnthropicCacheRetentionFamily | undefined {
   const normalizedProvider = normalizeOptionalLowercaseString(params.provider);
@@ -80,7 +89,7 @@ export function resolveAnthropicCacheRetentionFamily(params: {
     normalizedProvider === "amazon-bedrock" &&
     params.hasExplicitCacheConfig &&
     typeof params.modelId === "string" &&
-    isAnthropicBedrockModel(params.modelId)
+    isAnthropicBedrockModel(params.modelId, params.modelName)
   ) {
     return "anthropic-bedrock";
   }

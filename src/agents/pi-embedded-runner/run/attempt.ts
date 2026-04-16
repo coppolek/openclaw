@@ -1174,6 +1174,7 @@ export async function runEmbeddedAttempt(
         params.provider,
         params.model.api,
         params.modelId,
+        params.model.name,
       );
       const agentTransportOverride = resolveAgentTransportOverride({
         settingsManager,
@@ -2180,6 +2181,7 @@ export async function runEmbeddedAttempt(
           provider: params.provider,
           modelId: params.modelId,
           modelApi: params.model.api,
+          modelName: params.model.name,
           isCacheTtlEligibleProvider,
         });
 
