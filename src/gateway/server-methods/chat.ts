@@ -20,7 +20,12 @@ import { jsonUtf8Bytes } from "../../infra/json-utf8-bytes.js";
 import { getAgentScopedMediaLocalRoots } from "../../media/local-roots.js";
 import { isAudioFileName } from "../../media/mime.js";
 import type { PromptImageOrderEntry } from "../../media/prompt-image-order.js";
-import { deleteMediaBuffer, type SavedMedia, saveMediaBuffer } from "../../media/store.js";
+import {
+  deleteMediaBuffer,
+  MEDIA_MAX_BYTES,
+  type SavedMedia,
+  saveMediaBuffer,
+} from "../../media/store.js";
 import { createChannelReplyPipeline } from "../../plugin-sdk/channel-reply-pipeline.js";
 import { normalizeInputProvenance, type InputProvenance } from "../../sessions/input-provenance.js";
 import { resolveSendPolicy } from "../../sessions/send-policy.js";
@@ -53,6 +58,7 @@ import {
   type OffloadedRef,
   parseMessageWithAttachments,
   resolveChatAttachmentMaxBytes,
+  UnsupportedAttachmentError,
 } from "../chat-attachments.js";
 import { stripEnvelopeFromMessage, stripEnvelopeFromMessages } from "../chat-sanitize.js";
 import { augmentChatHistoryWithCliSessionImports } from "../cli-session-history.js";
@@ -557,6 +563,23 @@ async function prestageNonImageOffloads(params: {
       };
     }
 
+    // stageSandboxMedia caps each file at STAGED_MEDIA_MAX_BYTES (=
+    // MEDIA_MAX_BYTES, 5MB) and silently skips oversized files. The parse cap
+    // (resolveChatAttachmentMaxBytes, default 20MB) is higher, so a sandboxed
+    // session receiving a non-image file between the two caps would otherwise
+    // pass parse, fail staging, and surface as a retryable 5xx even though
+    // retry cannot succeed. Reject here as a client-side 4xx instead.
+    const oversizedForSandbox = nonImage.filter((ref) => ref.sizeBytes > MEDIA_MAX_BYTES);
+    if (oversizedForSandbox.length > 0) {
+      const details = oversizedForSandbox
+        .map((ref) => `${ref.label} (${ref.sizeBytes} bytes)`)
+        .join(", ");
+      throw new UnsupportedAttachmentError(
+        "non-image-too-large-for-sandbox",
+        `non-image attachments exceed sandbox staging limit (${MEDIA_MAX_BYTES} bytes): ${details}`,
+      );
+    }
+
     const stagingCtx: MsgContext = {
       MediaPath: nonImage[0].path,
       MediaPaths: nonImage.map((ref) => ref.path),
@@ -596,6 +619,11 @@ async function prestageNonImageOffloads(params: {
       params.offloadedRefs.map((ref) => deleteMediaBuffer(ref.id, "inbound")),
     );
     if (err instanceof MediaOffloadError) {
+      throw err;
+    }
+    // Sandbox-oversize rejections are client-side 4xx (see check above). Wrapping
+    // them as MediaOffloadError would misclassify them as retryable 5xx.
+    if (err instanceof UnsupportedAttachmentError) {
       throw err;
     }
     throw new MediaOffloadError(

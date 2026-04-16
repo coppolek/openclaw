@@ -27,6 +27,7 @@ export type OffloadedRef = {
   path: string;
   mimeType: string;
   label: string;
+  sizeBytes: number;
 };
 
 export type ParsedMessageWithImages = {
@@ -76,7 +77,8 @@ export function resolveChatAttachmentMaxBytes(cfg: OpenClawConfig): number {
 export type UnsupportedAttachmentReason =
   | "empty-payload"
   | "text-only-image"
-  | "unsupported-non-image";
+  | "unsupported-non-image"
+  | "non-image-too-large-for-sandbox";
 
 /** Client-side attachment refusal — maps to 4xx INVALID_REQUEST. */
 export class UnsupportedAttachmentError extends Error {
@@ -384,6 +386,7 @@ export async function parseMessageWithAttachments(
         path: savedMedia.path,
         mimeType: finalMime,
         label,
+        sizeBytes,
       });
       // imageOrder drives mergePromptAttachmentImages / splitPromptAndAttachmentRefs
       // downstream, pairing every "offloaded" slot with a trailing
