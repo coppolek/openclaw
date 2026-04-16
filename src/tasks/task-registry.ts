@@ -884,12 +884,29 @@ export function ensureTaskRegistryReady() {
   ensureListener();
 }
 
+function normalizeTaskLifecycleTimestamps(task: TaskRecord): TaskRecord {
+  let createdAt = task.createdAt;
+  const candidates = [task.startedAt, task.lastEventAt, task.endedAt];
+  for (const candidate of candidates) {
+    if (typeof candidate === "number" && candidate < createdAt) {
+      createdAt = candidate;
+    }
+  }
+  if (createdAt === task.createdAt) {
+    return task;
+  }
+  return {
+    ...task,
+    createdAt,
+  };
+}
+
 function updateTask(taskId: string, patch: Partial<TaskRecord>): TaskRecord | null {
   const current = tasks.get(taskId);
   if (!current) {
     return null;
   }
-  const next = { ...current, ...patch };
+  const next = normalizeTaskLifecycleTimestamps({ ...current, ...patch });
   if (isTerminalTaskStatus(next.status) && typeof next.cleanupAfter !== "number") {
     const terminalAt = next.endedAt ?? next.lastEventAt ?? Date.now();
     next.cleanupAfter = terminalAt + DEFAULT_TASK_RETENTION_MS;
@@ -1453,7 +1470,7 @@ export function createTaskRecord(params: {
     scopeKind,
   });
   const lastEventAt = params.lastEventAt ?? params.startedAt ?? now;
-  const record: TaskRecord = {
+  const record: TaskRecord = normalizeTaskLifecycleTimestamps({
     taskId,
     runtime: params.runtime,
     taskKind: normalizeOptionalString(params.taskKind),
@@ -1481,7 +1498,7 @@ export function createTaskRecord(params: {
       status,
       terminalOutcome: params.terminalOutcome,
     }),
-  };
+  });
   if (isTerminalTaskStatus(record.status) && typeof record.cleanupAfter !== "number") {
     record.cleanupAfter =
       (record.endedAt ?? record.lastEventAt ?? record.createdAt) + DEFAULT_TASK_RETENTION_MS;
