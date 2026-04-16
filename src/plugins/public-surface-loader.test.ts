@@ -137,4 +137,50 @@ describe("bundled plugin public surface loader", () => {
 
     expect(createJiti).toHaveBeenCalledTimes(1);
   });
+
+  it("throws and does not cache when module loader returns null", async () => {
+    const createJiti = vi.fn(() => vi.fn(() => null));
+    vi.doMock("jiti", () => ({
+      createJiti,
+    }));
+
+    const publicSurfaceLoader = await importFreshModule<
+      typeof import("./public-surface-loader.js")
+    >(import.meta.url, "./public-surface-loader.js?scope=null-loader");
+
+    const tempRoot = createTempDir();
+    const bundledPluginsDir = path.join(tempRoot, "dist");
+    process.env.OPENCLAW_BUNDLED_PLUGINS_DIR = bundledPluginsDir;
+
+    const modulePath = path.join(bundledPluginsDir, "demo", "null-api.js");
+    fs.mkdirSync(path.dirname(modulePath), { recursive: true });
+    fs.writeFileSync(modulePath, "export default null;\n", "utf8");
+
+    let thrown: unknown;
+    try {
+      publicSurfaceLoader.loadBundledPluginPublicArtifactModuleSync<{ marker: string }>({
+        dirName: "demo",
+        artifactBasename: "null-api.js",
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain("null/undefined");
+
+    // Subsequent call should attempt to load again, not return cached bad value
+    let thrownAgain: unknown;
+    try {
+      publicSurfaceLoader.loadBundledPluginPublicArtifactModuleSync<{ marker: string }>({
+        dirName: "demo",
+        artifactBasename: "null-api.js",
+      });
+    } catch (err) {
+      thrownAgain = err;
+    }
+    expect(thrownAgain).toBeInstanceOf(Error);
+    expect((thrownAgain as Error).message).toContain("null/undefined");
+    // Confirms no caching of bad value
+    expect(createJiti).toHaveBeenCalled();
+  });
 });

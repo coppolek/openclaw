@@ -336,14 +336,12 @@ function loadBundledEntryModuleSync(importMetaUrl: string, specifier: string): u
       loaded = getJiti(modulePath)(modulePath);
     } catch (err) {
       loadError = err;
-      // If both native require and jiti failed, clear cache and throw
-      loadedModuleExports.delete(modulePath);
+      // jiti failed; propagate the error without caching
       throw loadError;
     }
   }
-  // Defensive: if loaded is undefined or null, clear cache and throw
+  // Defensive: if loaded is undefined or null, refuse to cache and throw
   if (loaded === undefined || loaded === null) {
-    loadedModuleExports.delete(modulePath);
     throw new Error(`Bundled module loaded but returned null/undefined: ${modulePath}`);
   }
   loadedModuleExports.set(modulePath, loaded);

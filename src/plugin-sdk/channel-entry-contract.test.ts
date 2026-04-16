@@ -167,4 +167,53 @@ describe("loadBundledEntryExportSync", () => {
       }),
     ).toThrow(`resolved "${path.join(pluginRoot, "src", "secret-contract.js")}"`);
   });
+
+  it("throws and does not cache when jiti loader returns null", async () => {
+    const createJiti = vi.fn(() => vi.fn(() => null));
+    vi.doMock("jiti", () => ({
+      createJiti,
+    }));
+
+    const channelEntryContract = await importFreshModule<
+      typeof import("./channel-entry-contract.js")
+    >(import.meta.url, "./channel-entry-contract.js?scope=null-loader");
+
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-channel-entry-contract-"));
+    tempDirs.push(tempRoot);
+
+    const pluginRoot = path.join(tempRoot, "dist", "extensions", "telegram");
+    fs.mkdirSync(pluginRoot, { recursive: true });
+
+    const importerPath = path.join(pluginRoot, "index.js");
+    fs.writeFileSync(importerPath, "export default {};\n", "utf8");
+
+    const nullModulePath = path.join(pluginRoot, "null-module.js");
+    fs.writeFileSync(nullModulePath, "export default null;\n", "utf8");
+
+    // First call should throw
+    let thrown: unknown;
+    try {
+      channelEntryContract.loadBundledEntryExportSync(pathToFileURL(importerPath).href, {
+        specifier: "./null-module.js",
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain("null/undefined");
+
+    // Subsequent call should NOT return cached null — should try to load again and throw again
+    let thrownAgain: unknown;
+    try {
+      channelEntryContract.loadBundledEntryExportSync(pathToFileURL(importerPath).href, {
+        specifier: "./null-module.js",
+      });
+    } catch (err) {
+      thrownAgain = err;
+    }
+    expect(thrownAgain).toBeInstanceOf(Error);
+    expect((thrownAgain as Error).message).toContain("null/undefined");
+    // Both calls should have invoked jiti — confirms no caching of bad value
+    expect(createJiti).toHaveBeenCalled();
+  });
 });
