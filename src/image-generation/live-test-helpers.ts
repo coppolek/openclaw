@@ -15,6 +15,7 @@ export const DEFAULT_LIVE_IMAGE_MODELS: Record<string, string> = {
   google: "google/gemini-3.1-flash-image-preview",
   minimax: "minimax/image-01",
   openai: "openai/gpt-image-1",
+  openrouter: "openrouter/google/gemini-3-pro-image-preview",
   vydra: "vydra/grok-imagine",
 };
 
