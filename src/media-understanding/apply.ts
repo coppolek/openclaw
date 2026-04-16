@@ -493,6 +493,7 @@ export async function applyMediaUnderstanding(params: {
   const providerRegistry = buildProviderRegistry(params.providers, cfg);
   const cache = createMediaAttachmentCache(attachments, {
     localPathRoots: resolveMediaAttachmentLocalRoots({ cfg, ctx }),
+    workspaceDir: ctx.MediaWorkspaceDir,
   });
 
   try {

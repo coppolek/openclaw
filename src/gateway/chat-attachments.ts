@@ -1,6 +1,7 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { estimateBase64DecodedBytes } from "../media/base64.js";
+import { MAX_IMAGE_BYTES } from "../media/constants.js";
 import { extensionForMime, mimeTypeFromFilePath } from "../media/mime.js";
 import type { PromptImageOrderEntry } from "../media/prompt-image-order.js";
 import { sniffMimeFromBase64 } from "../media/sniff-mime-from-base64.js";
@@ -320,6 +321,18 @@ export async function parseMessageWithAttachments(
           `attachment ${label}: non-image attachments (${finalMime}) are not supported on this entrypoint`,
         );
       }
+      // Agent-side hydration (loadImageFromRef via optimizeAndClampImage / GIF
+      // direct compare) caps at MAX_IMAGE_BYTES. Accepting images above that
+      // would offload a file the runner later drops to null — a successful
+      // response with a silently missing image. Reject here so the client
+      // sees an explicit 4xx. Non-image attachments keep the full maxBytes
+      // ceiling because their host path (ctx.MediaPaths → Read/Bash) doesn't
+      // load into the model.
+      if (isImage && sizeBytes > MAX_IMAGE_BYTES) {
+        throw new Error(
+          `attachment ${label}: image exceeds size limit (${sizeBytes} > ${MAX_IMAGE_BYTES} bytes)`,
+        );
+      }
 
       const shouldOffload = !isImage || sizeBytes > OFFLOAD_THRESHOLD_BYTES;
 
@@ -372,7 +385,15 @@ export async function parseMessageWithAttachments(
         mimeType: finalMime,
         label,
       });
-      imageOrder.push("offloaded");
+      // imageOrder drives mergePromptAttachmentImages / splitPromptAndAttachmentRefs
+      // downstream, pairing every "offloaded" slot with a trailing
+      // `[media attached: media://...]` URI. Only image offloads emit that URI
+      // (see the isImage branch above), so tagging a non-image file here would
+      // make the single offloaded image consume the first slot in a mixed
+      // [non-image, inline, offloaded-image] batch — reordering real images.
+      if (isImage) {
+        imageOrder.push("offloaded");
+      }
     }
   } catch (err) {
     // Best-effort cleanup before rethrowing.
