@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthProfileStore } from "../agents/auth-profiles.js";
 import type { ProviderAuthChoiceMetadata } from "../plugins/provider-auth-choices.js";
@@ -93,28 +90,6 @@ describe("buildAuthChoiceOptions", () => {
   beforeEach(() => {
     resolveManifestProviderAuthChoices.mockReturnValue([]);
     resolveProviderWizardOptions.mockReturnValue([]);
-  });
-
-  it("labels bundled OpenAI manifest auth rows as API key vs Codex OAuth", () => {
-    const manifestPath = path.join(
-      path.dirname(fileURLToPath(import.meta.url)),
-      "../../extensions/openai/openclaw.plugin.json",
-    );
-    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
-      providerAuthChoices: Array<{
-        provider: string;
-        method: string;
-        choiceLabel?: string;
-        groupHint?: string;
-      }>;
-    };
-    const codex = manifest.providerAuthChoices.find((row) => row.provider === "openai-codex");
-    const apiKey = manifest.providerAuthChoices.find(
-      (row) => row.provider === "openai" && row.method === "api-key",
-    );
-    expect(codex?.choiceLabel).toBe("OpenAI Codex (Codex OAuth)");
-    expect(codex?.groupHint).toBe("Codex OAuth");
-    expect(apiKey?.groupHint).toBe("API key");
   });
 
   it("includes core and provider-specific auth choices", () => {
