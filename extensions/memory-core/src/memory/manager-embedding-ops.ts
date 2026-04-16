@@ -12,6 +12,8 @@ import {
   chunkMarkdown,
   hashText,
   remapChunkLines,
+  resolveChunkingStrategy,
+  type LlmCompletionFn,
   type MemoryChunk,
   type MemoryFileEntry,
   type MemorySource,
@@ -37,6 +39,11 @@ import {
 import { deleteMemoryFtsRows } from "./manager-fts-state.js";
 import { MemoryManagerSyncOps } from "./manager-sync-ops.js";
 import { replaceMemoryVectorRow } from "./manager-vector-write.js";
+import {
+  completeWithPreparedSimpleCompletionModel,
+  extractAssistantText,
+  prepareSimpleCompletionModelForAgent,
+} from "openclaw/plugin-sdk/simple-completion-runtime";
 
 const VECTOR_TABLE = "chunks_vec";
 const FTS_TABLE = "chunks_fts";
@@ -581,6 +588,31 @@ export abstract class MemoryManagerEmbeddingOps extends MemoryManagerSyncOps {
     entry: MemoryFileEntry | SessionFileEntry,
     options: { source: MemorySource; content?: string },
   ) {
+    let completionFn: LlmCompletionFn | undefined;
+    if (this.settings.chunking.strategy === "lumber" || this.settings.chunking.strategy === "hichunk") {
+      const lumberCfg = this.settings.chunking;
+      completionFn = async (prompt: string) => {
+        const prepared = await prepareSimpleCompletionModelForAgent({
+          cfg: this.cfg,
+          agentId: this.agentId,
+          modelRef: lumberCfg.completionModel
+        });
+        if ("error" in prepared) {
+          throw new Error(`Lumber/HiChunk chunking LLM preparation failed: ${prepared.error}`);
+        }
+        const response = await completeWithPreparedSimpleCompletionModel({
+          model: prepared.model,
+          auth: prepared.auth,
+          context: {
+            systemPrompt: "",
+            messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
+          },
+        });
+        return extractAssistantText(response);
+      };
+    }
+    const strategy = resolveChunkingStrategy(this.settings.chunking, this.provider, completionFn);
+
     // FTS-only mode: no embedding provider, but we can still build a FTS index
     if (!this.provider) {
       // Multimodal files require an embedding provider; skip in FTS-only mode.
@@ -588,7 +620,8 @@ export abstract class MemoryManagerEmbeddingOps extends MemoryManagerSyncOps {
         return;
       }
       const content = options.content ?? (await fs.readFile(entry.absPath, "utf-8"));
-      const chunks = filterNonEmptyMemoryChunks(chunkMarkdown(content, this.settings.chunking));
+      const rawChunks = await strategy.chunk(content, this.settings.chunking);
+      const chunks = filterNonEmptyMemoryChunks(rawChunks);
       if (options.source === "sessions" && "lineMap" in entry) {
         remapChunkLines(chunks, entry.lineMap);
       }
@@ -618,7 +651,8 @@ export abstract class MemoryManagerEmbeddingOps extends MemoryManagerSyncOps {
       chunks = [multimodalChunk.chunk];
     } else {
       const content = options.content ?? (await fs.readFile(entry.absPath, "utf-8"));
-      const baseChunks = filterNonEmptyMemoryChunks(chunkMarkdown(content, this.settings.chunking));
+      const rawChunks = await strategy.chunk(content, this.settings.chunking);
+      const baseChunks = filterNonEmptyMemoryChunks(rawChunks);
       chunks = this.provider
         ? enforceEmbeddingMaxInputTokens(this.provider, baseChunks, EMBEDDING_BATCH_MAX_TOKENS)
         : baseChunks;
