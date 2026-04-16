@@ -565,7 +565,7 @@ export function createHooksRequestHandler(
   };
 
   const forgetHookRunId = (key: string | undefined): void => {
-    if (!key) return;
+    if (!key) { return; }
     hookReplayCache.delete(key);
   };
 
