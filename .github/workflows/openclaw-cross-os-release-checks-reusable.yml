@@ -432,6 +432,12 @@ jobs:
           OPENCLAW_DISCORD_SMOKE_CHANNEL_ID: ${{ secrets.OPENCLAW_DISCORD_SMOKE_CHANNEL_ID }}
           OPENCLAW_RELEASE_CHECK_OS: ${{ matrix.os_id }}
           OPENCLAW_RELEASE_CHECK_RUNNER: ${{ matrix.runner }}
+          OPENCLAW_RELEASE_CHECK_ARTIFACT_NAME: ${{ matrix.artifact_name }}
+          OPENCLAW_RELEASE_CHECK_LANE: ${{ matrix.lane }}
+          OPENCLAW_RELEASE_CHECK_PREVIOUS_VERSION: ${{ inputs.previous_version }}
+          OPENCLAW_RELEASE_CHECK_PROVIDER: ${{ inputs.provider }}
+          OPENCLAW_RELEASE_CHECK_REF: ${{ inputs.ref }}
+          OPENCLAW_RELEASE_CHECK_SUITE: ${{ matrix.suite }}
         run: |
           DISCORD_ARGS=()
           if [[ -n "${OPENCLAW_DISCORD_SMOKE_BOT_TOKEN}" ]] && [[ -n "${OPENCLAW_DISCORD_SMOKE_GUILD_ID}" ]] && [[ -n "${OPENCLAW_DISCORD_SMOKE_CHANNEL_ID}" ]]; then
@@ -442,14 +448,14 @@ jobs:
             --candidate-version "${{ needs.prepare.outputs.candidate_version }}" \
             --source-sha "${{ needs.prepare.outputs.source_sha }}" \
             --baseline-spec "${{ needs.prepare.outputs.baseline_spec }}" \
-            --previous-version "${{ inputs.previous_version }}" \
+            --previous-version "${OPENCLAW_RELEASE_CHECK_PREVIOUS_VERSION}" \
             --baseline-tgz "$RUNNER_TEMP/openclaw-cross-os-release-checks/baseline/${{ needs.prepare.outputs.baseline_file_name }}" \
-            --provider "${{ inputs.provider }}" \
-            --mode "${{ matrix.lane }}" \
-            --suite "${{ matrix.suite }}" \
-            --ref "${{ inputs.ref }}" \
+            --provider "${OPENCLAW_RELEASE_CHECK_PROVIDER}" \
+            --mode "${OPENCLAW_RELEASE_CHECK_LANE}" \
+            --suite "${OPENCLAW_RELEASE_CHECK_SUITE}" \
+            --ref "${OPENCLAW_RELEASE_CHECK_REF}" \
             "${DISCORD_ARGS[@]}" \
-            --output-dir "$RUNNER_TEMP/openclaw-cross-os-release-checks/${{ matrix.artifact_name }}-${{ matrix.suite }}"
+            --output-dir "$RUNNER_TEMP/openclaw-cross-os-release-checks/${OPENCLAW_RELEASE_CHECK_ARTIFACT_NAME}-${OPENCLAW_RELEASE_CHECK_SUITE}"
 
       - name: Summarize release checks
         if: always()
