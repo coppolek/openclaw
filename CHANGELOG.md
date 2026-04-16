@@ -103,6 +103,7 @@ Docs: https://docs.openclaw.ai
 - Gateway/security: enforce `localRoots` containment on the webchat audio embedding path. (#67298) Thanks @pgondhi987.
 - Webchat/security: reject remote-host `file://` URLs in the media embedding path. (#67293) Thanks @pgondhi987.
 - Dreaming/memory-core: use the ingestion day, not the source file day, for daily recall dedupe so repeat sweeps of the same daily note can increment `dailyCount` across days instead of stalling at `1`. (#67091) Thanks @Bartok9.
+- Agents/auth-profiles: treat post-completion bookkeeping save failures (for example Windows EPERM when auth-profiles.json gets a ReadOnly attribute during concurrent hot-reload) as non-fatal in `markAuthProfileGood`, `markAuthProfileUsed`, and `markAuthProfileFailure`, so a succeeded LLM request is not turned into a cascading gateway failure. Fixes #62099. Thanks @ademczuk.
 
 ## 2026.4.14
 
