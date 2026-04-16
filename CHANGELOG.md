@@ -54,6 +54,7 @@ Docs: https://docs.openclaw.ai
 - Agents/context engines: keep loop-hook and final `afterTurn` prompt-cache touch metadata aligned with the current assistant turn so cache-aware context engines retain accurate cache TTL state during tool loops. (#67767) thanks @jalehman.
 - Memory/dreaming: strip AI-facing inbound metadata envelopes from session-corpus user turns before normalization so REM topic extraction sees the user's actual message text, including array-shaped split envelopes. (#66548) Thanks @zqchris.
 - Agents/errors: detect standalone Cloudflare/CDN HTML challenge pages before transport DNS classification so provider block pages no longer appear as local DNS lookup failures. (#67704) Thanks @chris-yyau.
+- Media/host-read: allow host-local `filePath` sends for HTML, XML, CSS, and plain text documents. `detectMime` returns `undefined` for these formats (no magic bytes), so the host-read fallback now accepts them via file-path MIME inference — HTML/XML/CSS as trusted text document aliases, and plain text through the same printable-ratio validator already used for CSV/Markdown, so binary files renamed `.txt` are still rejected. (#66551)
 
 ## 2026.4.15-beta.1
 
