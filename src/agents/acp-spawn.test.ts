@@ -2,6 +2,11 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../plugins/runtime.js";
+import {
+  createOutboundTestPlugin,
+  createTestRegistry,
+} from "../test-utils/channel-plugins.js";
 import * as acpSessionManager from "../acp/control-plane/manager.js";
 import type { AcpInitializeSessionInput } from "../acp/control-plane/manager.types.js";
 import {
@@ -516,6 +521,7 @@ describe("spawnAcpDirect", () => {
     resetTaskRegistryForTests();
     sessionBindingServiceTesting.resetSessionBindingAdaptersForTests();
     clearRuntimeConfigSnapshot();
+    resetPluginRuntimeStateForTest();
   });
 
   it("spawns ACP session, binds a new thread, and dispatches initial task", async () => {
@@ -550,6 +556,11 @@ describe("spawnAcpDirect", () => {
       expect.objectContaining({
         targetKind: "session",
         placement: "child",
+        conversation: expect.objectContaining({
+          channel: "discord",
+          accountId: "default",
+          conversationId: "requester-thread",
+        }),
       }),
     );
     expectResolvedIntroTextInBindMetadata();
@@ -1199,6 +1210,52 @@ describe("spawnAcpDirect", () => {
       .map((call: unknown[]) => call[0] as { method?: string; params?: Record<string, unknown> })
       .find((request) => request.method === "agent");
     expect(agentCall?.params?.sessionKey).toBe(result.childSessionKey);
+  });
+
+  it("normalizes canonical Discord conversation targets before child thread binding", async () => {
+    setActivePluginRegistry(
+      createTestRegistry([
+        {
+          pluginId: "discord",
+          source: "test",
+          plugin: createOutboundTestPlugin({
+            id: "discord",
+            messaging: {
+              resolveInboundConversation: () => ({
+                conversationId: "channel:parent-channel",
+              }),
+            },
+          }),
+        },
+      ]),
+    );
+
+    const result = await spawnAcpDirect(
+      {
+        task: "Investigate flaky tests",
+        agentId: "codex",
+        mode: "session",
+        thread: true,
+      },
+      {
+        agentSessionKey: "agent:main:main",
+        agentChannel: "discord",
+        agentAccountId: "default",
+        agentTo: "channel:parent-channel",
+      },
+    );
+
+    expect(result.status).toBe("accepted");
+    expect(hoisted.sessionBindingBindMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        placement: "child",
+        conversation: expect.objectContaining({
+          channel: "discord",
+          accountId: "default",
+          conversationId: "parent-channel",
+        }),
+      }),
+    );
   });
 
   it("includes cwd in ACP thread intro banner when provided at spawn time", async () => {
