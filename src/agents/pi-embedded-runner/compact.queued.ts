@@ -56,14 +56,15 @@ export async function compactEmbeddedPiSession(
         allowGatewaySubagentBinding: params.allowGatewaySubagentBinding,
       });
       ensureContextEnginesInitialized();
+      const agentDir = params.agentDir ?? resolveOpenClawAgentDir();
+      const resolvedWorkspaceDir = resolveUserPath(params.workspaceDir);
       const contextEngine = await resolveContextEngine(params.config, {
-        agentDir: params.agentDir,
-        workspaceDir: params.workspaceDir,
+        agentDir,
+        workspaceDir: resolvedWorkspaceDir,
       });
       let checkpointSnapshot: CapturedCompactionCheckpointSnapshot | null = null;
       let checkpointSnapshotRetained = false;
       try {
-        const agentDir = params.agentDir ?? resolveOpenClawAgentDir();
         const resolvedCompactionTarget = resolveEmbeddedCompactionTarget({
           config: params.config,
           provider: params.provider,
@@ -115,7 +116,7 @@ export async function compactEmbeddedPiSession(
           sessionId: params.sessionId,
           agentId: sessionAgentId,
           sessionKey: hookSessionKey,
-          workspaceDir: resolveUserPath(params.workspaceDir),
+          workspaceDir: resolvedWorkspaceDir,
           messageProvider: resolvedMessageProvider,
         };
         const runtimeContext = {

@@ -570,8 +570,8 @@ export async function runEmbeddedPiAgent(
       // repeated initialization/connection overhead per attempt.
       ensureContextEnginesInitialized();
       const contextEngine = await resolveContextEngine(params.config, {
-        agentDir: params.agentDir,
-        workspaceDir: params.workspaceDir,
+        agentDir,
+        workspaceDir: resolvedWorkspace,
       });
       try {
         // When the engine owns compaction, compactEmbeddedPiSessionDirect is
