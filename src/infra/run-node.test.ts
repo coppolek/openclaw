@@ -12,6 +12,8 @@ import {
 import { withTempDir } from "../test-helpers/temp-dir.js";
 
 const ROOT_SRC = "src/index.ts";
+const A2UI_BUNDLE = "src/canvas-host/a2ui/a2ui.bundle.js";
+const A2UI_BUNDLE_HASH = "src/canvas-host/a2ui/.bundle.hash";
 const ROOT_TSCONFIG = "tsconfig.json";
 const ROOT_PACKAGE = "package.json";
 const ROOT_TSDOWN = "tsdown.config.ts";
@@ -707,6 +709,39 @@ describe("run-node script", () => {
       expect(requirement).toEqual({
         shouldBuild: true,
         reason: "dirty_watched_tree",
+      });
+    });
+  });
+
+  it("ignores generated a2ui bundle adjunct files when checking dirty watched trees", async () => {
+    await withTempDir({ prefix: "openclaw-run-node-" }, async (tmp) => {
+      await setupTrackedProject(tmp, {
+        files: {
+          [ROOT_SRC]: "export const value = 1;\n",
+          [A2UI_BUNDLE]: "export default {};\n",
+          [A2UI_BUNDLE_HASH]: "abc123\n",
+        },
+        buildPaths: [
+          ROOT_SRC,
+          A2UI_BUNDLE,
+          A2UI_BUNDLE_HASH,
+          ROOT_TSCONFIG,
+          ROOT_PACKAGE,
+          DIST_ENTRY,
+          BUILD_STAMP,
+        ],
+      });
+
+      const requirement = resolveBuildRequirement(
+        createBuildRequirementDeps(tmp, {
+          gitHead: "abc123\n",
+          gitStatus: ` M ${A2UI_BUNDLE}\n M ${A2UI_BUNDLE_HASH}\n`,
+        }),
+      );
+
+      expect(requirement).toEqual({
+        shouldBuild: false,
+        reason: "clean",
       });
     });
   });
