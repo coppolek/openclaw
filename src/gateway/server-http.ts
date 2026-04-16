@@ -564,6 +564,11 @@ export function createHooksRequestHandler(
     pruneHookReplayCache(now);
   };
 
+  const forgetHookRunId = (key: string | undefined): void => {
+    if (!key) return;
+    hookReplayCache.delete(key);
+  };
+
   return async (req, res) => {
     const hooksConfig = getHooksConfig();
     if (!hooksConfig) {
@@ -719,14 +724,22 @@ export function createHooksRequestHandler(
       // so rememberHookRunId is a no-op.
       const preRunId = randomUUID();
       rememberHookRunId(replayKey, preRunId, now);
-      const { runId, outputText, agentError } = await dispatchAgentHook({
-        ...normalized.value,
-        runId: preRunId,
-        idempotencyKey,
-        sessionKey: normalizedDispatchSessionKey,
-        agentId: targetAgentId,
-        externalContentSource: "webhook",
-      });
+      let dispatchResult: Awaited<ReturnType<typeof dispatchAgentHook>>;
+      try {
+        dispatchResult = await dispatchAgentHook({
+          ...normalized.value,
+          runId: preRunId,
+          idempotencyKey,
+          sessionKey: normalizedDispatchSessionKey,
+          agentId: targetAgentId,
+          externalContentSource: "webhook",
+        });
+      } catch (err) {
+        forgetHookRunId(replayKey);
+        sendJson(res, 500, { ok: false, runId: preRunId, error: String(err) });
+        return true;
+      }
+      const { runId, outputText, agentError } = dispatchResult;
       if (agentError) {
         sendJson(res, 500, { ok: false, runId, error: agentError });
         return true;
@@ -824,27 +837,35 @@ export function createHooksRequestHandler(
           // Pre-allocate and cache before dispatch to close the idempotency async gap.
           const preRunId = randomUUID();
           rememberHookRunId(replayKey, preRunId, now);
-          const { runId, outputText, agentError } = await dispatchAgentHook({
-            message: mapped.action.message,
-            name: mapped.action.name ?? "Hook",
-            runId: preRunId,
-            idempotencyKey,
-            agentId: targetAgentId,
-            wakeMode: mapped.action.wakeMode,
-            sessionKey: normalizedDispatchSessionKey,
-            deliver: resolveHookDeliver(mapped.action.deliver),
-            channel,
-            to: mapped.action.to,
-            model: mapped.action.model,
-            thinking: mapped.action.thinking,
-            timeoutSeconds: mapped.action.timeoutSeconds,
-            allowUnsafeExternalContent: mapped.action.allowUnsafeExternalContent,
-            externalContentSource: resolveMappedHookExternalContentSource({
-              subPath,
-              payload: payload as Record<string, unknown>,
-              sessionKey: sessionKey.value,
-            }),
-          });
+          let dispatchResult: Awaited<ReturnType<typeof dispatchAgentHook>>;
+          try {
+            dispatchResult = await dispatchAgentHook({
+              message: mapped.action.message,
+              name: mapped.action.name ?? "Hook",
+              runId: preRunId,
+              idempotencyKey,
+              agentId: targetAgentId,
+              wakeMode: mapped.action.wakeMode,
+              sessionKey: normalizedDispatchSessionKey,
+              deliver: resolveHookDeliver(mapped.action.deliver),
+              channel,
+              to: mapped.action.to,
+              model: mapped.action.model,
+              thinking: mapped.action.thinking,
+              timeoutSeconds: mapped.action.timeoutSeconds,
+              allowUnsafeExternalContent: mapped.action.allowUnsafeExternalContent,
+              externalContentSource: resolveMappedHookExternalContentSource({
+                subPath,
+                payload: payload as Record<string, unknown>,
+                sessionKey: sessionKey.value,
+              }),
+            });
+          } catch (err) {
+            forgetHookRunId(replayKey);
+            sendJson(res, 500, { ok: false, runId: preRunId, error: String(err) });
+            return true;
+          }
+          const { runId, outputText, agentError } = dispatchResult;
           if (agentError) {
             sendJson(res, 500, { ok: false, runId, error: agentError });
             return true;

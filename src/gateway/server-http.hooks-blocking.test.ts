@@ -212,4 +212,55 @@ describe("createHooksRequestHandler blocking mode", () => {
     expect(response1.runId).toEqual(expect.any(String));
     expect(response2.runId).toBe(response1.runId);
   });
+
+  test("dispatch throw rolls back idempotency cache", async () => {
+    let callCount = 0;
+    const dispatchAgentHook = vi.fn(async (payload: { runId?: string }) => {
+      callCount++;
+      if (callCount === 1) {
+        throw new Error("exploded");
+      }
+      return { runId: payload.runId ?? "success-run-id" };
+    });
+    const handler = createHooksHandler({ dispatchAgentHook });
+
+    // First call: dispatchAgentHook throws
+    readJsonBodyMock.mockResolvedValueOnce({
+      ok: true,
+      value: { message: "test message" },
+    });
+    const req1 = createHookRequest({
+      url: "/hooks/agent",
+      headers: { "idempotency-key": "throw-test-key" },
+    });
+    const { res: res1, end: end1 } = createResponse();
+    await handler(req1, res1);
+
+    // Verify first response is 500 with error
+    expect(res1.statusCode).toBe(500);
+    const response1 = JSON.parse(end1.mock.calls[0][0] as string);
+    expect(response1.ok).toBe(false);
+    expect(response1.error).toContain("exploded");
+
+    // Second call with same idempotency key: dispatchAgentHook returns success
+    readJsonBodyMock.mockResolvedValueOnce({
+      ok: true,
+      value: { message: "test message" },
+    });
+    const req2 = createHookRequest({
+      url: "/hooks/agent",
+      headers: { "idempotency-key": "throw-test-key" },
+    });
+    const { res: res2, end: end2 } = createResponse();
+    await handler(req2, res2);
+
+    // Verify dispatchAgentHook was called TWICE (not served from stale cache)
+    expect(dispatchAgentHook).toHaveBeenCalledTimes(2);
+
+    // Verify second response is 200 with success
+    expect(res2.statusCode).toBe(200);
+    const response2 = JSON.parse(end2.mock.calls[0][0] as string);
+    expect(response2.ok).toBe(true);
+    expect(response2.runId).toEqual(expect.any(String));
+  });
 });
