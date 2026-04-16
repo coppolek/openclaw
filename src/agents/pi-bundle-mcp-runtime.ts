@@ -2,7 +2,8 @@ import crypto from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { PaginatedResultSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { logWarn } from "../logger.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
@@ -29,7 +30,38 @@ type BundleMcpSession = {
 };
 
 type LoadedMcpConfig = ReturnType<typeof loadEmbeddedPiMcpConfig>;
-type ListedTool = Awaited<ReturnType<Client["listTools"]>>["tools"][number];
+
+/**
+ * Lenient tool schema that accepts inputSchema without requiring type: "object".
+ * The official MCP SDK's ToolSchema uses z.literal("object") for inputSchema.type,
+ * which causes servers that omit this field to fail validation (issue #63602).
+ * We normalize the inputSchema after listing instead.
+ */
+const LenientToolSchema = z
+  .object({
+    name: z.string(),
+    title: z.string().optional(),
+    description: z.string().optional(),
+    inputSchema: z.record(z.string(), z.unknown()).default({}),
+  })
+  .catchall(z.unknown());
+
+type LenientListedTool = z.infer<typeof LenientToolSchema>;
+
+const LenientListToolsResultSchema = PaginatedResultSchema.extend({
+  tools: z.array(LenientToolSchema),
+});
+
+/**
+ * Normalize an MCP tool's inputSchema to always include type: "object",
+ * which is required by LLM providers. Some MCP servers omit this field.
+ */
+function normalizeInputSchema(raw: Record<string, unknown>): Record<string, unknown> {
+  if (raw.type !== undefined) {
+    return raw;
+  }
+  return { ...raw, type: "object" };
+}
 
 const SESSION_MCP_RUNTIME_MANAGER_KEY = Symbol.for("openclaw.sessionMcpRuntimeManager");
 
@@ -61,10 +93,17 @@ function redactErrorUrls(error: unknown): string {
 }
 
 async function listAllTools(client: Client) {
-  const tools: ListedTool[] = [];
+  const tools: LenientListedTool[] = [];
   let cursor: string | undefined;
   do {
-    const page = await client.listTools(cursor ? { cursor } : undefined);
+    // Use client.request() with a lenient schema instead of client.listTools()
+    // to avoid the SDK's strict inputSchema.type === "object" validation.
+    // Some MCP servers return tools without type: "object" in their inputSchema
+    // (issue #63602), which causes the default Zod validation to fail.
+    const page = await client.request(
+      { method: "tools/list", params: cursor ? { cursor } : undefined },
+      LenientListToolsResultSchema,
+    );
     tools.push(...page.tools);
     cursor = page.nextCursor;
   } while (cursor);
@@ -208,7 +247,7 @@ export function createSessionMcpRuntime(params: {
                 toolName,
                 title: tool.title,
                 description: normalizeOptionalString(tool.description),
-                inputSchema: tool.inputSchema,
+                inputSchema: normalizeInputSchema(tool.inputSchema),
                 fallbackDescription: `Provided by bundle MCP server "${serverName}" (${resolved.description}).`,
               });
             }
@@ -440,4 +479,5 @@ export const __testing = {
   getCachedSessionIds() {
     return getSessionMcpRuntimeManager().listSessionIds();
   },
+  normalizeInputSchema,
 };
