@@ -25,6 +25,7 @@ export type GeminiEmbeddingClient = {
   baseUrl: string;
   headers: Record<string, string>;
   ssrfPolicy?: SsrFPolicy;
+  fetchImpl?: typeof fetch;
   model: string;
   modelPath: string;
   apiKeys: string[];
@@ -182,6 +183,7 @@ async function fetchGeminiEmbeddingPayload(params: {
       return await withRemoteHttpResponse({
         url: params.endpoint,
         ssrfPolicy: params.client.ssrfPolicy,
+        fetchImpl: params.client.fetchImpl,
         init: {
           method: "POST",
           headers,
@@ -332,5 +334,14 @@ export async function resolveGeminiEmbeddingClient(
     embedEndpoint: `${baseUrl}/${modelPath}:embedContent`,
     batchEndpoint: `${baseUrl}/${modelPath}:batchEmbedContents`,
   });
-  return { baseUrl, headers, ssrfPolicy, model, modelPath, apiKeys, outputDimensionality };
+  return {
+    baseUrl,
+    headers,
+    ssrfPolicy,
+    fetchImpl: options.fetchImpl,
+    model,
+    modelPath,
+    apiKeys,
+    outputDimensionality,
+  };
 }
