@@ -15,7 +15,7 @@ chunks and searching them using embeddings, keywords, or both.
 
 ## Quick start
 
-If you have a GitHub Copilot subscription, OpenAI, Gemini, Voyage, or Mistral
+If you have a GitHub Copilot subscription, OpenAI, Gemini, Voyage, ZeroEntropy, or Mistral
 API key configured, memory search works automatically. To set a provider
 explicitly:
 
@@ -42,6 +42,7 @@ node-llama-cpp).
 | Gemini         | `gemini`         | Yes           | Supports image/audio indexing                        |
 | GitHub Copilot | `github-copilot` | No            | Auto-detected, uses Copilot subscription             |
 | Local          | `local`          | No            | GGUF model, ~0.6 GB download                         |
+| ZeroEntropy    | `zeroentropy`    | Yes           | Auto-detected                                        | 
 | Mistral        | `mistral`        | Yes           | Auto-detected                                        |
 | Ollama         | `ollama`         | No            | Local, must set explicitly                           |
 | OpenAI         | `openai`         | Yes           | Auto-detected, fast                                  |

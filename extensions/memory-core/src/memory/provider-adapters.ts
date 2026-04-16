@@ -6,6 +6,7 @@ import {
   DEFAULT_MISTRAL_EMBEDDING_MODEL,
   DEFAULT_OLLAMA_EMBEDDING_MODEL,
   DEFAULT_OPENAI_EMBEDDING_MODEL,
+  DEFAULT_ZEROENTROPY_EMBEDDING_MODEL,
   DEFAULT_VOYAGE_EMBEDDING_MODEL,
   OPENAI_BATCH_ENDPOINT,
   buildGeminiEmbeddingRequest,
@@ -15,6 +16,7 @@ import {
   createMistralEmbeddingProvider,
   createOllamaEmbeddingProvider,
   createOpenAiEmbeddingProvider,
+  createZeroentropyEmbeddingProvider,
   createVoyageEmbeddingProvider,
   hasNonTextEmbeddingParts,
   listRegisteredMemoryEmbeddingProviderAdapters,
@@ -87,7 +89,7 @@ function formatLocalSetupError(err: unknown): string {
       ? "2) Reinstall OpenClaw (this should install node-llama-cpp): npm i -g openclaw@latest"
       : null,
     "3) If you use pnpm: pnpm approve-builds (select node-llama-cpp), then pnpm rebuild node-llama-cpp",
-    ...["openai", "gemini", "voyage", "mistral"].map(
+    ...["openai", "gemini", "voyage", "zeroentropy", "mistral"].map(
       (provider) => `Or set agents.defaults.memorySearch.provider = "${provider}" (remote).`,
     ),
   ]
@@ -266,6 +268,37 @@ const voyageAdapter: MemoryEmbeddingProviderAdapter = {
   },
 };
 
+const zeroentropyAdapter: MemoryEmbeddingProviderAdapter = {
+  id: "zeroentropy",
+  defaultModel: DEFAULT_ZEROENTROPY_EMBEDDING_MODEL,
+  transport: "remote",
+  autoSelectPriority: 45,
+  allowExplicitWhenConfiguredAuto: true,
+  shouldContinueAutoSelection: isMissingApiKeyError,
+  create: async (options) => {
+    const { provider, client } = await createZeroentropyEmbeddingProvider({
+      ...options,
+      provider: "zeroentropy",
+      fallback: "none",
+    });
+    return {
+      provider,
+      runtime: {
+        id: "zeroentropy",
+        cacheKeyData: {
+          provider: "zeroentropy",
+          baseUrl: client.baseUrl,
+          model: client.model,
+          dimensions: client.dimensions,
+          encodingFormat: client.encodingFormat,
+          latency: client.latency,
+          headers: sanitizeHeaders(client.headers, ["authorization"]),
+        },
+      },
+    };
+  },
+};
+
 const mistralAdapter: MemoryEmbeddingProviderAdapter = {
   id: "mistral",
   defaultModel: DEFAULT_MISTRAL_EMBEDDING_MODEL,
@@ -373,6 +406,7 @@ export const builtinMemoryEmbeddingProviderAdapters = [
   openAiAdapter,
   geminiAdapter,
   voyageAdapter,
+  zeroentropyAdapter,
   mistralAdapter,
   ollamaAdapter,
   lmstudioAdapter,
@@ -439,6 +473,7 @@ export {
   DEFAULT_MISTRAL_EMBEDDING_MODEL,
   DEFAULT_OLLAMA_EMBEDDING_MODEL,
   DEFAULT_OPENAI_EMBEDDING_MODEL,
+  DEFAULT_ZEROENTROPY_EMBEDDING_MODEL,
   DEFAULT_VOYAGE_EMBEDDING_MODEL,
   canAutoSelectLocal,
   formatLocalSetupError,

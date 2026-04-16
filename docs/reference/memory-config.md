@@ -39,7 +39,7 @@ plugin-owned config, transcript persistence, and safe rollout pattern.
 
 | Key        | Type      | Default          | Description                                                                                                   |
 | ---------- | --------- | ---------------- | ------------------------------------------------------------------------------------------------------------- |
-| `provider` | `string`  | auto-detected    | Embedding adapter ID: `bedrock`, `gemini`, `github-copilot`, `local`, `mistral`, `ollama`, `openai`, `voyage` |
+| `provider` | `string`  | auto-detected    | Embedding adapter ID: `bedrock`, `gemini`, `github-copilot`, `local`, `zeroentropy`,`mistral`, `ollama`, `openai`, `voyage` |
 | `model`    | `string`  | provider default | Embedding model name                                                                                          |
 | `fallback` | `string`  | `"none"`         | Fallback adapter ID when the primary fails                                                                    |
 | `enabled`  | `boolean` | `true`           | Enable or disable memory search                                                                               |
@@ -53,8 +53,9 @@ When `provider` is not set, OpenClaw selects the first available:
 3. `openai` -- if an OpenAI key can be resolved.
 4. `gemini` -- if a Gemini key can be resolved.
 5. `voyage` -- if a Voyage key can be resolved.
-6. `mistral` -- if a Mistral key can be resolved.
-7. `bedrock` -- if the AWS SDK credential chain resolves (instance role, access keys, profile, SSO, web identity, or shared config).
+6. `zeroentropy` -- if a ZeroEntropy key can be resolved.
+7. `mistral` -- if a Mistral key can be resolved.
+8. `bedrock` -- if the AWS SDK credential chain resolves (instance role, access keys, profile, SSO, web identity, or shared config).
 
 `ollama` is supported but not auto-detected (set it explicitly).
 
@@ -63,15 +64,16 @@ When `provider` is not set, OpenClaw selects the first available:
 Remote embeddings require an API key. Bedrock uses the AWS SDK default
 credential chain instead (instance roles, SSO, access keys).
 
-| Provider       | Env var                                            | Config key                        |
-| -------------- | -------------------------------------------------- | --------------------------------- |
-| Bedrock        | AWS credential chain                               | No API key needed                 |
-| Gemini         | `GEMINI_API_KEY`                                   | `models.providers.google.apiKey`  |
-| GitHub Copilot | `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` | Auth profile via device login     |
-| Mistral        | `MISTRAL_API_KEY`                                  | `models.providers.mistral.apiKey` |
-| Ollama         | `OLLAMA_API_KEY` (placeholder)                     | --                                |
-| OpenAI         | `OPENAI_API_KEY`                                   | `models.providers.openai.apiKey`  |
-| Voyage         | `VOYAGE_API_KEY`                                   | `models.providers.voyage.apiKey`  |
+| Provider       | Env var                                            | Config key                           |
+| -------------- | -------------------------------------------------- | ------------------------------------ |
+| Bedrock        | AWS credential chain                               | No API key needed                    |
+| Gemini         | `GEMINI_API_KEY`                                   | `models.providers.google.apiKey`     |
+| GitHub Copilot | `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` | Auth profile via device login        |
+| ZeroEntropy    | `ZEROENTROPY_API_KEY`                              | `models.providers.zeroentropy.apiKey`|
+| Mistral        | `MISTRAL_API_KEY`                                  | `models.providers.mistral.apiKey`    |
+| Ollama         | `OLLAMA_API_KEY` (placeholder)                     | --                                   |
+| OpenAI         | `OPENAI_API_KEY`                                   | `models.providers.openai.apiKey`     |
+| Voyage         | `VOYAGE_API_KEY`                                   | `models.providers.voyage.apiKey`     |
 
 Codex OAuth covers chat/completions only and does not satisfy embedding
 requests.
