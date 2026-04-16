@@ -104,6 +104,11 @@ export function formatTransportErrorCopy(raw: string): string | undefined {
   if (!raw) {
     return undefined;
   }
+
+  if (isCloudflareOrHtmlErrorPage(raw)) {
+    return undefined;
+  }
+
   const lower = normalizeLowercaseStringOrEmpty(raw);
 
   if (
