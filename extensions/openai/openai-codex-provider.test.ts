@@ -72,6 +72,11 @@ describe("openai codex provider", () => {
     });
   });
 
+  it("exposes groupHint for grouped model/auth provider picker", () => {
+    const provider = buildOpenAICodexProviderPlugin();
+    expect(provider.wizard?.setup?.groupHint).toBe("Codex OAuth");
+  });
+
   it("returns deprecated-profile doctor guidance for legacy Codex CLI ids", () => {
     const provider = buildOpenAICodexProviderPlugin();
 

@@ -15,11 +15,11 @@
       "method": "oauth",
       "choiceId": "openai-codex",
       "deprecatedChoiceIds": ["codex-cli"],
-      "choiceLabel": "OpenAI Codex (ChatGPT OAuth)",
+      "choiceLabel": "OpenAI Codex (Codex OAuth)",
       "choiceHint": "Browser sign-in",
       "groupId": "openai",
       "groupLabel": "OpenAI",
-      "groupHint": "Codex OAuth + API key"
+      "groupHint": "Codex OAuth"
     },
     {
       "provider": "openai",
@@ -28,7 +28,7 @@
       "choiceLabel": "OpenAI API key",
       "groupId": "openai",
       "groupLabel": "OpenAI",
-      "groupHint": "Codex OAuth + API key",
+      "groupHint": "API key",
       "optionKey": "openaiApiKey",
       "cliFlag": "--openai-api-key",
       "cliOption": "--openai-api-key <key>",

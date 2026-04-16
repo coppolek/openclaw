@@ -306,9 +306,10 @@ export function buildOpenAICodexProviderPlugin(): ProviderPlugin {
     wizard: {
       setup: {
         choiceId: "openai-codex",
-        choiceLabel: "OpenAI Codex (ChatGPT OAuth)",
+        choiceLabel: "OpenAI Codex (Codex OAuth)",
         choiceHint: "Browser sign-in",
         methodId: "oauth",
+        groupHint: "Codex OAuth",
       },
     },
     catalog: {
