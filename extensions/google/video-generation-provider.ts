@@ -15,7 +15,7 @@ import type {
   VideoGenerationProvider,
   VideoGenerationRequest,
 } from "openclaw/plugin-sdk/video-generation";
-import { normalizeGoogleApiBaseUrl } from "./api.js";
+import { resolveGoogleGenerativeAiApiOrigin } from "./api.js";
 
 const DEFAULT_GOOGLE_VIDEO_MODEL = "veo-3.1-fast-generate-preview";
 const DEFAULT_TIMEOUT_MS = 180_000;
@@ -28,7 +28,7 @@ const GOOGLE_VIDEO_MAX_DURATION_SECONDS =
 
 function resolveConfiguredGoogleVideoBaseUrl(req: VideoGenerationRequest): string | undefined {
   const configured = normalizeOptionalString(req.cfg?.models?.providers?.google?.baseUrl);
-  return configured ? normalizeGoogleApiBaseUrl(configured) : undefined;
+  return configured ? resolveGoogleGenerativeAiApiOrigin(configured) : undefined;
 }
 
 function parseVideoSize(size: string | undefined): { width: number; height: number } | undefined {
