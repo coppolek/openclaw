@@ -21,6 +21,20 @@ export const MIN_CHUNK_RATIO = 0.15;
 export const SAFETY_MARGIN = 1.2; // 20% buffer for estimateTokens() inaccuracy
 const DEFAULT_SUMMARY_FALLBACK = "No prior history.";
 const DEFAULT_PARTS = 2;
+export const DEFAULT_RECENT_TOOL_RESULTS_PRESERVE = 5;
+export const CLEARED_TOOL_RESULT_PLACEHOLDER = "[Bulky tool result cleared for compaction]";
+
+const CLEARABLE_TOOL_NAMES = new Set([
+  "read",
+  "write",
+  "edit",
+  "exec",
+  "bash",
+  "shell",
+  "web_search",
+  "web_fetch",
+  "browser",
+]);
 const MERGE_SUMMARIES_INSTRUCTIONS = [
   "Merge these partial summaries into a single cohesive summary.",
   "",
@@ -300,6 +314,7 @@ async function summarizeChunks(params: {
   customInstructions?: string;
   summarizationInstructions?: CompactionSummarizationInstructions;
   previousSummary?: string;
+  sessionPath?: string;
 }): Promise<string> {
   if (params.messages.length === 0) {
     return params.previousSummary ?? DEFAULT_SUMMARY_FALLBACK;
@@ -307,14 +322,18 @@ async function summarizeChunks(params: {
 
   // SECURITY: never feed toolResult.details into summarization prompts.
   const safeMessages = stripToolResultDetails(params.messages);
-  const chunks = chunkMessagesByMaxTokens(safeMessages, params.maxChunkTokens);
+
+  // microCompact: clear old bulky tool results (read, exec, etc.) without LLM cost.
+  const microCompacted = microCompactMessages(safeMessages);
+
+  const chunks = chunkMessagesByMaxTokens(microCompacted, params.maxChunkTokens);
   let summary = params.previousSummary;
   const effectiveInstructions = buildCompactionSummarizationInstructions(
     params.customInstructions,
     params.summarizationInstructions,
   );
   for (const chunk of chunks) {
-    summary = await retryAsync(
+    const rawSummary: string = await retryAsync(
       () =>
         generateSummary(
           chunk,
@@ -335,6 +354,17 @@ async function summarizeChunks(params: {
         shouldRetry: (err) => !isAbortError(err) && !isTimeoutError(err),
       },
     );
+    const stripped = stripAnalysisScratchpad(rawSummary);
+    if (stripped) {
+      summary = stripped;
+    }
+  }
+
+  if (summary && params.sessionPath) {
+    const link = `\n\n[Full session transcript available at: ${params.sessionPath}]`;
+    if (!summary.includes(link)) {
+      summary += link;
+    }
   }
 
   return summary ?? DEFAULT_SUMMARY_FALLBACK;
@@ -373,6 +403,89 @@ function generateSummary(
   );
 }
 
+export function stripAnalysisScratchpad(text: string): string {
+  if (!text) {
+    return "";
+  }
+
+  // Removes <analysis>...</analysis> blocks (case-insensitive, handles newlines)
+  let stripped = text
+    .replace(/<analysis>[\s\S]*?<\/analysis>/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Extracts content from top-level <summary>...</summary> if it exists.
+  // We avoid <summary> tags that are children of <details> to prevent stripping
+  // valid HTML disclosure widgets from the output.
+  const summaryRegex = /<(summary)>([\s\S]*?)<\/summary>|<(\/?)details[^>]*>/gi;
+  let match;
+  let extracted: string | null = null;
+  let detailsDepth = 0;
+
+  while ((match = summaryRegex.exec(stripped)) !== null) {
+    const [fullMatch, isSummary, summaryContent, isDetailsClose] = match;
+
+    if (fullMatch.toLowerCase().startsWith("<details")) {
+      detailsDepth++;
+    } else if (isDetailsClose === "/") {
+      detailsDepth = Math.max(0, detailsDepth - 1);
+    } else if (isSummary && detailsDepth === 0) {
+      extracted = summaryContent;
+      break; // Take the first valid top-level <summary>
+    }
+  }
+
+  if (extracted !== null) {
+    stripped = extracted.trim();
+  }
+
+  return stripped;
+}
+
+/**
+ * Perform a "micro-compaction" by clearing the content of old bulky tool results
+ * without using an LLM. Preserves only the N most recent results for specific
+ * heavy-output tools (read, exec, etc.).
+ */
+export function microCompactMessages(
+  messages: AgentMessage[],
+  preserveCount = DEFAULT_RECENT_TOOL_RESULTS_PRESERVE,
+): AgentMessage[] {
+  if (messages.length === 0) {
+    return [];
+  }
+
+  const out = [...messages];
+  let clearableCount = 0;
+
+  // Count total clearable results first to know how many to clear from the start
+  for (const msg of messages) {
+    if (msg.role === "toolResult" && !msg.isError && CLEARABLE_TOOL_NAMES.has(msg.toolName)) {
+      clearableCount++;
+    }
+  }
+
+  if (clearableCount <= preserveCount) {
+    return messages;
+  }
+
+  let clearedSoFar = 0;
+  const toClear = clearableCount - preserveCount;
+
+  for (let i = 0; i < out.length && clearedSoFar < toClear; i++) {
+    const msg = out[i];
+    if (msg.role === "toolResult" && !msg.isError && CLEARABLE_TOOL_NAMES.has(msg.toolName)) {
+      out[i] = {
+        ...msg,
+        content: [{ type: "text", text: CLEARED_TOOL_RESULT_PLACEHOLDER }],
+      };
+      clearedSoFar++;
+    }
+  }
+
+  return out;
+}
+
 /**
  * Summarize with progressive fallback for handling oversized messages.
  * If full summarization fails, tries partial summarization excluding oversized messages.
@@ -389,6 +502,7 @@ export async function summarizeWithFallback(params: {
   customInstructions?: string;
   summarizationInstructions?: CompactionSummarizationInstructions;
   previousSummary?: string;
+  sessionPath?: string;
 }): Promise<string> {
   const { messages, contextWindow } = params;
 
@@ -455,6 +569,7 @@ export async function summarizeInStages(params: {
   previousSummary?: string;
   parts?: number;
   minMessagesForSplit?: number;
+  sessionPath?: string;
 }): Promise<string> {
   const { messages } = params;
   if (messages.length === 0) {
@@ -481,6 +596,7 @@ export async function summarizeInStages(params: {
         ...params,
         messages: chunk,
         previousSummary: undefined,
+        sessionPath: undefined, // Only link at final merge
       }),
     );
   }
@@ -504,6 +620,7 @@ export async function summarizeInStages(params: {
     ...params,
     messages: summaryMessages,
     customInstructions: mergeInstructions,
+    sessionPath: params.sessionPath,
   });
 }
 

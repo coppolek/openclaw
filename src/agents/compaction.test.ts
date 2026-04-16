@@ -2,9 +2,12 @@ import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage, ToolResultMessage } from "@mariozechner/pi-ai";
 import { describe, expect, it } from "vitest";
 import {
+  CLEARED_TOOL_RESULT_PLACEHOLDER,
   estimateMessagesTokens,
+  microCompactMessages,
   pruneHistoryForContextShare,
   splitMessagesByTokenShare,
+  stripAnalysisScratchpad,
 } from "./compaction.js";
 import { makeAgentAssistantMessage } from "./test-helpers/agent-message-fixtures.js";
 
@@ -359,5 +362,119 @@ describe("pruneHistoryForContextShare", () => {
     const keptToolResults = pruned.messages.filter((m) => m.role === "toolResult");
     expect(keptToolResults).toHaveLength(0);
     expect(pruned.droppedMessages).toBe(pruned.droppedMessagesList.length);
+  });
+});
+
+describe("stripAnalysisScratchpad", () => {
+  it("strips analysis tags and keeps the summary content", () => {
+    const input = "<analysis>Internal thinking here.</analysis><summary>Factual summary.</summary>";
+    expect(stripAnalysisScratchpad(input)).toBe("Factual summary.");
+  });
+
+  it("handles multiline content and case-insensitive tags", () => {
+    const input =
+      "<ANALYSIS>\nThinking...\nMore thinking.\n</analysis>\n<Summary>\nClean summary.\n</SUMMARY>";
+    expect(stripAnalysisScratchpad(input)).toBe("Clean summary.");
+  });
+
+  it("falls back to trimmed text if summary tags are missing", () => {
+    const input = "<analysis>Thinking.</analysis> No tags here.";
+    expect(stripAnalysisScratchpad(input)).toBe("No tags here.");
+  });
+
+  it("returns plain text unchanged when no tags are present", () => {
+    expect(stripAnalysisScratchpad("Plain text with no tags.")).toBe("Plain text with no tags.");
+  });
+
+  it("extracts summary content even when no analysis tags are present", () => {
+    expect(stripAnalysisScratchpad("<summary>Just a summary.</summary>")).toBe("Just a summary.");
+  });
+
+  it("strips multiple analysis blocks", () => {
+    const input = "<analysis>First.</analysis> Middle. <analysis>Second.</analysis> End.";
+    expect(stripAnalysisScratchpad(input)).toBe("Middle. End.");
+  });
+
+  it("returns empty string when stripping leaves nothing", () => {
+    expect(stripAnalysisScratchpad("<analysis>Everything.</analysis>")).toBe("");
+  });
+
+  it("passes through text with no tags", () => {
+    const input = "Just a regular string with no special tags at all.";
+    expect(stripAnalysisScratchpad(input)).toBe(input);
+  });
+
+  it("handles multiple <analysis> blocks", () => {
+    const input =
+      "<analysis>Thought 1</analysis> middle text <analysis>Thought 2</analysis> end text";
+    expect(stripAnalysisScratchpad(input)).toBe("middle text end text");
+  });
+
+  it("handles empty input or empty after stripping", () => {
+    expect(stripAnalysisScratchpad("")).toBe("");
+    expect(stripAnalysisScratchpad("   ")).toBe("");
+    expect(stripAnalysisScratchpad("<analysis>Only thoughts, no output</analysis>")).toBe("");
+  });
+
+  it("extracts <summary> even if <analysis> tags are absent", () => {
+    const input = "Some intro text <summary>The actual summary</summary> some outro text";
+    expect(stripAnalysisScratchpad(input)).toBe("The actual summary");
+  });
+
+  it("ignores <summary> when it is an HTML <details> element", () => {
+    const input =
+      "Intro.\n<details>\n<summary>Click to expand</summary>\nMore info\n</details>\n<summary>The real summary</summary>";
+    expect(stripAnalysisScratchpad(input)).toBe("The real summary");
+
+    const input2 = "Check this <details><summary>Details</summary> info</details> tag.";
+    // If no top-level summary is found, it falls back to keeping everything (minus analysis tags).
+    expect(stripAnalysisScratchpad(input2)).toBe(input2);
+
+    const input3 =
+      "<details> <p> <summary>Inner</summary> </p> </details> <summary>Outer</summary>";
+    expect(stripAnalysisScratchpad(input3)).toBe("Outer");
+  });
+});
+
+describe("microCompactMessages", () => {
+  function toolResult(toolName: string, text: string) {
+    return {
+      role: "toolResult",
+      toolCallId: "id",
+      toolName,
+      content: [{ type: "text", text }],
+      timestamp: 0,
+    } as AgentMessage;
+  }
+
+  it("returns messages unchanged when there are fewer results than limit", () => {
+    const messages = [toolResult("read", "content")];
+    expect(microCompactMessages(messages, 5)).toEqual(messages);
+  });
+
+  it("clears old bulky results but keeps the most recent", () => {
+    const messages = [
+      toolResult("read", "old 1"),
+      toolResult("read", "old 2"),
+      toolResult("read", "recent 1"),
+      toolResult("read", "recent 2"),
+    ];
+    const result = microCompactMessages(messages, 2);
+    expect((result[0] as any).content[0].text).toBe(CLEARED_TOOL_RESULT_PLACEHOLDER);
+    expect((result[1] as any).content[0].text).toBe(CLEARED_TOOL_RESULT_PLACEHOLDER);
+    expect((result[2] as any).content[0].text).toBe("recent 1");
+    expect((result[3] as any).content[0].text).toBe("recent 2");
+  });
+
+  it("only targets specific clearable tools", () => {
+    const messages = [
+      toolResult("custom", "old but custom"),
+      toolResult("read", "old read"),
+      toolResult("read", "recent 1"),
+    ];
+    const result = microCompactMessages(messages, 1);
+    expect((result[0] as any).content[0].text).toBe("old but custom");
+    expect((result[1] as any).content[0].text).toBe(CLEARED_TOOL_RESULT_PLACEHOLDER);
+    expect((result[2] as any).content[0].text).toBe("recent 1");
   });
 });
