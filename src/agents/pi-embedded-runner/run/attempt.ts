@@ -85,7 +85,10 @@ import {
   resolveBootstrapTotalMaxChars,
 } from "../../pi-embedded-helpers.js";
 import { subscribeEmbeddedPiSession } from "../../pi-embedded-subscribe.js";
-import { createPreparedEmbeddedPiSettingsManager } from "../../pi-project-settings.js";
+import {
+  createPreparedEmbeddedPiSettingsManager,
+  reloadEmbeddedPiResourceLoader,
+} from "../../pi-project-settings.js";
 import { applyPiAutoCompactionGuard } from "../../pi-settings.js";
 import {
   createClientToolNameConflictError,
@@ -960,7 +963,12 @@ export async function runEmbeddedAttempt(
           settingsManager,
           extensionFactories,
         });
-        await resourceLoader.reload();
+        await reloadEmbeddedPiResourceLoader({
+          resourceLoader,
+          settingsManager,
+          cfg: params.config,
+          contextEngineInfo: params.contextEngine?.info,
+        });
       }
 
       // Get hook runner early so it's available when creating tools
