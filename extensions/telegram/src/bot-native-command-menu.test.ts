@@ -150,7 +150,7 @@ describe("bot-native-command-menu", () => {
     );
   });
 
-  it("deletes stale commands before setting new menu", async () => {
+  it("skips deleteMyCommands before setting a non-empty menu", async () => {
     const callOrder: string[] = [];
     const deleteMyCommands = vi.fn(async () => {
       callOrder.push("delete");
@@ -171,7 +171,33 @@ describe("bot-native-command-menu", () => {
       expect(setMyCommands).toHaveBeenCalled();
     });
 
-    expect(callOrder).toEqual(["delete", "set"]);
+    expect(deleteMyCommands).not.toHaveBeenCalled();
+    expect(callOrder).toEqual(["set"]);
+  });
+
+  it("deletes commands when syncing an empty menu", async () => {
+    const callOrder: string[] = [];
+    const deleteMyCommands = vi.fn(async () => {
+      callOrder.push("delete");
+    });
+    const setMyCommands = vi.fn(async () => {
+      callOrder.push("set");
+    });
+
+    syncMenuCommandsWithMocks({
+      deleteMyCommands,
+      setMyCommands,
+      commandsToRegister: [],
+      accountId: `test-empty-delete-${Date.now()}`,
+      botIdentity: "bot-a",
+    });
+
+    await vi.waitFor(() => {
+      expect(deleteMyCommands).toHaveBeenCalled();
+    });
+
+    expect(setMyCommands).not.toHaveBeenCalled();
+    expect(callOrder).toEqual(["delete"]);
   });
 
   it("produces a stable hash regardless of command order (#32017)", () => {
@@ -211,6 +237,7 @@ describe("bot-native-command-menu", () => {
     await vi.waitFor(() => {
       expect(setMyCommands).toHaveBeenCalledTimes(1);
     });
+    await Promise.resolve();
 
     // Second sync with the same commands — hash is cached, should skip.
     syncMenuCommandsWithMocks({
