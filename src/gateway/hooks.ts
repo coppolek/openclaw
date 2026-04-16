@@ -207,6 +207,12 @@ export type HookAgentPayload = {
   wakeMode: "now" | "next-heartbeat";
   sessionKey?: string;
   deliver: boolean;
+  /**
+   * When true, holds the HTTP connection open until the agent completes.
+   * The response includes a `text` field with the agent's output.
+   * Bypasses the idempotency cache — the caller handles retry deduplication.
+   * Use `timeoutSeconds` to bound the wait.
+   */
   blocking?: boolean;
   channel: HookMessageChannel;
   to?: string;
