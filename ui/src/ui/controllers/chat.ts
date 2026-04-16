@@ -13,6 +13,8 @@ import {
 const SILENT_REPLY_PATTERN = /^\s*NO_REPLY\s*$/;
 const SYNTHETIC_TRANSCRIPT_REPAIR_RESULT =
   "[openclaw] missing tool result in session history; inserted synthetic error result for transcript repair.";
+const LEAKED_SESSION_RESET_PROMPT_PREFIX =
+  "A new session was started via /new or /reset. If runtime-provided startup context is included for this first turn, use it before responding to the user.";
 const STARTUP_CHAT_HISTORY_RETRY_TIMEOUT_MS = 60_000;
 const STARTUP_CHAT_HISTORY_DEFAULT_RETRY_MS = 500;
 const STARTUP_CHAT_HISTORY_MAX_RETRY_MS = 5_000;
@@ -71,8 +73,44 @@ function isSyntheticTranscriptRepairToolResult(message: unknown): boolean {
   return typeof text === "string" && text.trim() === SYNTHETIC_TRANSCRIPT_REPAIR_RESULT;
 }
 
+function isLeakedInternalHistoryMessage(message: unknown): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  const entry = message as Record<string, unknown>;
+  const text = extractText(message);
+  if (typeof text !== "string") {
+    return false;
+  }
+  const lower = normalizeLowercaseStringOrEmpty(text.trim());
+  if (!lower) {
+    return false;
+  }
+  const role = normalizeLowercaseStringOrEmpty(entry.role);
+  const hasExecStatus =
+    lower.includes("exec started") ||
+    lower.includes("exec completed") ||
+    lower.includes("exec finished") ||
+    lower.includes("exec failed") ||
+    lower.includes("exec denied");
+  if (
+    role === "system" &&
+    (lower.startsWith("system:") || lower.startsWith("system (untrusted):") || hasExecStatus)
+  ) {
+    return true;
+  }
+  if (lower.startsWith("sender (untrusted metadata):") && hasExecStatus) {
+    return true;
+  }
+  return lower.startsWith(normalizeLowercaseStringOrEmpty(LEAKED_SESSION_RESET_PROMPT_PREFIX));
+}
+
 function shouldHideHistoryMessage(message: unknown): boolean {
-  return isAssistantSilentReply(message) || isSyntheticTranscriptRepairToolResult(message);
+  return (
+    isAssistantSilentReply(message) ||
+    isSyntheticTranscriptRepairToolResult(message) ||
+    isLeakedInternalHistoryMessage(message)
+  );
 }
 
 function isRetryableStartupUnavailable(err: unknown, method: string): err is GatewayRequestError {
