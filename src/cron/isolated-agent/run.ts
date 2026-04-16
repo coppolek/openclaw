@@ -1,3 +1,4 @@
+import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../../auto-reply/tokens.js";
 import { hasAnyAuthProfileStoreSource } from "../../agents/auth-profiles/source-check.js";
 import type { SkillSnapshot } from "../../agents/skills.js";
 import type { ThinkLevel } from "../../auto-reply/thinking.js";
@@ -131,10 +132,11 @@ function resolveCronToolPolicy(params: {
     // was successfully resolved. When resolution fails the agent should not
     // be blocked by a target it cannot satisfy (#27898).
     requireExplicitMessageTarget: params.deliveryRequested && params.resolvedDelivery.ok,
-    // Cron-owned runs always route user-facing delivery through the runner
-    // itself. Shared callers keep the previous behavior so non-cron paths do
-    // not silently lose the message tool when no explicit delivery is active.
-    disableMessageTool: params.deliveryContract === "cron-owned" ? true : params.deliveryRequested,
+    // Cron-owned runs must keep the message tool available so isolated cron
+    // jobs can explicitly send attachments or richer payloads (for example
+    // Discord media with components). Shared callers keep the previous
+    // delivery-requested behavior.
+    disableMessageTool: params.deliveryContract === "shared" ? params.deliveryRequested : false,
   };
 }
 
@@ -189,11 +191,32 @@ async function resolveCronDeliveryContext(params: {
 function appendCronDeliveryInstruction(params: {
   commandBody: string;
   deliveryRequested: boolean;
+  resolvedDelivery: ResolvedCronDeliveryTarget;
 }) {
   if (!params.deliveryRequested) {
     return params.commandBody;
   }
-  return `${params.commandBody}\n\nReturn your response as plain text; it will be delivered automatically. If the task explicitly calls for messaging a specific external recipient, note who/where it should go instead of sending it yourself.`.trim();
+  const serializedChannel =
+    params.resolvedDelivery.ok && params.resolvedDelivery.channel
+      ? JSON.stringify(params.resolvedDelivery.channel)
+      : undefined;
+  const serializedTarget =
+    params.resolvedDelivery.ok && params.resolvedDelivery.to
+      ? JSON.stringify(params.resolvedDelivery.to)
+      : undefined;
+  const serializedThreadId =
+    params.resolvedDelivery.ok && params.resolvedDelivery.threadId !== undefined
+      ? JSON.stringify(params.resolvedDelivery.threadId)
+      : undefined;
+  const serializedAccountId =
+    params.resolvedDelivery.ok && params.resolvedDelivery.accountId
+      ? JSON.stringify(params.resolvedDelivery.accountId)
+      : undefined;
+  const explicitTargetInstruction =
+    serializedChannel && serializedTarget
+      ? `When using the message tool for this cron delivery, set channel to ${serializedChannel} and target to ${serializedTarget}${serializedThreadId ? ` with threadId ${serializedThreadId}` : ""}${serializedAccountId ? ` with accountId ${serializedAccountId}` : ""}.`
+      : "When using the message tool for this cron delivery, include an explicit channel and target.";
+  return `${params.commandBody}\n\n${explicitTargetInstruction} Plain-text summaries are delivered automatically only when you do not send the final result yourself. If you use the message tool for the final delivery (for example attachments, media, richer components, or a different recipient), send everything there and then return exactly ${SILENT_REPLY_TOKEN}.`.trim();
 }
 
 function resolvePositiveContextTokens(value: unknown): number | undefined {
@@ -439,7 +462,11 @@ async function prepareCronRunContext(params: {
   } else {
     commandBody = `${base}\n${timeLine}`.trim();
   }
-  commandBody = appendCronDeliveryInstruction({ commandBody, deliveryRequested });
+  commandBody = appendCronDeliveryInstruction({
+    commandBody,
+    deliveryRequested,
+    resolvedDelivery,
+  });
 
   const skillsSnapshot = await resolveCronSkillsSnapshot({
     workspaceDir,
@@ -651,15 +678,16 @@ async function finalizeCronRun(params: {
     matchesMessagingToolDeliveryTarget,
     resolveCronDeliveryBestEffort,
   } = await loadCronDeliveryRuntime();
+  const didHandoffFinalDelivery = isSilentReplyText(synthesizedText, SILENT_REPLY_TOKEN);
   const skipMessagingToolDelivery =
-    (prepared.input.deliveryContract ?? "cron-owned") === "shared" &&
     prepared.deliveryRequested &&
-    finalRunResult.didSendViaMessagingTool === true &&
+    didHandoffFinalDelivery &&
     (finalRunResult.messagingToolSentTargets ?? []).some((target) =>
       matchesMessagingToolDeliveryTarget(target, {
         channel: prepared.resolvedDelivery.channel,
         to: prepared.resolvedDelivery.to,
         accountId: prepared.resolvedDelivery.accountId,
+        threadId: prepared.resolvedDelivery.threadId,
       }),
     );
   const deliveryResult = await dispatchCronDelivery({
