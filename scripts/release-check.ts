@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { NPM_UPDATE_COMPAT_SIDECAR_PATHS } from "../src/infra/npm-update-compat-sidecars.ts";
 import {
   PACKAGE_DIST_INVENTORY_RELATIVE_PATH,
   writePackageDistInventory,
@@ -40,6 +41,9 @@ export {
 
 type PackFile = { path: string };
 type PackResult = { files?: PackFile[]; filename?: string; unpackedSize?: number };
+const legacyUpdateCompatPackedPaths = [
+  ...NPM_UPDATE_COMPAT_SIDECAR_PATHS,
+].toSorted() as readonly string[];
 
 const requiredPathGroups = [
   PACKAGE_DIST_INVENTORY_RELATIVE_PATH,
@@ -57,6 +61,7 @@ const requiredPathGroups = [
   "dist/build-info.json",
   "dist/channel-catalog.json",
   "dist/control-ui/index.html",
+  ...legacyUpdateCompatPackedPaths,
 ];
 const forbiddenPrefixes = [
   "dist-runtime/",
@@ -271,7 +276,9 @@ export function collectForbiddenPackPaths(paths: Iterable<string>): string[] {
   return [...paths]
     .filter(
       (path) =>
-        forbiddenPrefixes.some((prefix) => path.startsWith(prefix)) || /node_modules\//.test(path),
+        (!legacyUpdateCompatPackedPaths.includes(path) &&
+          forbiddenPrefixes.some((prefix) => path.startsWith(prefix))) ||
+        /node_modules\//.test(path),
     )
     .toSorted((left, right) => left.localeCompare(right));
 }
