@@ -11,6 +11,7 @@ export { listRegisteredMemoryEmbeddingProviders };
 export function listRegisteredMemoryEmbeddingProviderAdapters(): MemoryEmbeddingProviderAdapter[] {
   return listRegisteredMemoryEmbeddingProviders().map((entry) => entry.adapter);
 }
+
 export function listMemoryEmbeddingProviders(
   cfg?: OpenClawConfig,
 ): MemoryEmbeddingProviderAdapter[] {
@@ -32,8 +33,9 @@ export function getMemoryEmbeddingProvider(
   if (registered) {
     return registered.adapter;
   }
-  if (listRegisteredMemoryEmbeddingProviders().length > 0) {
-    return undefined;
-  }
-  return listMemoryEmbeddingProviders(cfg).find((adapter) => adapter.id === id);
+
+  return resolvePluginCapabilityProviders({
+    key: "memoryEmbeddingProviders",
+    cfg,
+  }).find((adapter) => adapter.id === id);
 }
