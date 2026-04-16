@@ -979,10 +979,18 @@ export async function spawnAcpDirect(
     threadRequested: requestThreadBinding,
   });
   if (spawnMode === "session" && !requestThreadBinding) {
+    // #67400: the previous message stopped at "requires thread=true" without
+    // naming the alternative. Retry with `thread=true` only succeeds on a
+    // channel that exposes thread bindings (Discord/Slack/Telegram topics);
+    // on webchat/CLI the `thread=true` path fails with a separate binding
+    // error. Make the fallback path explicit so callers on any channel have
+    // a viable next step.
     return createAcpSpawnFailure({
       status: "error",
       errorCode: "thread_required",
-      error: 'mode="session" requires thread=true so the ACP session can stay bound to a thread.',
+      error:
+        'sessions_spawn(runtime="acp", mode="session") requires thread=true so the ACP session can stay bound to a channel thread. ' +
+        'Retry with { mode: "session", thread: true } on a channel that exposes threads (e.g. Discord, Slack, Telegram topics), or use mode="run" for one-shot work.',
     });
   }
 
