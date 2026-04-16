@@ -254,9 +254,16 @@ describe("resolveAgentConfig", () => {
       resolveEffectiveModelFallbacks({
         cfg: cfgInheritDefaults,
         agentId: "linus",
+        hasSessionModelOverride: false,
+      }),
+    ).toEqual([]);
+    expect(
+      resolveEffectiveModelFallbacks({
+        cfg: cfgInheritDefaults,
+        agentId: "linus",
         hasSessionModelOverride: true,
       }),
-    ).toEqual(["openai/gpt-5.4"]);
+    ).toEqual([]);
     expect(
       resolveEffectiveModelFallbacks({
         cfg: cfgDisable,
@@ -264,6 +271,32 @@ describe("resolveAgentConfig", () => {
         hasSessionModelOverride: true,
       }),
     ).toEqual([]);
+
+    const cfgInheritDefaultsSamePrimary: OpenClawConfig = {
+      agents: {
+        defaults: {
+          model: {
+            primary: "anthropic/claude-sonnet-4-6",
+            fallbacks: ["openai/gpt-5.4"],
+          },
+        },
+        list: [
+          {
+            id: "linus",
+            model: {
+              primary: "anthropic/claude-sonnet-4-6",
+            },
+          },
+        ],
+      },
+    };
+    expect(
+      resolveEffectiveModelFallbacks({
+        cfg: cfgInheritDefaultsSamePrimary,
+        agentId: "linus",
+        hasSessionModelOverride: true,
+      }),
+    ).toEqual(["openai/gpt-5.4"]);
   });
 
   it("resolves fallback agent id from explicit agent id first", () => {
