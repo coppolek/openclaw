@@ -4,7 +4,6 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { NPM_UPDATE_COMPAT_SIDECAR_PATHS } from "../src/infra/npm-update-compat-sidecars.ts";
 import {
   PACKAGE_DIST_INVENTORY_RELATIVE_PATH,
   writePackageDistInventory,
@@ -61,8 +60,9 @@ export type NpmDistTagMirrorAuth = {
 const EXPECTED_REPOSITORY_URL = "https://github.com/openclaw/openclaw";
 const MAX_CALVER_DISTANCE_DAYS = 2;
 const LEGACY_UPDATE_COMPAT_PACKED_PATHS = [
-  ...NPM_UPDATE_COMPAT_SIDECAR_PATHS,
-].toSorted() as readonly string[];
+  "dist/extensions/qa-channel/runtime-api.js",
+  "dist/extensions/qa-lab/runtime-api.js",
+] as const;
 const REQUIRED_PACKED_PATHS = [
   PACKAGE_DIST_INVENTORY_RELATIVE_PATH,
   "dist/control-ui/index.html",
@@ -90,6 +90,11 @@ const FORBIDDEN_PACKED_PATH_RULES = [
     prefix: "dist/plugin-sdk/extensions/qa-lab/",
     describe: (packedPath: string) =>
       `npm package must not include private QA lab type artifact "${packedPath}".`,
+  },
+  {
+    prefix: "dist/qa-runtime-",
+    describe: (packedPath: string) =>
+      `npm package must not include private QA runtime chunk "${packedPath}".`,
   },
   {
     prefix: "qa/",
@@ -527,7 +532,7 @@ function collectPackedTarballErrors(): string[] {
 export function collectForbiddenPackedPathErrors(paths: Iterable<string>): string[] {
   const errors: string[] = [];
   for (const packedPath of paths) {
-    if (LEGACY_UPDATE_COMPAT_PACKED_PATHS.includes(packedPath)) {
+    if ((LEGACY_UPDATE_COMPAT_PACKED_PATHS as readonly string[]).includes(packedPath)) {
       continue;
     }
     const matchedRule = FORBIDDEN_PACKED_PATH_RULES.find((rule) =>

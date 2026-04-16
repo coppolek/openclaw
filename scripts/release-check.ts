@@ -5,7 +5,6 @@ import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { NPM_UPDATE_COMPAT_SIDECAR_PATHS } from "../src/infra/npm-update-compat-sidecars.ts";
 import {
   PACKAGE_DIST_INVENTORY_RELATIVE_PATH,
   writePackageDistInventory,
@@ -41,9 +40,6 @@ export {
 
 type PackFile = { path: string };
 type PackResult = { files?: PackFile[]; filename?: string; unpackedSize?: number };
-const legacyUpdateCompatPackedPaths = [
-  ...NPM_UPDATE_COMPAT_SIDECAR_PATHS,
-].toSorted() as readonly string[];
 
 const requiredPathGroups = [
   PACKAGE_DIST_INVENTORY_RELATIVE_PATH,
@@ -61,15 +57,23 @@ const requiredPathGroups = [
   "dist/build-info.json",
   "dist/channel-catalog.json",
   "dist/control-ui/index.html",
-  ...legacyUpdateCompatPackedPaths,
+  "dist/extensions/qa-channel/runtime-api.js",
+  "dist/extensions/qa-lab/runtime-api.js",
 ];
+const legacyUpdateCompatPackPaths = new Set([
+  "dist/extensions/qa-channel/runtime-api.js",
+  "dist/extensions/qa-lab/runtime-api.js",
+]);
 const forbiddenPrefixes = [
   "dist-runtime/",
   "dist/OpenClaw.app/",
   "dist/extensions/qa-lab/",
   "dist/plugin-sdk/extensions/qa-lab/",
   "dist/plugin-sdk/qa-lab.",
+  "dist/plugin-sdk/qa-runtime.",
   "dist/plugin-sdk/src/plugin-sdk/qa-lab.d.ts",
+  "dist/plugin-sdk/src/plugin-sdk/qa-runtime.d.ts",
+  "dist/qa-runtime-",
   "dist/plugin-sdk/.tsbuildinfo",
   "docs/.generated/",
   "qa/",
@@ -276,9 +280,9 @@ export function collectForbiddenPackPaths(paths: Iterable<string>): string[] {
   return [...paths]
     .filter(
       (path) =>
-        (!legacyUpdateCompatPackedPaths.includes(path) &&
-          forbiddenPrefixes.some((prefix) => path.startsWith(prefix))) ||
-        /node_modules\//.test(path),
+        !legacyUpdateCompatPackPaths.has(path) &&
+        (forbiddenPrefixes.some((prefix) => path.startsWith(prefix)) ||
+          /node_modules\//.test(path)),
     )
     .toSorted((left, right) => left.localeCompare(right));
 }

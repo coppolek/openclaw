@@ -7,7 +7,7 @@ export const NPM_UPDATE_COMPAT_SIDECARS = [
   {
     path: "dist/extensions/qa-lab/runtime-api.js",
     content:
-      "// Compatibility stub for older OpenClaw updaters. QA Lab is not packaged.\nexport {};\n",
+      "// Compatibility stub for older OpenClaw updaters. The QA lab implementation is not packaged.\nexport {};\n",
   },
 ] as const;
 
