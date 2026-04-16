@@ -27,8 +27,8 @@ describe("createHooksRequestHandler blocking mode", () => {
       ok: true,
       value: { message: "test message", blocking: true },
     });
-    const dispatchAgentHook = vi.fn(async () => ({
-      runId: "run-123",
+    const dispatchAgentHook = vi.fn(async (payload: { runId?: string }) => ({
+      runId: payload.runId ?? "run-123",
       outputText: "hello",
     }));
     const handler = createHooksHandler({ dispatchAgentHook });
@@ -49,7 +49,7 @@ describe("createHooksRequestHandler blocking mode", () => {
     const responseBody = JSON.parse(end.mock.calls[0][0] as string);
     expect(responseBody).toEqual({
       ok: true,
-      runId: "run-123",
+      runId: expect.any(String),
       text: "hello",
     });
   });
@@ -59,8 +59,8 @@ describe("createHooksRequestHandler blocking mode", () => {
       ok: true,
       value: { message: "test message", blocking: true },
     });
-    const dispatchAgentHook = vi.fn(async () => ({
-      runId: "run-456",
+    const dispatchAgentHook = vi.fn(async (payload: { runId?: string }) => ({
+      runId: payload.runId ?? "run-456",
       agentError: "boom",
     }));
     const handler = createHooksHandler({ dispatchAgentHook });
@@ -75,7 +75,7 @@ describe("createHooksRequestHandler blocking mode", () => {
     const responseBody = JSON.parse(end.mock.calls[0][0] as string);
     expect(responseBody).toEqual({
       ok: false,
-      runId: "run-456",
+      runId: expect.any(String),
       error: "boom",
     });
   });
@@ -88,8 +88,8 @@ describe("createHooksRequestHandler blocking mode", () => {
       ok: true,
       value: { message: "test message", blocking: true },
     });
-    const dispatchAgentHook = vi.fn(async () => ({
-      runId: "run-5",
+    const dispatchAgentHook = vi.fn(async (payload: { runId?: string }) => ({
+      runId: payload.runId ?? "run-5",
       agentError: "run failed (error): abort",
     }));
     const handler = createHooksHandler({ dispatchAgentHook });
@@ -104,7 +104,7 @@ describe("createHooksRequestHandler blocking mode", () => {
     const responseBody = JSON.parse(end.mock.calls[0][0] as string);
     expect(responseBody).toEqual({
       ok: false,
-      runId: "run-5",
+      runId: expect.any(String),
       error: "run failed (error): abort",
     });
   });
@@ -114,8 +114,8 @@ describe("createHooksRequestHandler blocking mode", () => {
       ok: true,
       value: { message: "test message" },
     });
-    const dispatchAgentHook = vi.fn(async () => ({
-      runId: "run-789",
+    const dispatchAgentHook = vi.fn(async (payload: { runId?: string }) => ({
+      runId: payload.runId ?? "run-789",
     }));
     const handler = createHooksHandler({ dispatchAgentHook });
     const req = createHookRequest({ url: "/hooks/agent" });
@@ -129,14 +129,14 @@ describe("createHooksRequestHandler blocking mode", () => {
     const responseBody = JSON.parse(end.mock.calls[0][0] as string);
     expect(responseBody).toEqual({
       ok: true,
-      runId: "run-789",
+      runId: expect.any(String),
     });
     expect(responseBody).not.toHaveProperty("text");
   });
 
   test("blocking:true bypasses idempotency cache", async () => {
-    const dispatchAgentHook = vi.fn(async () => ({
-      runId: "run-" + Math.random(),
+    const dispatchAgentHook = vi.fn(async (payload: { runId?: string }) => ({
+      runId: payload.runId ?? "run-" + Math.random(),
       outputText: "response",
     }));
     const handler = createHooksHandler({ dispatchAgentHook });
@@ -172,8 +172,8 @@ describe("createHooksRequestHandler blocking mode", () => {
   });
 
   test("non-blocking uses idempotency cache", async () => {
-    const dispatchAgentHook = vi.fn(async () => ({
-      runId: "cached-run-id",
+    const dispatchAgentHook = vi.fn(async (payload: { runId?: string }) => ({
+      runId: payload.runId ?? "cached-run-id",
     }));
     const handler = createHooksHandler({ dispatchAgentHook });
 
@@ -208,7 +208,8 @@ describe("createHooksRequestHandler blocking mode", () => {
 
     const response1 = JSON.parse(end1.mock.calls[0][0] as string);
     const response2 = JSON.parse(end2.mock.calls[0][0] as string);
-    expect(response1.runId).toBe("cached-run-id");
-    expect(response2.runId).toBe("cached-run-id");
+    // Both responses should have the same runId (second request hit cache with pre-allocated id)
+    expect(response1.runId).toEqual(expect.any(String));
+    expect(response2.runId).toBe(response1.runId);
   });
 });

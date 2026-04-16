@@ -78,7 +78,7 @@ export function createGatewayHooksRequestHandler(params: {
       state: { nextRunAtMs: now },
     };
 
-    const runId = randomUUID();
+    const runId = value.runId ?? randomUUID();
 
     // Shared post-run helper: logs the result as a system event and fires heartbeat.
     // For blocking calls: returns { outputText } on success or { agentError } when

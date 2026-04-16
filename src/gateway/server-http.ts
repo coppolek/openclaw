@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   createServer as createHttpServer,
   type Server as HttpServer,
@@ -713,8 +713,15 @@ export function createHooksRequestHandler(
         sendJson(res, 400, { ok: false, error: getHookSessionKeyPrefixError(allowedPrefixes) });
         return true;
       }
+      // Pre-allocate and cache before dispatch to close the idempotency async gap:
+      // concurrent retries with the same key will hit the cache rather than
+      // starting a second agent run. For blocking requests replayKey is undefined
+      // so rememberHookRunId is a no-op.
+      const preRunId = randomUUID();
+      rememberHookRunId(replayKey, preRunId, now);
       const { runId, outputText, agentError } = await dispatchAgentHook({
         ...normalized.value,
+        runId: preRunId,
         idempotencyKey,
         sessionKey: normalizedDispatchSessionKey,
         agentId: targetAgentId,
@@ -724,7 +731,6 @@ export function createHooksRequestHandler(
         sendJson(res, 500, { ok: false, runId, error: agentError });
         return true;
       }
-      rememberHookRunId(replayKey, runId, now);
       sendJson(res, 200, {
         ok: true,
         runId,
@@ -814,10 +820,14 @@ export function createHooksRequestHandler(
             sendJson(res, 200, { ok: true, runId: cachedRunId });
             return true;
           }
-          // Mappings are external-event-triggered and intentionally non-blocking
+          // Mappings are external-event-triggered and intentionally non-blocking.
+          // Pre-allocate and cache before dispatch to close the idempotency async gap.
+          const preRunId = randomUUID();
+          rememberHookRunId(replayKey, preRunId, now);
           const { runId, outputText, agentError } = await dispatchAgentHook({
             message: mapped.action.message,
             name: mapped.action.name ?? "Hook",
+            runId: preRunId,
             idempotencyKey,
             agentId: targetAgentId,
             wakeMode: mapped.action.wakeMode,
@@ -839,7 +849,6 @@ export function createHooksRequestHandler(
             sendJson(res, 500, { ok: false, runId, error: agentError });
             return true;
           }
-          rememberHookRunId(replayKey, runId, now);
           sendJson(res, 200, {
             ok: true,
             runId,

@@ -225,6 +225,10 @@ export type HookAgentDispatchPayload = Omit<HookAgentPayload, "sessionKey"> & {
   sessionKey: string;
   allowUnsafeExternalContent?: boolean;
   externalContentSource?: HookExternalContentSource;
+  /** Pre-allocated run ID from the caller. When provided, dispatchAgentHook uses this
+   *  instead of generating a new UUID, allowing the caller to cache the ID before the
+   *  async dispatch begins to close the idempotency async gap. */
+  runId?: string;
 };
 
 const listHookChannelValues = () => ["last", ...listChannelPlugins().map((plugin) => plugin.id)];
