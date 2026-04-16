@@ -1898,7 +1898,7 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
     expect(extractFirstTextBlock(payload)).toBe("MEDIA:https://example.com/final.png");
   });
 
-  it("drops image attachments for text-only session models", async () => {
+  it("rejects image attachments with an explicit error for text-only session models", async () => {
     createTranscriptFixture("openclaw-chat-send-text-only-attachments-");
     mockState.finalText = "ok";
     mockState.sessionEntry = {
@@ -1931,10 +1931,19 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
         ],
       },
       expectBroadcast: false,
+      waitFor: "none",
     });
 
+    // Chat.send must refuse the request with a 4xx; dispatch never runs and no
+    // dedupe entry is written because the call never reached the dispatch step.
     expect(mockState.lastDispatchImages).toBeUndefined();
     expect(mockState.lastDispatchImageOrder).toBeUndefined();
+    expect(context.dedupe.has("chat:idem-text-only-attachments")).toBe(false);
+    expect(respond).toHaveBeenCalledTimes(1);
+    const [ok, payload, error] = respond.mock.calls[0] ?? [];
+    expect(ok).toBe(false);
+    expect(payload).toBeUndefined();
+    expect(error?.message ?? String(error)).toMatch(/text-only|image inputs/i);
   });
 
   it("resolves attachment image support from the session agent model", async () => {
@@ -1988,10 +1997,76 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
         ],
       },
       expectBroadcast: false,
+      waitFor: "none",
     });
 
     expect(mockState.lastDispatchImages).toBeUndefined();
     expect(mockState.lastDispatchImageOrder).toBeUndefined();
+    expect(context.dedupe.has("chat:idem-agent-scoped-text-only-attachments")).toBe(false);
+    expect(respond).toHaveBeenCalledTimes(1);
+    const [ok, payload, error] = respond.mock.calls[0] ?? [];
+    expect(ok).toBe(false);
+    expect(payload).toBeUndefined();
+    expect(error?.message ?? String(error)).toMatch(/text-only|image inputs/i);
+  });
+
+  it("routes non-image offloaded refs into ctx.MediaPaths + MediaTypes for chat.send", async () => {
+    createTranscriptFixture("openclaw-chat-send-non-image-ctx-media-paths-");
+    mockState.finalText = "ok";
+    mockState.sessionEntry = {
+      modelProvider: "test-provider",
+      model: "vision-model",
+    };
+    mockState.modelCatalog = [
+      {
+        provider: "test-provider",
+        id: "vision-model",
+        name: "Vision model",
+        input: ["text", "image"],
+      },
+    ];
+    mockState.savedMediaResults = [
+      { path: "/home/user/.openclaw/media/inbound/report.pdf", contentType: "application/pdf" },
+    ];
+    const respond = vi.fn();
+    const context = createChatContext();
+    const pdf = Buffer.from("%PDF-1.4\n%µ¶\n1 0 obj\n<<>>\nendobj\n").toString("base64");
+
+    await runNonStreamingChatSend({
+      context,
+      respond,
+      idempotencyKey: "idem-non-image-ctx-media",
+      message: "read this",
+      requestParams: {
+        attachments: [
+          {
+            type: "file",
+            mimeType: "application/pdf",
+            fileName: "report.pdf",
+            content: pdf,
+          },
+        ],
+      },
+      expectBroadcast: false,
+    });
+
+    expect(mockState.lastDispatchCtx?.MediaPaths).toEqual([
+      "/home/user/.openclaw/media/inbound/report.pdf",
+    ]);
+    expect(mockState.lastDispatchCtx?.MediaPath).toBe(
+      "/home/user/.openclaw/media/inbound/report.pdf",
+    );
+    expect(mockState.lastDispatchCtx?.MediaTypes).toEqual(["application/pdf"]);
+    expect(mockState.lastDispatchCtx?.MediaType).toBe("application/pdf");
+    // Non-image offloads MUST NOT inject a media://URI into the prompt body —
+    // they ride through ctx.MediaPaths so buildInboundMediaNote prepends the
+    // real path, avoiding duplicate media markers.
+    expect(mockState.lastDispatchCtx?.Body).not.toContain("media://");
+    expect(mockState.lastDispatchCtx?.BodyForAgent).not.toContain("media://");
+    expect(mockState.lastDispatchImages).toBeUndefined();
+    // Marker replaces the implicit "relative-path no-op" coupling in
+    // get-reply.ts with an explicit skip contract.
+    expect(mockState.lastDispatchCtx?.MediaStaged).toBe(true);
   });
 
   it("passes imageOrder for mixed inline and offloaded chat.send attachments", async () => {

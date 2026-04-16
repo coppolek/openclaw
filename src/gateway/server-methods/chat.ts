@@ -2,21 +2,24 @@ import fs from "node:fs";
 import path from "node:path";
 import { CURRENT_SESSION_VERSION, SessionManager } from "@mariozechner/pi-coding-agent";
 import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
-import { resolveSessionAgentId } from "../../agents/agent-scope.js";
+import { resolveAgentWorkspaceDir, resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { resolveThinkingDefault } from "../../agents/model-selection.js";
 import { rewriteTranscriptEntriesInSessionFile } from "../../agents/pi-embedded-runner/transcript-rewrite.js";
+import { ensureSandboxWorkspaceForSession } from "../../agents/sandbox/context.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { dispatchInboundMessage } from "../../auto-reply/dispatch.js";
 import type { ReplyPayload } from "../../auto-reply/reply-payload.js";
 import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.js";
-import type { MsgContext } from "../../auto-reply/templating.js";
+import { stageSandboxMedia } from "../../auto-reply/reply/stage-sandbox-media.js";
+import type { MsgContext, TemplateContext } from "../../auto-reply/templating.js";
 import { extractCanvasFromText } from "../../chat/canvas-render.js";
 import { resolveSessionFilePath } from "../../config/sessions.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { jsonUtf8Bytes } from "../../infra/json-utf8-bytes.js";
 import { getAgentScopedMediaLocalRoots } from "../../media/local-roots.js";
 import { isAudioFileName } from "../../media/mime.js";
 import type { PromptImageOrderEntry } from "../../media/prompt-image-order.js";
-import { type SavedMedia, saveMediaBuffer } from "../../media/store.js";
+import { deleteMediaBuffer, type SavedMedia, saveMediaBuffer } from "../../media/store.js";
 import { createChannelReplyPipeline } from "../../plugin-sdk/channel-reply-pipeline.js";
 import { normalizeInputProvenance, type InputProvenance } from "../../sessions/input-provenance.js";
 import { resolveSendPolicy } from "../../sessions/send-policy.js";
@@ -494,6 +497,64 @@ function buildChatSendTranscriptMessage(params: {
     timestamp: params.timestamp,
     ...mediaFields,
   };
+}
+
+// Stages non-image offloads into the agent sandbox synchronously so chat.send
+// can surface 5xx before respond(). Throws MediaOffloadError on partial-stage
+// instead of silently losing files (channel path is best-effort; chat.send is
+// strong-delivery RPC). Callers MUST set ctx.MediaStaged=true when this runs
+// so the dispatch pipeline skips its own stageSandboxMedia pass.
+async function prestageNonImageOffloads(params: {
+  offloadedRefs: OffloadedRef[];
+  cfg: OpenClawConfig;
+  sessionKey: string;
+  agentId: string;
+}): Promise<{ paths: string[]; types: string[] }> {
+  const nonImage = params.offloadedRefs.filter((ref) => !ref.mimeType.startsWith("image/"));
+  if (nonImage.length === 0) {
+    return { paths: [], types: [] };
+  }
+
+  const workspaceDir = resolveAgentWorkspaceDir(params.cfg, params.agentId);
+  const sandbox = await ensureSandboxWorkspaceForSession({
+    config: params.cfg,
+    sessionKey: params.sessionKey,
+    workspaceDir,
+  });
+  if (!sandbox) {
+    return {
+      paths: nonImage.map((ref) => ref.path),
+      types: nonImage.map((ref) => ref.mimeType),
+    };
+  }
+
+  const stagingCtx: MsgContext = {
+    MediaPath: nonImage[0].path,
+    MediaPaths: nonImage.map((ref) => ref.path),
+    MediaType: nonImage[0].mimeType,
+    MediaTypes: nonImage.map((ref) => ref.mimeType),
+  };
+  await stageSandboxMedia({
+    ctx: stagingCtx,
+    sessionCtx: stagingCtx as TemplateContext,
+    cfg: params.cfg,
+    sessionKey: params.sessionKey,
+    workspaceDir,
+  });
+
+  const stagedPaths = stagingCtx.MediaPaths ?? [];
+  const stagedTypes = stagingCtx.MediaTypes ?? nonImage.map((ref) => ref.mimeType);
+  const allRewritten =
+    stagedPaths.length === nonImage.length && stagedPaths.every((p) => !path.isAbsolute(p));
+  if (!allRewritten) {
+    await Promise.allSettled(
+      params.offloadedRefs.map((ref) => deleteMediaBuffer(ref.id, "inbound")),
+    );
+    throw new MediaOffloadError(
+      `non-image attachment staging incomplete: ${stagedPaths.length}/${nonImage.length} paths rewritten into sandbox workspace`,
+    );
+  }
+  return { paths: stagedPaths, types: stagedTypes };
 }
 
 function resolveChatSendTranscriptMediaFields(savedImages: SavedMedia[]) {
@@ -1854,6 +1915,8 @@ export const chatHandlers: GatewayRequestHandlers = {
     let parsedImages: ChatImageContent[] = [];
     let imageOrder: PromptImageOrderEntry[] = [];
     let offloadedRefs: OffloadedRef[] = [];
+    let nonImageMediaPaths: string[] = [];
+    let nonImageMediaTypes: string[] = [];
     const timeoutMs = resolveAgentTimeoutMs({
       cfg,
       overrideMs: p.timeoutMs,
@@ -1912,7 +1975,7 @@ export const chatHandlers: GatewayRequestHandlers = {
     }
     if (normalizedAttachments.length > 0) {
       const modelRef = resolveSessionModelRef(cfg, entry, agentId);
-      const supportsImages = await resolveGatewayModelSupportsImages({
+      const supportsInlineImages = await resolveGatewayModelSupportsImages({
         loadGatewayModelCatalog: context.loadGatewayModelCatalog,
         provider: modelRef.provider,
         model: modelRef.model,
@@ -1921,12 +1984,21 @@ export const chatHandlers: GatewayRequestHandlers = {
         const parsed = await parseMessageWithAttachments(inboundMessage, normalizedAttachments, {
           maxBytes: 5_000_000,
           log: context.logGateway,
-          supportsImages,
+          supportsInlineImages,
+          // chat.send routes non-image offloadedRefs into ctx.MediaPaths below
+          // so the auto-reply stage pipeline can surface them to the agent.
+          acceptNonImage: true,
         });
         parsedMessage = parsed.message;
         parsedImages = parsed.images;
         imageOrder = parsed.imageOrder;
         offloadedRefs = parsed.offloadedRefs;
+        ({ paths: nonImageMediaPaths, types: nonImageMediaTypes } = await prestageNonImageOffloads({
+          offloadedRefs,
+          cfg,
+          sessionKey,
+          agentId,
+        }));
       } catch (err) {
         respond(
           false,
@@ -2016,6 +2088,18 @@ export const chatHandlers: GatewayRequestHandlers = {
         SenderUsername: clientInfo?.displayName,
         GatewayClientScopes: client?.connect?.scopes ?? [],
       };
+      if (nonImageMediaPaths.length > 0) {
+        // Inject non-image offloads via the same MsgContext fields the channel
+        // path uses so buildInboundMediaNote renders a real `[media attached:
+        // <workspace-relative-path>]` line into the agent prompt. Marker
+        // blocks the dispatch pipeline from re-running stageSandboxMedia; see
+        // prestageNonImageOffloads.
+        ctx.MediaPath = nonImageMediaPaths[0];
+        ctx.MediaPaths = nonImageMediaPaths;
+        ctx.MediaType = nonImageMediaTypes[0];
+        ctx.MediaTypes = nonImageMediaTypes;
+        ctx.MediaStaged = true;
+      }
 
       const { onModelSelected, ...replyPipeline } = createChannelReplyPipeline({
         cfg,
