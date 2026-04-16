@@ -375,6 +375,21 @@ const CREDENTIAL_ENV_VARS = [
   "AWS_ROLE_ARN",
 ] as const;
 
+// Memoize the SDK credential probe so IMDS is contacted at most once per
+// CACHE_TTL_MS interval. This avoids repeated network requests in
+// environments where IMDS returns errors (e.g. 403 in sandboxed
+// environments like NVIDIA NemoClaw) while allowing credential changes
+// (SSO refresh, delayed IMDS) to be picked up on the next interval.
+let _cachedResult: boolean | undefined;
+let _cacheTimestamp: number | undefined;
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+/** @internal Visible for testing – resets the memoized credential probe state. */
+export function _resetCredentialCache(): void {
+  _cachedResult = undefined;
+  _cacheTimestamp = undefined;
+}
+
 export async function hasAwsCredentials(env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
   if (env.AWS_ACCESS_KEY_ID?.trim() && env.AWS_SECRET_ACCESS_KEY?.trim()) {
     return true;
@@ -382,6 +397,22 @@ export async function hasAwsCredentials(env: NodeJS.ProcessEnv = process.env): P
   if (CREDENTIAL_ENV_VARS.some((k) => env[k]?.trim())) {
     return true;
   }
+
+  // Only cache when using the real process.env (production path).
+  // Test callers passing a custom env object bypass the cache.
+  if (env === process.env) {
+    if (_cachedResult !== undefined && Date.now() - _cacheTimestamp! < CACHE_TTL_MS) {
+      return _cachedResult;
+    }
+    const result = await probeAwsCredentials();
+    _cachedResult = result;
+    _cacheTimestamp = Date.now();
+    return result;
+  }
+  return probeAwsCredentials();
+}
+
+async function probeAwsCredentials(): Promise<boolean> {
   const credentialProviderSdk = await loadCredentialProviderSdk();
   if (!credentialProviderSdk) {
     return false;
@@ -396,3 +427,4 @@ export async function hasAwsCredentials(env: NodeJS.ProcessEnv = process.env): P
     return false;
   }
 }
+

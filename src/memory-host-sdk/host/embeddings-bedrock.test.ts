@@ -31,6 +31,7 @@ let createBedrockEmbeddingProvider: typeof import("./embeddings-bedrock.js").cre
 let resolveBedrockEmbeddingClient: typeof import("./embeddings-bedrock.js").resolveBedrockEmbeddingClient;
 let normalizeBedrockEmbeddingModel: typeof import("./embeddings-bedrock.js").normalizeBedrockEmbeddingModel;
 let hasAwsCredentials: typeof import("./embeddings-bedrock.js").hasAwsCredentials;
+let _resetCredentialCache: typeof import("./embeddings-bedrock.js")._resetCredentialCache;
 
 beforeAll(async () => {
   ({
@@ -38,6 +39,7 @@ beforeAll(async () => {
     resolveBedrockEmbeddingClient,
     normalizeBedrockEmbeddingModel,
     hasAwsCredentials,
+    _resetCredentialCache,
   } = await import("./embeddings-bedrock.js"));
 });
 
@@ -57,6 +59,7 @@ describe("bedrock embedding provider", () => {
     defaultProviderMock.mockClear();
     resolveCredentialsMock.mockReset();
     sendMock.mockReset();
+    _resetCredentialCache();
   });
 
   // --- Normalization ---
@@ -188,6 +191,15 @@ describe("bedrock embedding provider", () => {
   it("returns false with no creds", async () => {
     resolveCredentialsMock.mockRejectedValue(new Error("no aws credentials"));
     await expect(hasAwsCredentials({} as NodeJS.ProcessEnv)).resolves.toBe(false);
+  });
+  it("probes SDK only once per call with custom env (memoized for process.env)", async () => {
+    resolveCredentialsMock.mockResolvedValue({ accessKeyId: "AKIAEXAMPLE" });
+    // Custom env objects bypass the cache, so each call invokes the SDK.
+    const env1 = {} as NodeJS.ProcessEnv;
+    const env2 = {} as NodeJS.ProcessEnv;
+    await expect(hasAwsCredentials(env1)).resolves.toBe(true);
+    await expect(hasAwsCredentials(env2)).resolves.toBe(true);
+    expect(defaultProviderMock).toHaveBeenCalledTimes(2);
   });
 
   // --- Titan V2 ---
