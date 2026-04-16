@@ -330,7 +330,7 @@ describe("buildAuthChoiceOptions", () => {
         providerId: "openai-codex",
         methodId: "oauth",
         choiceId: "openai-codex",
-        choiceLabel: "OpenAI Codex (ChatGPT OAuth)",
+        choiceLabel: "OpenAI Codex (Codex OAuth)",
         deprecatedChoiceIds: ["codex-cli"],
       },
     ]);

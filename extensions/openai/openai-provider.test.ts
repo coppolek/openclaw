@@ -49,6 +49,12 @@ function runWrappedPayloadCase(params: {
 }
 
 describe("buildOpenAIProvider", () => {
+  it("uses API key groupHint for onboarding auth picker", () => {
+    const provider = buildOpenAIProvider();
+    const apiKey = provider.auth.find((method) => method.id === "api-key");
+    expect(apiKey?.wizard?.groupHint).toBe("API key");
+  });
+
   it("resolves gpt-5.4 mini and nano from GPT-5 small-model templates", () => {
     const provider = buildOpenAIProvider();
     const registry = {
