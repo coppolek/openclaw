@@ -58,6 +58,7 @@ const ANTHROPIC_SONNET_TEMPLATE_MODEL_IDS = ["claude-sonnet-4-5", "claude-sonnet
 const ANTHROPIC_MODERN_MODEL_PREFIXES = [
   "claude-opus-4-7",
   "claude-sonnet-4-7",
+  "claude-sonnet-4.7",
   "claude-opus-4-6",
   "claude-sonnet-4-6",
   "claude-opus-4-5",

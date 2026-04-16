@@ -251,7 +251,7 @@ describe("anthropic provider replay hooks", () => {
       });
     });
 
-    it.each(["claude-opus-4-7", "claude-sonnet-4-7"])(
+    it.each(["claude-opus-4-7", "claude-sonnet-4-7", "claude-sonnet-4.7"])(
       "marks %s as a modern model",
       async (modelId) => {
         const provider = await registerSingleProviderPlugin(anthropicPlugin);
@@ -265,7 +265,7 @@ describe("anthropic provider replay hooks", () => {
       },
     );
 
-    it.each(["claude-opus-4-7", "claude-sonnet-4-7"])(
+    it.each(["claude-opus-4-7", "claude-sonnet-4-7", "claude-sonnet-4.7"])(
       "uses adaptive thinking for %s",
       async (modelId) => {
         const provider = await registerSingleProviderPlugin(anthropicPlugin);
