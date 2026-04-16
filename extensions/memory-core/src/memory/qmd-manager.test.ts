@@ -39,15 +39,16 @@ type MockChild = EventEmitter & {
 function createMockChild(params?: { autoClose?: boolean; closeDelayMs?: number }): MockChild {
   const stdout = new EventEmitter();
   const stderr = new EventEmitter();
-  const child = new EventEmitter() as MockChild;
-  child.stdout = stdout;
-  child.stderr = stderr;
-  child.closeWith = (code = 0) => {
-    child.emit("close", code);
-  };
-  child.kill = () => {
-    // Let timeout rejection win in tests that simulate hung QMD commands.
-  };
+  const child = Object.assign(new EventEmitter(), {
+    stdout,
+    stderr,
+    closeWith(code: number | null = 0) {
+      child.emit("close", code);
+    },
+    kill() {
+      // Let timeout rejection win in tests that simulate hung QMD commands.
+    },
+  });
   if (params?.autoClose !== false) {
     const delayMs = params?.closeDelayMs ?? 0;
     if (delayMs <= 0) {
@@ -134,7 +135,7 @@ import { QmdMemoryManager } from "./qmd-manager.js";
 const spawnMock = mockedSpawn as unknown as Mock;
 const originalPath = process.env.PATH;
 const originalPathExt = process.env.PATHEXT;
-const originalWindowsPath = (process.env as NodeJS.ProcessEnv & { Path?: string }).Path;
+const originalWindowsPath = process.env.Path;
 
 describe("QmdMemoryManager", () => {
   let fixtureRoot: string;
@@ -269,9 +270,9 @@ describe("QmdMemoryManager", () => {
       process.env.PATHEXT = originalPathExt;
     }
     if (originalWindowsPath === undefined) {
-      delete (process.env as NodeJS.ProcessEnv & { Path?: string }).Path;
+      delete process.env.Path;
     } else {
-      (process.env as NodeJS.ProcessEnv & { Path?: string }).Path = originalWindowsPath;
+      process.env.Path = originalWindowsPath;
     }
     delete (globalThis as Record<PropertyKey, unknown>)[MCPORTER_STATE_KEY];
     delete (globalThis as Record<PropertyKey, unknown>)[QMD_EMBED_QUEUE_KEY];
@@ -423,7 +424,7 @@ describe("QmdMemoryManager", () => {
 
     const { manager } = await createManager({ mode: "full" });
     expect(watchMock).toHaveBeenCalledTimes(1);
-    const watcher = watchMock.mock.results[0]?.value as EventEmitter & { close: Mock };
+    const watcher = watchMock.mock.results[0]?.value;
     const initialUpdateCalls = spawnMock.mock.calls.filter((call) => call[1]?.[0] === "update");
     expect(initialUpdateCalls).toHaveLength(0);
 
@@ -2925,7 +2926,7 @@ describe("QmdMemoryManager", () => {
               return [
                 {
                   collection: "sessions-main",
-                  path: `${String(arg)}.md`,
+                  path: `${arg}.md`,
                 },
               ];
             default:
@@ -3994,6 +3995,119 @@ describe("QmdMemoryManager", () => {
     await expect(
       manager.search("missing", { sessionKey: "agent:main:slack:dm:u123" }),
     ).rejects.toThrow(/qmd query returned invalid JSON/);
+    await manager.close();
+  });
+
+  it("falls back to direct qmd query when mcporter returns an empty result set", async () => {
+    cfg = {
+      ...cfg,
+      memory: {
+        backend: "qmd",
+        qmd: {
+          includeDefaultMemory: false,
+          searchMode: "search",
+          update: { interval: "0s", debounceMs: 60_000, onBoot: false },
+          paths: [{ path: workspaceDir, pattern: "**/*.md", name: "workspace" }],
+          mcporter: { enabled: true, serverName: "qmd", startDaemon: false },
+        },
+      },
+    } as OpenClawConfig;
+
+    spawnMock.mockImplementation((cmd: string, args: string[]) => {
+      const child = createMockChild({ autoClose: false });
+      if (isMcporterCommand(cmd) && args[0] === "call") {
+        emitAndClose(child, "stdout", JSON.stringify({ results: [] }));
+        return child;
+      }
+      if (cmd === "qmd" && args[0] === "query") {
+        emitAndClose(
+          child,
+          "stdout",
+          JSON.stringify([
+            {
+              docid: path.join(workspaceDir, "file.md"),
+              file: path.join(workspaceDir, "file.md"),
+              collection: "workspace",
+              score: 0.9,
+              snippet: "fallback hit",
+            },
+          ]),
+        );
+        return child;
+      }
+      emitAndClose(child, "stdout", "[]");
+      return child;
+    });
+
+    const { manager } = await createManager();
+    vi.spyOn(
+      manager as unknown as { resolveDocLocation: (docid: string) => Promise<unknown> },
+      "resolveDocLocation",
+    ).mockResolvedValue({
+      rel: "file.md",
+      abs: path.join(workspaceDir, "file.md"),
+      source: "memory",
+    });
+    await expect(
+      manager.search("fallback", { sessionKey: "agent:main:slack:dm:u123" }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        path: "file.md",
+        source: "memory",
+        snippet: "fallback hit",
+      }),
+    ]);
+    expect(spawnMock).toHaveBeenCalledWith(
+      "qmd",
+      expect.arrayContaining(["query"]),
+      expect.anything(),
+    );
+    await manager.close();
+  });
+
+  it("keeps empty success when direct qmd fallback also fails", async () => {
+    cfg = {
+      ...cfg,
+      memory: {
+        backend: "qmd",
+        qmd: {
+          includeDefaultMemory: false,
+          searchMode: "query",
+          update: { interval: "0s", debounceMs: 60_000, onBoot: false },
+          paths: [{ path: workspaceDir, pattern: "**/*.md", name: "workspace" }],
+          mcporter: { enabled: true, serverName: "qmd", startDaemon: false },
+        },
+      },
+    } as OpenClawConfig;
+
+    spawnMock.mockImplementation((cmd: string, args: string[]) => {
+      const child = createMockChild({ autoClose: false });
+      if (isMcporterCommand(cmd) && args[0] === "call") {
+        emitAndClose(child, "stdout", JSON.stringify({ results: [] }));
+        return child;
+      }
+      if (cmd === "qmd" && args[0] === "query") {
+        queueMicrotask(() => child.emit("error", new Error("qmd unavailable")));
+        return child;
+      }
+      emitAndClose(child, "stdout", "[]");
+      return child;
+    });
+
+    const onDebug = vi.fn();
+    const { manager } = await createManager();
+    await expect(
+      manager.search("fallback", {
+        sessionKey: "agent:main:slack:dm:u123",
+        onDebug,
+      }),
+    ).resolves.toEqual([]);
+    expect(onDebug).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backend: "qmd",
+        fallback: "mcporter-empty-result",
+      }),
+    );
     await manager.close();
   });
 
