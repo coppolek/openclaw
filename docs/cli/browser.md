@@ -50,11 +50,14 @@ Detailed guidance: [Browser troubleshooting](/tools/browser#cdp-startup-failure-
 ## Lifecycle
 
 ```bash
+openclaw browser doctor
 openclaw browser status
 openclaw browser start
 openclaw browser stop
 openclaw browser --browser-profile openclaw reset-profile
 ```
+
+`openclaw browser doctor` runs a focused health probe for the selected profile and reports browser-control reachability, launch prerequisites, and CDP or Chrome MCP readiness.
 
 Notes:
 
