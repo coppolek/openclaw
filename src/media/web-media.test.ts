@@ -17,6 +17,7 @@ let stateDir = "";
 let canvasPngFile = "";
 let workspaceDir = "";
 let workspacePngFile = "";
+let htmlFile = "";
 
 beforeAll(async () => {
   ({ loadWebMedia } = await import("./web-media.js"));
@@ -27,6 +28,8 @@ beforeAll(async () => {
   workspacePngFile = path.join(workspaceDir, "chart.png");
   await fs.mkdir(workspaceDir, { recursive: true });
   await fs.writeFile(workspacePngFile, Buffer.from(TINY_PNG_BASE64, "base64"));
+  htmlFile = path.join(fixtureRoot, "report.html");
+  await fs.writeFile(htmlFile, "<!doctype html><html><body>ok</body></html>", "utf8");
   stateDir = resolveStateDir();
   canvasPngFile = path.join(
     stateDir,
@@ -155,21 +158,6 @@ describe("loadWebMedia", () => {
     expect(result.buffer.length).toBeGreaterThan(0);
   });
 
-  it("rejects host-read text files outside local roots", async () => {
-    const secretFile = path.join(fixtureRoot, "secret.txt");
-    await fs.writeFile(secretFile, "secret", "utf8");
-    await expect(
-      loadWebMedia(secretFile, {
-        maxBytes: 1024 * 1024,
-        localRoots: "any",
-        readFile: async (filePath) => await fs.readFile(filePath),
-        hostReadCapability: true,
-      }),
-    ).rejects.toMatchObject({
-      code: "path-not-allowed",
-    });
-  });
-
   it("rejects renamed host-read text files even when the extension looks allowed", async () => {
     const disguisedPdf = path.join(fixtureRoot, "secret.pdf");
     await fs.writeFile(disguisedPdf, "secret", "utf8");
@@ -183,6 +171,19 @@ describe("loadWebMedia", () => {
     ).rejects.toMatchObject({
       code: "path-not-allowed",
     });
+  });
+
+  it("allows host-read HTML files when MIME is inferred from the file path fallback", async () => {
+    const result = await loadWebMedia(htmlFile, {
+      maxBytes: 1024 * 1024,
+      localRoots: "any",
+      readFile: async (filePath) => await fs.readFile(filePath),
+      hostReadCapability: true,
+    });
+    expect(result.kind).toBe("document");
+    expect(result.contentType).toBe("text/html");
+    expect(result.fileName).toBe("report.html");
+    expect(result.buffer.toString("utf8")).toContain("<!doctype html>");
   });
 
   it("allows host-read CSV files", async () => {
@@ -209,6 +210,36 @@ describe("loadWebMedia", () => {
     });
     expect(result.kind).toBe("document");
     expect(result.contentType).toBe("text/markdown");
+  });
+
+  it("allows host-read plain-text files when MIME is inferred from the file path fallback", async () => {
+    const txtFile = path.join(fixtureRoot, "note.txt");
+    await fs.writeFile(txtFile, "hello world\nline two\n", "utf8");
+    const result = await loadWebMedia(txtFile, {
+      maxBytes: 1024 * 1024,
+      localRoots: "any",
+      readFile: async (filePath) => await fs.readFile(filePath),
+      hostReadCapability: true,
+    });
+    expect(result.kind).toBe("document");
+    expect(result.contentType).toBe("text/plain");
+    expect(result.fileName).toBe("note.txt");
+  });
+
+  it("rejects a disguised .txt file that is actually binary", async () => {
+    const disguisedTxt = path.join(fixtureRoot, "secret.txt");
+    const binaryBytes = Buffer.from([0x00, 0xff, 0xfe, 0x00, 0x80, 0x81, 0x82, 0x00]);
+    await fs.writeFile(disguisedTxt, binaryBytes);
+    await expect(
+      loadWebMedia(disguisedTxt, {
+        maxBytes: 1024 * 1024,
+        localRoots: "any",
+        readFile: async (filePath) => await fs.readFile(filePath),
+        hostReadCapability: true,
+      }),
+    ).rejects.toMatchObject({
+      code: "path-not-allowed",
+    });
   });
 
   it("rejects binary data disguised as a CSV file", async () => {

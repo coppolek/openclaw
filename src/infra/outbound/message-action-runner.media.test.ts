@@ -378,13 +378,16 @@ describe("runMessageAction media behavior", () => {
       }
     });
 
-    it("rejects host-local text attachments even when fs root expansion is enabled", async () => {
+    it("rejects host-local binary attachments disguised as text even when fs root expansion is enabled", async () => {
       await restoreRealMediaLoader();
 
       const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "msg-attachment-text-"));
       try {
         const outsidePath = path.join(tempDir, "secret.txt");
-        await fs.writeFile(outsidePath, "secret", "utf8");
+        await fs.writeFile(
+          outsidePath,
+          Buffer.from([0x00, 0xff, 0xfe, 0x00, 0x80, 0x81, 0x82, 0x00]),
+        );
 
         await expect(
           runMessageAction({
@@ -400,7 +403,7 @@ describe("runMessageAction media behavior", () => {
               message: "caption",
             },
           }),
-        ).rejects.toThrow(/Host-local media sends only allow/i);
+        ).rejects.toThrow(/hostReadCapability|Host-local media sends only allow/i);
       } finally {
         await fs.rm(tempDir, { recursive: true, force: true });
       }

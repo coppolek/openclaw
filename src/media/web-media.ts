@@ -87,9 +87,17 @@ const HOST_READ_ALLOWED_DOCUMENT_MIMES = new Set([
   "text/csv",
   "text/markdown",
 ]);
-// file-type returns undefined (no magic bytes) for plain-text formats like CSV and
-// Markdown, so host-read needs an explicit "this really decodes as text" fallback.
-const HOST_READ_TEXT_PLAIN_ALIASES = new Set(["text/csv", "text/markdown"]);
+const HOST_READ_ALLOWED_FALLBACK_DOCUMENT_MIMES = new Set([
+  "text/html",
+  "text/xml",
+  "text/css",
+  "application/xml",
+]);
+// file-type returns undefined (no magic bytes) for plain-text formats like CSV,
+// Markdown, and plain text, so host-read needs an explicit "this really decodes
+// as text" fallback. Binary files renamed with these extensions are rejected by
+// isValidatedHostReadText (printable-ratio check).
+const HOST_READ_TEXT_PLAIN_ALIASES = new Set(["text/csv", "text/markdown", "text/plain"]);
 const MB = 1024 * 1024;
 
 function getTextStats(text: string): { printableRatio: number } {
@@ -252,12 +260,9 @@ function assertHostReadMediaAllowed(params: {
   if (
     params.kind === "document" &&
     normalizedMime &&
-    HOST_READ_ALLOWED_DOCUMENT_MIMES.has(normalizedMime)
+    HOST_READ_ALLOWED_FALLBACK_DOCUMENT_MIMES.has(normalizedMime)
   ) {
-    throw new LocalMediaAccessError(
-      "path-not-allowed",
-      `Host-local media sends require buffer-verified media/document types (got fallback ${normalizedMime}).`,
-    );
+    return;
   }
   throw new LocalMediaAccessError(
     "path-not-allowed",
