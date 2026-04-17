@@ -41,7 +41,7 @@ const HEARTBEAT_ISOLATED_SESSION_SUFFIX = ":heartbeat";
 
 type Logger = Pick<OpenClawPluginApi["logger"], "info" | "warn" | "error">;
 
-type CronSchedule = { kind: "cron"; expr: string; tz?: string };
+type CronSchedule = { kind: "cron"; expr: string; tz?: string; staggerMs?: number };
 type CronPayload = { kind: "systemEvent"; text: string };
 type ManagedCronJobCreate = {
   name: string;
@@ -72,6 +72,7 @@ type ManagedCronJobLike = {
     kind?: string;
     expr?: string;
     tz?: string;
+    staggerMs?: number;
   };
   sessionTarget?: string;
   wakeMode?: string;
@@ -98,6 +99,7 @@ export type ShortTermPromotionDreamingConfig = {
   enabled: boolean;
   cron: string;
   timezone?: string;
+  staggerMs?: number;
   limit: number;
   minScore: number;
   minRecallCount: number;
@@ -154,6 +156,7 @@ function buildManagedDreamingCronJob(
       kind: "cron",
       expr: config.cron,
       ...(config.timezone ? { tz: config.timezone } : {}),
+      ...(config.staggerMs !== undefined ? { staggerMs: config.staggerMs } : {}),
     },
     sessionTarget: "main",
     wakeMode: "now",
@@ -246,10 +249,13 @@ function buildManagedDreamingPatch(
   const scheduleKind = normalizeLowercaseStringOrEmpty(normalizeTrimmedString(job.schedule?.kind));
   const scheduleExpr = normalizeTrimmedString(job.schedule?.expr);
   const scheduleTz = normalizeTrimmedString(job.schedule?.tz);
+  const scheduleStaggerMs =
+    typeof job.schedule?.staggerMs === "number" ? job.schedule.staggerMs : undefined;
   if (
     scheduleKind !== "cron" ||
     !compareOptionalStrings(scheduleExpr, desired.schedule.expr) ||
-    !compareOptionalStrings(scheduleTz, desired.schedule.tz)
+    !compareOptionalStrings(scheduleTz, desired.schedule.tz) ||
+    scheduleStaggerMs !== desired.schedule.staggerMs
   ) {
     patch.schedule = desired.schedule;
   }
@@ -384,6 +390,7 @@ export function resolveShortTermPromotionDreamingConfig(params: {
     enabled: resolved.enabled,
     cron: resolved.cron,
     ...(resolved.timezone ? { timezone: resolved.timezone } : {}),
+    ...(resolved.staggerMs !== undefined ? { staggerMs: resolved.staggerMs } : {}),
     limit: resolved.limit,
     minScore: resolved.minScore,
     minRecallCount: resolved.minRecallCount,
@@ -529,7 +536,7 @@ export async function runShortTermDreamingPromotionIfTriggered(params: {
 
   if (params.config.verboseLogging) {
     params.logger.info(
-      `memory-core: dreaming verbose enabled (cron=${params.config.cron}, limit=${params.config.limit}, minScore=${params.config.minScore.toFixed(3)}, minRecallCount=${params.config.minRecallCount}, minUniqueQueries=${params.config.minUniqueQueries}, recencyHalfLifeDays=${recencyHalfLifeDays}, maxAgeDays=${params.config.maxAgeDays ?? "none"}, workspaces=${workspaces.length}).`,
+      `memory-core: dreaming verbose enabled (cron=${params.config.cron}, staggerMs=${params.config.staggerMs ?? "default"}, limit=${params.config.limit}, minScore=${params.config.minScore.toFixed(3)}, minRecallCount=${params.config.minRecallCount}, minUniqueQueries=${params.config.minUniqueQueries}, recencyHalfLifeDays=${recencyHalfLifeDays}, maxAgeDays=${params.config.maxAgeDays ?? "none"}, workspaces=${workspaces.length}).`,
     );
   }
 
@@ -659,6 +666,7 @@ export function registerShortTermPromotionDreaming(api: OpenClawPluginApi): void
       config.enabled ? "enabled" : "disabled",
       config.cron,
       config.timezone ?? "",
+      String(config.staggerMs ?? ""),
       String(config.limit),
       String(config.minScore),
       String(config.minRecallCount),
