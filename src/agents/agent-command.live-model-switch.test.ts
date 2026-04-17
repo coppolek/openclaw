@@ -63,7 +63,7 @@ vi.mock("./command/session-store.runtime.js", () => ({
 }));
 
 vi.mock("./command/session.js", () => ({
-  resolveSession: (arg: unknown) => state.resolveSessionMock(arg),
+  resolveSession: () => state.resolveSessionMock(),
 }));
 
 vi.mock("../sessions/session-key-utils.js", () => ({
