@@ -325,9 +325,8 @@ search API.
 
 - Provider id: `minimax`
 - Structured results: titles, URLs, snippets, related queries
-- Preferred env var: `MINIMAX_CODE_PLAN_KEY`
-- Accepted env alias: `MINIMAX_CODING_API_KEY`
-- Compatibility fallback: `MINIMAX_API_KEY` when it already points at a coding-plan token
+- Preferred env var: `MINIMAX_API_KEY`
+- Accepted aliases: `MINIMAX_CODE_PLAN_KEY`, `MINIMAX_CODING_API_KEY`
 - Region reuse: `plugins.entries.minimax.config.webSearch.region`, then `MINIMAX_API_HOST`, then MiniMax provider base URLs
 - Search stays on provider id `minimax`; OAuth CN/global setup can still steer region indirectly through `models.providers.minimax-portal.baseUrl`
 

@@ -192,8 +192,8 @@ const MiniMaxSearchSchema = Type.Object({
 function missingMiniMaxKeyPayload() {
   return {
     error: "missing_minimax_api_key",
-    message: `web_search (minimax) needs a MiniMax Coding Plan key. Run \`${formatCliCommand("openclaw configure --section web")}\` to store it, or set MINIMAX_CODE_PLAN_KEY, MINIMAX_CODING_API_KEY, or MINIMAX_API_KEY in the Gateway environment.`,
-    docs: "https://docs.openclaw.ai/tools/web",
+    message: `web_search (minimax) needs a MiniMax API key with Token Plan access. Run \`${formatCliCommand("openclaw configure --section web")}\` to store it, or set MINIMAX_API_KEY in the Gateway environment. Subscribe at https://platform.minimax.io/subscribe/token-plan if needed.`,
+    docs: "https://docs.openclaw.ai/tools/minimax-search",
   };
 }
 
@@ -275,10 +275,11 @@ export function createMiniMaxWebSearchProvider(): WebSearchProviderPlugin {
   return {
     id: "minimax",
     label: "MiniMax Search",
-    hint: "Structured results via MiniMax Coding Plan search API",
-    credentialLabel: "MiniMax Coding Plan key",
-    envVars: [...MINIMAX_CODING_PLAN_ENV_VARS],
-    placeholder: "sk-cp-...",
+    hint: "Native MiniMax web search · requires Token Plan",
+    onboardingScopes: ["text-inference"],
+    credentialLabel: "MiniMax API key",
+    envVars: [...MINIMAX_CODING_PLAN_ENV_VARS, "MINIMAX_API_KEY"],
+    placeholder: "sk-...",
     signupUrl: "https://platform.minimax.io/user-center/basic-information/interface-key",
     docsUrl: "https://docs.openclaw.ai/tools/minimax-search",
     autoDetectOrder: 15,

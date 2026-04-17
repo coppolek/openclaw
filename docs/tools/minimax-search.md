@@ -2,7 +2,7 @@
 summary: "MiniMax Search via the Coding Plan search API"
 read_when:
   - You want to use MiniMax for web_search
-  - You need a MiniMax Coding Plan key
+  - You need a MiniMax API key for web search
   - You want MiniMax CN/global search host guidance
 title: "MiniMax Search"
 ---
@@ -13,25 +13,41 @@ OpenClaw supports MiniMax as a `web_search` provider through the MiniMax
 Coding Plan search API. It returns structured search results with titles, URLs,
 snippets, and related queries.
 
-## Get a Coding Plan key
+## Quick start
+
+When `MINIMAX_API_KEY` is set, OpenClaw auto-detects it and offers MiniMax
+Search during web search setup. No separate MCP server or additional install
+is needed -- the MiniMax search plugin is built into OpenClaw.
+
+<Note>
+  MiniMax web search uses the [Coding Plan search API](https://platform.minimax.io/docs/token-plan/mcp-guide#web_search).
+  Your MiniMax API key must have **Token Plan** access for search to work.
+  If you haven't subscribed yet, visit the
+  [Token Plan subscription page](https://platform.minimax.io/subscribe/token-plan).
+</Note>
+
+## Setup
 
 <Steps>
-  <Step title="Create a key">
-    Create or copy a MiniMax Coding Plan key from
+  <Step title="Get a MiniMax API key">
+    Create or copy a key from
     [MiniMax Platform](https://platform.minimax.io/user-center/basic-information/interface-key).
+    Make sure your account has Token Plan access enabled.
   </Step>
   <Step title="Store the key">
-    Set `MINIMAX_CODE_PLAN_KEY` in the Gateway environment, or configure via:
+    Set `MINIMAX_API_KEY` in the Gateway environment, or configure via:
 
     ```bash
     openclaw configure --section web
     ```
 
+    OpenClaw will detect the key and present MiniMax Search as an option.
+
   </Step>
 </Steps>
 
-OpenClaw also accepts `MINIMAX_CODING_API_KEY` as an env alias. `MINIMAX_API_KEY`
-is still read as a compatibility fallback when it already points at a coding-plan token.
+OpenClaw also accepts the dedicated env aliases `MINIMAX_CODE_PLAN_KEY` and
+`MINIMAX_CODING_API_KEY`. All three are checked during auto-detection.
 
 ## Config
 
@@ -42,7 +58,7 @@ is still read as a compatibility fallback when it already points at a coding-pla
       minimax: {
         config: {
           webSearch: {
-            apiKey: "sk-cp-...", // optional if MINIMAX_CODE_PLAN_KEY is set
+            apiKey: "sk-...", // optional if MINIMAX_API_KEY is set
             region: "global", // or "cn"
           },
         },
@@ -59,8 +75,8 @@ is still read as a compatibility fallback when it already points at a coding-pla
 }
 ```
 
-**Environment alternative:** set `MINIMAX_CODE_PLAN_KEY` in the Gateway environment.
-For a gateway install, put it in `~/.openclaw/.env`.
+**Environment alternative:** set `MINIMAX_API_KEY` (or `MINIMAX_CODE_PLAN_KEY`)
+in the Gateway environment. For a gateway install, put it in `~/.openclaw/.env`.
 
 ## Region selection
 
@@ -97,3 +113,4 @@ Provider-specific filters are not currently supported.
 
 - [Web Search overview](/tools/web) -- all providers and auto-detection
 - [MiniMax](/providers/minimax) -- model, image, speech, and auth setup
+- [MiniMax web search API reference](https://platform.minimax.io/docs/token-plan/mcp-guide#web_search) -- underlying search API details (external)
