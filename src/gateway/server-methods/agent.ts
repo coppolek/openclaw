@@ -720,7 +720,7 @@ export const agentHandlers: GatewayRequestHandlers = {
           store[primaryKey] = merged;
           return { denied: false as const, entry: merged };
         });
-        if (storeResult.denied) {
+        if (storeResult?.denied) {
           respond(
             false,
             undefined,
@@ -728,7 +728,7 @@ export const agentHandlers: GatewayRequestHandlers = {
           );
           return;
         }
-        sessionEntry = storeResult.entry;
+        sessionEntry = storeResult?.entry;
       } else {
         // No store path - use initial entry for policy check and build (fallback)
         const sendPolicy = resolveSendPolicy({
@@ -782,7 +782,7 @@ export const agentHandlers: GatewayRequestHandlers = {
           space: resolvedGroupSpace ?? entry?.space,
         });
       }
-      resolvedSessionId = sessionEntry.sessionId;
+      resolvedSessionId = sessionEntry?.sessionId ?? generatedSessionId;
       if (canonicalSessionKey === mainSessionKey || canonicalSessionKey === "global") {
         context.addChatRun(idem, {
           sessionKey: canonicalSessionKey,
