@@ -36,7 +36,7 @@ vi.mock("./command/attempt-execution.runtime.js", () => ({
   persistAcpTurnTranscript: vi.fn(),
   persistSessionEntry: vi.fn(),
   prependInternalEventContext: (_body: string) => _body,
-  runAgentAttempt: (...args: unknown[]) => state.runAgentAttemptMock(...args),
+  runAgentAttempt: (arg: unknown) => state.runAgentAttemptMock(arg),
   sessionFileHasContent: vi.fn(async () => false),
 }));
 
@@ -526,7 +526,7 @@ describe("agentCommand – LiveSessionModelSwitchError retry", () => {
         sessionId: "session-1",
         updatedAt: Date.now(),
         spawnedBy: "agent:main:subagent:stale-child",
-      },
+      } as { sessionId: string; updatedAt: number; spawnedBy?: string },
       sessionStore: {},
       storePath: "/tmp/store.json",
       isNewSession: false,
