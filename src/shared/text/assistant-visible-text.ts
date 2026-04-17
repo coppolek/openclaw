@@ -205,9 +205,9 @@ interface LiteralToolBlockEnd {
 }
 
 const LITERAL_TOOL_TAG_BEFORE_RE =
-  /\b(?:use|type|write|include|document|example|literal(?:ly)?|syntax)\b[^.!?\n]*$/i;
+  /(?:\b(?:use|type|write|include|document|example|literal(?:ly)?|syntax)\b|\b(?:close|closing)\b[^.!?\n]*\btag\b)[^.!?\n]*$/i;
 const LITERAL_TOOL_TAG_MULTILINE_BEFORE_RE =
-  /(?:^|[\n.!?]\s*)(?:(?:use|type|write|include|document)\b[^.!?\n]*\b(?:close|closing|example|literal(?:ly)?|syntax|tag)\b|(?:example|syntax)\b[^.!?\n]*)[ \t:;]*(?:\r?\n[ \t]*)$/i;
+  /(?:^|[\n.!?]\s*)(?:(?:use|type|write|include|document)\b[^.!?\n]*\b(?:close|closing|example|literal(?:ly)?|syntax|tag)\b|(?:example|literal(?:ly)?|syntax)\b[^.!?\n]*|\b(?:close|closing)\b[^.!?\n]*\btag\b[^.!?\n]*)[ \t:;]*(?:\r?\n[ \t]*)$/i;
 const LITERAL_TOOL_TAG_AFTER_RE =
   /^[^.!?\n]*\b(?:close|closing|docs?|documentation|example|literal(?:ly)?|syntax|tag)\b/i;
 const LITERAL_TOOL_PAYLOAD_AFTER_RE =

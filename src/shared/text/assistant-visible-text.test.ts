@@ -231,6 +231,7 @@ describe("stripAssistantInternalScaffolding", () => {
       expectVisibleText("Use </tool_call> to close the tag.", "Use </tool_call> to close the tag.");
       expectVisibleText("Use </tool_call>.", "Use </tool_call>.");
       expectVisibleText("Example: </tool_result>", "Example: </tool_result>");
+      expectVisibleText("Closing tag: </tool_call>", "Closing tag: </tool_call>");
     });
 
     it("preserves newline-formatted literal closing-tag syntax", () => {
@@ -239,6 +240,8 @@ describe("stripAssistantInternalScaffolding", () => {
         "Use this closing tag:\n</tool_call>",
       );
       expectVisibleText("Example:\n</tool_result>", "Example:\n</tool_result>");
+      expectVisibleText("Literal:\n</tool_call>", "Literal:\n</tool_call>");
+      expectVisibleText("Closing tag:\n</function_calls>", "Closing tag:\n</function_calls>");
     });
 
     it("preserves literal JSON tool-call examples in instructional prose", () => {
