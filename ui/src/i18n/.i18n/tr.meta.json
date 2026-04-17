@@ -1,11 +1,11 @@
 {
   "fallbackKeys": [],
-  "generatedAt": "2026-04-17T13:25:26.794Z",
+  "generatedAt": "2026-04-17T13:57:37.738Z",
   "locale": "tr",
   "model": "MiniMax-M2.7",
   "provider": "minimax-cn",
-  "sourceHash": "7845482ea0386ad3bbe823699584d1b064be730ddc6f0e51e1b336abfae26a62",
-  "totalKeys": 699,
-  "translatedKeys": 699,
+  "sourceHash": "4588340f2ef2de228d4c7ea730a33600571dd2c429df69bc64ef39866146ea98",
+  "totalKeys": 712,
+  "translatedKeys": 712,
   "workflow": 1
 }
