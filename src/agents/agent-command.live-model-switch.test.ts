@@ -41,7 +41,7 @@ vi.mock("./command/attempt-execution.runtime.js", () => ({
 }));
 
 vi.mock("./command/delivery.runtime.js", () => ({
-  deliverAgentCommandResult: (...args: unknown[]) => state.deliverAgentCommandResultMock(...args),
+  deliverAgentCommandResult: (arg: unknown) => state.deliverAgentCommandResultMock(arg),
 }));
 
 vi.mock("./command/run-context.js", () => ({
@@ -59,12 +59,11 @@ vi.mock("./command/run-context.js", () => ({
 }));
 
 vi.mock("./command/session-store.runtime.js", () => ({
-  updateSessionStoreAfterAgentRun: (...args: unknown[]) =>
-    state.updateSessionStoreAfterAgentRunMock(...args),
+  updateSessionStoreAfterAgentRun: (arg: unknown) => state.updateSessionStoreAfterAgentRunMock(arg),
 }));
 
 vi.mock("./command/session.js", () => ({
-  resolveSession: (...args: unknown[]) => state.resolveSessionMock(...args),
+  resolveSession: (arg: unknown) => state.resolveSessionMock(arg),
 }));
 
 vi.mock("../sessions/session-key-utils.js", () => ({
@@ -154,10 +153,10 @@ vi.mock("../config/sessions/transcript-resolve.runtime.js", () => ({
 }));
 
 vi.mock("../infra/agent-events.js", () => ({
-  clearAgentRunContext: (...args: unknown[]) => state.clearAgentRunContextMock(...args),
-  emitAgentEvent: (...args: unknown[]) => state.emitAgentEventMock(...args),
+  clearAgentRunContext: (arg: unknown) => state.clearAgentRunContextMock(arg),
+  emitAgentEvent: (arg: unknown) => state.emitAgentEventMock(arg),
   onAgentEvent: vi.fn(),
-  registerAgentRunContext: (...args: unknown[]) => state.registerAgentRunContextMock(...args),
+  registerAgentRunContext: (arg: unknown) => state.registerAgentRunContextMock(arg),
 }));
 
 vi.mock("../infra/outbound/session-context.js", () => ({
@@ -447,8 +446,8 @@ describe("agentCommand – LiveSessionModelSwitchError retry", () => {
       };
     });
 
-    state.runAgentAttemptMock.mockImplementation(async (...args: unknown[]) => {
-      const attemptParams = args[0] as { authProfileProvider?: string } | undefined;
+    state.runAgentAttemptMock.mockImplementation(async (arg: unknown) => {
+      const attemptParams = arg as { authProfileProvider?: string } | undefined;
       capturedAuthProfileProvider = attemptParams?.authProfileProvider;
       return makeSuccessResult("openai", "gpt-5.4");
     });
