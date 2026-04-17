@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  resolveAgentConfig,
   resolveAgentEffectiveModelPrimary,
   resolveAgentModelFallbacksOverride,
   resolveAgentWorkspaceDir,
@@ -12,10 +13,13 @@ import type { ModelCatalogEntry } from "../agents/model-catalog.js";
 import {
   inferUniqueProviderFromConfiguredModels,
   normalizeStoredOverrideModel,
+  legacyModelKey,
   parseModelRef,
+  modelKey,
   resolveConfiguredModelRef,
   resolveDefaultModelForAgent,
   resolvePersistedSelectedModelRef,
+  resolveThinkingDefault,
 } from "../agents/model-selection.js";
 import {
   getSessionDisplaySubagentRunByChildSessionKey,
@@ -1113,6 +1117,7 @@ export function buildGatewaySessionRow(params: {
   cfg: OpenClawConfig;
   storePath: string;
   store: Record<string, SessionEntry>;
+  catalog?: ModelCatalogEntry[];
   key: string;
   entry?: SessionEntry;
   now?: number;
@@ -1232,6 +1237,31 @@ export function buildGatewaySessionRow(params: {
         allowAsyncLoad: false,
       }),
     );
+  const selectedModelProvider = selectedModel?.provider ?? modelProvider ?? DEFAULT_PROVIDER;
+  const selectedModelId = selectedModel?.model ?? model ?? DEFAULT_MODEL;
+  const agentThinkingDefault = resolveAgentConfig(cfg, sessionAgentId)?.thinkingDefault;
+  const configuredModels = cfg.agents?.defaults?.models;
+  const selectedModelKey = modelKey(selectedModelProvider, selectedModelId);
+  const selectedLegacyModelKey = legacyModelKey(selectedModelProvider, selectedModelId);
+  const perModelThinking =
+    configuredModels?.[selectedModelKey]?.params?.thinking ??
+    (selectedLegacyModelKey
+      ? configuredModels?.[selectedLegacyModelKey]?.params?.thinking
+      : undefined);
+  const canResolveThinkingDefaultFromConfig =
+    Boolean(agentThinkingDefault) ||
+    Boolean(cfg.agents?.defaults?.thinkingDefault) ||
+    Boolean(perModelThinking);
+  const effectiveThinkingDefault =
+    agentThinkingDefault ??
+    (params.catalog || canResolveThinkingDefaultFromConfig
+      ? resolveThinkingDefault({
+          cfg,
+          provider: selectedModelProvider,
+          model: selectedModelId,
+          catalog: params.catalog,
+        })
+      : undefined);
 
   let derivedTitle: string | undefined;
   let lastMessagePreview: string | undefined;
@@ -1274,6 +1304,7 @@ export function buildGatewaySessionRow(params: {
     systemSent: entry?.systemSent,
     abortedLastRun: entry?.abortedLastRun,
     thinkingLevel: entry?.thinkingLevel,
+    effectiveThinkingDefault,
     fastMode: entry?.fastMode,
     verboseLevel: entry?.verboseLevel,
     traceLevel: entry?.traceLevel,
@@ -1329,9 +1360,10 @@ export function listSessionsFromStore(params: {
   cfg: OpenClawConfig;
   storePath: string;
   store: Record<string, SessionEntry>;
+  catalog?: ModelCatalogEntry[];
   opts: import("./protocol/index.js").SessionsListParams;
 }): SessionsListResult {
-  const { cfg, storePath, store, opts } = params;
+  const { cfg, storePath, store, catalog, opts } = params;
   const now = Date.now();
 
   const includeGlobal = opts.includeGlobal === true;
@@ -1397,6 +1429,7 @@ export function listSessionsFromStore(params: {
         cfg,
         storePath,
         store,
+        catalog,
         key,
         entry,
         now,

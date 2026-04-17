@@ -683,15 +683,21 @@ function resolveChatThinkingSelectState(state: AppViewState): ChatThinkingSelect
     typeof persisted === "string" && persisted.trim()
       ? (normalizeThinkLevel(persisted) ?? persisted.trim())
       : "";
+  const effectiveDefault =
+    typeof activeRow?.effectiveThinkingDefault === "string" && activeRow.effectiveThinkingDefault
+      ? (normalizeThinkLevel(activeRow.effectiveThinkingDefault) ??
+        activeRow.effectiveThinkingDefault.trim())
+      : "";
   const { provider, model } = resolveThinkingTargetModel(state);
   const defaultLevel =
-    provider && model
+    effectiveDefault ||
+    (provider && model
       ? resolveThinkingDefaultForModel({
           provider,
           model,
           catalog: state.chatModelCatalog ?? [],
         })
-      : "off";
+      : "off");
   return {
     currentOverride,
     defaultLabel: `Default (${defaultLevel})`,
