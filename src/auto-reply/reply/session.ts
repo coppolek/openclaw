@@ -596,9 +596,7 @@ export async function initSessionState(params: {
       ? (persistedSpawnedWorkspaceDir ?? baseEntry?.spawnedWorkspaceDir)
       : undefined,
     parentSessionKey: persistedParentSessionKey ?? baseEntry?.parentSessionKey,
-    forkedFromParent: preserveSpawnLineage
-      ? (persistedForkedFromParent ?? baseEntry?.forkedFromParent)
-      : undefined,
+    forkedFromParent: persistedForkedFromParent ?? baseEntry?.forkedFromParent,
     spawnDepth: preserveSpawnLineage ? (persistedSpawnDepth ?? baseEntry?.spawnDepth) : undefined,
     subagentRole: preserveSpawnLineage
       ? (persistedSubagentRole ?? baseEntry?.subagentRole)
