@@ -43,6 +43,7 @@ Docs: https://docs.openclaw.ai
 - Gateway/assistant media: require `operator.read` scope for assistant-media file and metadata requests on identity-bearing HTTP auth paths so callers without a read scope can no longer access assistant media. (#68175) Thanks @eleqtrizit.
 - Exec approvals/display: escape raw control characters (including newline and carriage return) in the shared and macOS approval-prompt command sanitizers, so trailing command payloads no longer render on hidden extra lines in the approval UI. (#68198)
 - OpenAI Codex/OAuth + Pi: keep imported Codex CLI OAuth bootstrap, Pi auth export, and runtime overlay handling aligned so Codex sessions survive refresh and health checks without leaking transient CLI state into saved auth files. Thanks @vincentkoc.
+- Gateway/chat: resolve overlapping assistant text duplication in chat stream assembler by adding a `replace` flag to the protocol and optimizing the `appendUniqueSuffix` heuristic. (#60063) Thanks @jlapenna.
 
 ## 2026.4.15
 
