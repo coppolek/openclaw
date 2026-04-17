@@ -256,8 +256,10 @@ function warnEscapedSkillPath(params: {
 function shouldEnforceContainedSkillPaths(source: string): boolean {
   // Repo-scoped and explicitly configured external roots are treated as untrusted
   // boundaries. Managed/personal skill roots are user-owned and may legitimately
-  // expose symlinked skill directories.
+  // expose symlinked skill directories, but bundled roots must stay confined to
+  // the checked-in bundled tree so stray local symlinks are ignored.
   return (
+    source === "openclaw-bundled" ||
     source === "openclaw-extra" ||
     source === "openclaw-workspace" ||
     source === "agents-skills-project"
