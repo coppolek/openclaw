@@ -4093,8 +4093,8 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                       },
                       maxDepth: {
                         type: "integer",
-                        minimum: 1,
-                        maximum: 6,
+                        exclusiveMinimum: 0,
+                        maximum: 9007199254740991,
                         title: "Memory Chunk Markdown Max Heading Depth",
                         description:
                           "Maximum heading depth (1-6) to treat as chunk boundaries in the markdown-heading strategy. For example, maxDepth=2 splits at # and ## headings only.",
@@ -4125,7 +4125,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                       },
                       bufferSize: {
                         type: "integer",
-                        minimum: 0,
+                        exclusiveMinimum: 0,
                         maximum: 9007199254740991,
                         title: "Memory Chunk Semantic Buffer Size",
                         description:
@@ -4151,7 +4151,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                         type: "string",
                         title: "Memory Chunk Completion Model",
                         description:
-                          "Model used for LLM-assisted chunking strategies. Required when using 'lumber' or 'hichunk'; must be set to a valid model reference.",
+                          "Model used for LLM-assisted chunking strategies. Required when using 'lumber' or 'hichunk'; must be set to a valid model reference. For 'hichunk', this should be the HiChunk model (arXiv:2509.11552); for 'lumber', any general-purpose chat model works.",
                       },
                       windowSize: {
                         type: "integer",
@@ -4171,8 +4171,8 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                       },
                       maxLevel: {
                         type: "integer",
-                        minimum: 1,
-                        maximum: 9007199254740991,
+                        exclusiveMinimum: 0,
+                        maximum: 10,
                         title: "Memory Chunk HiChunk Max Level",
                         description:
                           "Maximum number of hierarchical segmentation levels for the hichunk strategy (default: 10). Higher values allow finer-grained multi-level semantic boundaries.",
@@ -6052,8 +6052,8 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                         },
                         maxDepth: {
                           type: "integer",
-                          minimum: 1,
-                          maximum: 6,
+                          exclusiveMinimum: 0,
+                          maximum: 9007199254740991,
                         },
                         maxTokens: {
                           type: "integer",
@@ -6072,7 +6072,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                         },
                         bufferSize: {
                           type: "integer",
-                          minimum: 0,
+                          exclusiveMinimum: 0,
                           maximum: 9007199254740991,
                         },
                         breakpointPercentileThreshold: {
@@ -6100,8 +6100,8 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                         },
                         maxLevel: {
                           type: "integer",
-                          minimum: 1,
-                          maximum: 9007199254740991,
+                          exclusiveMinimum: 0,
+                          maximum: 10,
                         },
                         recurrentType: {
                           type: "integer",
@@ -25074,7 +25074,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
     "agents.defaults.memorySearch.chunking.tokens": {
       label: "Memory Chunk Tokens",
       help: "Chunk size in tokens used when splitting memory sources before embedding/indexing. Applies to the fixed-size strategy. Increase for broader context per chunk, or lower to improve precision on pinpoint lookups.",
-      tags: ["advanced"],
+      tags: ["security", "auth"],
     },
     "agents.defaults.memorySearch.chunking.overlap": {
       label: "Memory Chunk Overlap Tokens",
@@ -25084,17 +25084,17 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
     "agents.defaults.memorySearch.chunking.maxDepth": {
       label: "Memory Chunk Markdown Max Heading Depth",
       help: "Maximum heading depth (1-6) to treat as chunk boundaries in the markdown-heading strategy. For example, maxDepth=2 splits at # and ## headings only.",
-      tags: ["advanced"],
+      tags: ["performance"],
     },
     "agents.defaults.memorySearch.chunking.maxTokens": {
       label: "Memory Chunk Max Tokens",
       help: "Maximum tokens per chunk before fallback sub-chunking. Used by markdown-heading and semantic strategies to handle oversized sections.",
-      tags: ["advanced"],
+      tags: ["security", "auth", "performance"],
     },
     "agents.defaults.memorySearch.chunking.targetTokens": {
       label: "Memory Chunk Target Tokens",
       help: "Target token count per chunk in the sentence strategy. Sentences are accumulated until this budget is reached.",
-      tags: ["advanced"],
+      tags: ["security", "auth"],
     },
     "agents.defaults.memorySearch.chunking.overlapSentences": {
       label: "Memory Chunk Overlap Sentences",
@@ -25118,7 +25118,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
     },
     "agents.defaults.memorySearch.chunking.completionModel": {
       label: "Memory Chunk Completion Model",
-      help: "Model used for LLM-assisted chunking strategies. Required when using 'lumber' or 'hichunk'; must be set to a valid model reference.",
+      help: "Model used for LLM-assisted chunking strategies. Required when using 'lumber' or 'hichunk'; must be set to a valid model reference. For 'hichunk', this should be the HiChunk model (arXiv:2509.11552); for 'lumber', any general-purpose chat model works.",
       tags: ["advanced"],
     },
     "agents.defaults.memorySearch.chunking.windowSize": {
@@ -25129,12 +25129,12 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
     "agents.defaults.memorySearch.chunking.lineMaxLen": {
       label: "Memory Chunk HiChunk Line Max Length",
       help: "Maximum character length per sentence in the LLM input for the hichunk strategy (default: 100). Longer sentences are truncated to fit within the inference window.",
-      tags: ["advanced"],
+      tags: ["performance"],
     },
     "agents.defaults.memorySearch.chunking.maxLevel": {
       label: "Memory Chunk HiChunk Max Level",
       help: "Maximum number of hierarchical segmentation levels for the hichunk strategy (default: 10). Higher values allow finer-grained multi-level semantic boundaries.",
-      tags: ["advanced"],
+      tags: ["performance"],
     },
     "agents.defaults.memorySearch.chunking.recurrentType": {
       label: "Memory Chunk HiChunk Recurrent Type",
