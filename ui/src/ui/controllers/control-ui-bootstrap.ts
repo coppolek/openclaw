@@ -35,6 +35,7 @@ export async function loadControlUiBootstrapConfig(state: ControlUiBootstrapStat
       method: "GET",
       headers: { Accept: "application/json" },
       credentials: "same-origin",
+      cache: "no-store",
     });
     if (!res.ok) {
       return;

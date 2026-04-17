@@ -341,7 +341,7 @@ describe("handleControlUiHttpRequest", () => {
   it("serves bootstrap config JSON", async () => {
     await withControlUiRoot({
       fn: async (tmp) => {
-        const { res, end } = makeMockHttpResponse();
+        const { res, end, setHeader } = makeMockHttpResponse();
         const handled = handleControlUiHttpRequest(
           { url: CONTROL_UI_BOOTSTRAP_CONFIG_PATH, method: "GET" } as IncomingMessage,
           res,
@@ -360,6 +360,10 @@ describe("handleControlUiHttpRequest", () => {
         expect(parsed.assistantAvatar).toBe("/avatar/main");
         expect(parsed.assistantAgentId).toBe("main");
         expect(Array.isArray(parsed.localMediaPreviewRoots)).toBe(true);
+        expect(setHeader).toHaveBeenCalledWith(
+          "Cache-Control",
+          "no-store, no-cache, must-revalidate",
+        );
       },
     });
   });
@@ -367,7 +371,7 @@ describe("handleControlUiHttpRequest", () => {
   it("serves bootstrap config JSON under basePath", async () => {
     await withControlUiRoot({
       fn: async (tmp) => {
-        const { res, end } = makeMockHttpResponse();
+        const { res, end, setHeader } = makeMockHttpResponse();
         const handled = handleControlUiHttpRequest(
           { url: `/openclaw${CONTROL_UI_BOOTSTRAP_CONFIG_PATH}`, method: "GET" } as IncomingMessage,
           res,
@@ -387,6 +391,10 @@ describe("handleControlUiHttpRequest", () => {
         expect(parsed.assistantAvatar).toBe("/openclaw/avatar/main");
         expect(parsed.assistantAgentId).toBe("main");
         expect(Array.isArray(parsed.localMediaPreviewRoots)).toBe(true);
+        expect(setHeader).toHaveBeenCalledWith(
+          "Cache-Control",
+          "no-store, no-cache, must-revalidate",
+        );
       },
     });
   });

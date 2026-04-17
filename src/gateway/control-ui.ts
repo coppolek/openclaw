@@ -128,10 +128,10 @@ function applyControlUiSecurityHeaders(res: ServerResponse) {
   res.setHeader("Referrer-Policy", "no-referrer");
 }
 
-function sendJson(res: ServerResponse, status: number, body: unknown) {
+function sendJson(res: ServerResponse, status: number, body: unknown, cacheControl = "no-cache") {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Cache-Control", cacheControl);
   res.end(JSON.stringify(body));
 }
 
@@ -580,25 +580,30 @@ export function handleControlUiHttpRequest(
     if (req.method === "HEAD") {
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json; charset=utf-8");
-      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
       res.end();
       return true;
     }
-    sendJson(res, 200, {
-      basePath,
-      assistantName: identity.name,
-      assistantAvatar: avatarValue ?? identity.avatar,
-      assistantAgentId: identity.agentId,
-      serverVersion: resolveRuntimeServiceVersion(process.env),
-      localMediaPreviewRoots: [...getAgentScopedMediaLocalRoots(config ?? {}, identity.agentId)],
-      embedSandbox:
-        config?.gateway?.controlUi?.embedSandbox === "trusted"
-          ? "trusted"
-          : config?.gateway?.controlUi?.embedSandbox === "strict"
-            ? "strict"
-            : "scripts",
-      allowExternalEmbedUrls: config?.gateway?.controlUi?.allowExternalEmbedUrls === true,
-    } satisfies ControlUiBootstrapConfig);
+    sendJson(
+      res,
+      200,
+      {
+        basePath,
+        assistantName: identity.name,
+        assistantAvatar: avatarValue ?? identity.avatar,
+        assistantAgentId: identity.agentId,
+        serverVersion: resolveRuntimeServiceVersion(process.env),
+        localMediaPreviewRoots: [...getAgentScopedMediaLocalRoots(config ?? {}, identity.agentId)],
+        embedSandbox:
+          config?.gateway?.controlUi?.embedSandbox === "trusted"
+            ? "trusted"
+            : config?.gateway?.controlUi?.embedSandbox === "strict"
+              ? "strict"
+              : "scripts",
+        allowExternalEmbedUrls: config?.gateway?.controlUi?.allowExternalEmbedUrls === true,
+      } satisfies ControlUiBootstrapConfig,
+      "no-store, no-cache, must-revalidate",
+    );
     return true;
   }
 
