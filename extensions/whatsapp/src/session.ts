@@ -16,6 +16,7 @@ import {
   resolveWebCredsBackupPath,
   resolveWebCredsPath,
 } from "./auth-store.js";
+import { renderQrTerminal } from "./qr-terminal.js";
 import { formatError, getStatusCode } from "./session-errors.js";
 import {
   BufferJSON,
@@ -39,15 +40,7 @@ export {
 
 const LOGGED_OUT_STATUS = DisconnectReason?.loggedOut ?? 401;
 
-async function loadQrTerminal() {
-  const mod = await import("qrcode-terminal");
-  return mod.default ?? mod;
-}
-
-export async function writeCredsJsonAtomically(
-  authDir: string,
-  creds: unknown,
-): Promise<void> {
+export async function writeCredsJsonAtomically(authDir: string, creds: unknown): Promise<void> {
   const credsPath = resolveWebCredsPath(authDir);
   const tempPath = path.join(authDir, `.creds.${process.pid}.${Date.now()}.tmp`);
   try {
@@ -62,7 +55,6 @@ export async function writeCredsJsonAtomically(
     throw err;
   }
 }
-
 // Per-authDir queues so multi-account creds saves don't block each other.
 const credsSaveQueues = new Map<string, Promise<void>>();
 const CREDS_SAVE_FLUSH_TIMEOUT_MS = 15_000;
@@ -119,6 +111,11 @@ async function safeSaveCreds(
   }
 }
 
+async function printTerminalQr(qr: string): Promise<void> {
+  const output = await renderQrTerminal(qr, { small: true });
+  process.stdout.write(output.endsWith("\n") ? output : `${output}\n`);
+}
+
 /**
  * Create a Baileys socket backed by the multi-file auth store we keep on disk.
  * Consumers can opt into QR printing for interactive login flows.
@@ -173,8 +170,9 @@ export async function createWaSocket(
           opts.onQr?.(qr);
           if (printQr) {
             console.log("Scan this QR in WhatsApp (Linked Devices):");
-            const qrcode = await loadQrTerminal();
-            qrcode.generate(qr, { small: true });
+            void printTerminalQr(qr).catch((err) => {
+              sessionLogger.warn({ error: String(err) }, "failed rendering WhatsApp QR");
+            });
           }
         }
         if (connection === "close") {

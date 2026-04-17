@@ -4,6 +4,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { hasConfiguredSecretInput } from "../config/types.secrets.js";
 import { trimToUndefined } from "../gateway/credentials.js";
 import { resolveRequiredConfiguredSecretRefInputString } from "../gateway/resolve-configured-secret-input-string.js";
+import { renderQrTerminal } from "../media/qr-terminal.ts";
 import { resolvePairingSetupFromConfig, encodePairingSetupCode } from "../pairing/setup-code.js";
 import { runCommandWithTimeout } from "../process/exec.js";
 import { defaultRuntime } from "../runtime.js";
@@ -23,18 +24,8 @@ type QrCliOptions = {
   password?: string;
 };
 
-async function loadQrTerminal() {
-  const mod = await import("qrcode-terminal");
-  return mod.default ?? mod;
-}
-
-async function renderQrAscii(data: string): Promise<string> {
-  const qrcode = await loadQrTerminal();
-  return new Promise((resolve) => {
-    qrcode.generate(data, { small: true }, (output: string) => {
-      resolve(output);
-    });
-  });
+function renderQrAscii(data: string): Promise<string> {
+  return renderQrTerminal(data, { small: true });
 }
 
 function readDevicePairPublicUrlFromConfig(cfg: OpenClawConfig): string | undefined {

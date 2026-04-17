@@ -7,14 +7,12 @@ async function loadQrCodeTuiRuntime() {
   return await qrCodeTuiRuntimePromise;
 }
 
-export async function renderQrPngBase64(
+export async function renderQrTerminal(
   input: string,
-  opts: { scale?: number; marginModules?: number } = {},
+  opts: { small?: boolean } = {},
 ): Promise<string> {
-  const { scale = 6, marginModules = 4 } = opts;
-  const { renderPngBase64 } = await loadQrCodeTuiRuntime();
-  return await renderPngBase64(input, {
-    margin: marginModules,
-    scale,
+  const { renderTerminal } = await loadQrCodeTuiRuntime();
+  return await renderTerminal(input, {
+    small: opts.small ?? true,
   });
 }
