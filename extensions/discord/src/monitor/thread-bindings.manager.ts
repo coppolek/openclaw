@@ -609,10 +609,7 @@ export function createThreadBindingManager(
       if (!targetSessionKey) {
         return null;
       }
-      // Strip "channel:" prefix — must not appear in raw Discord API calls. It survives
-      // into bind() via resolvePluginConversationRefForThreadBinding's early return,
-      // bypassing the resolveConversationIdFromTargets stripping step.
-      const conversationId = (normalizeOptionalString(input.conversation.conversationId) ?? "").replace(/^channel:/i, "");
+      const conversationId = normalizeOptionalString(input.conversation.conversationId) ?? "";
       const placement = input.placement === "child" ? "child" : "current";
       const metadata = input.metadata ?? {};
       const label = normalizeOptionalString(metadata.label);
@@ -640,12 +637,16 @@ export function createThreadBindingManager(
         createThread = true;
         if (!channelId && conversationId) {
           const cfg = resolveCurrentCfg();
+          // Strip "channel:" prefix before Discord REST API call — it survives into bind()
+          // via resolvePluginConversationRefForThreadBinding's early return, bypassing the
+          // resolveConversationIdFromTargets stripping step.
+          const discordChannelId = conversationId.replace(/^channel:/i, "");
           channelId =
             (await resolveChannelIdForBinding({
               cfg,
               accountId,
               token: resolveCurrentToken(),
-              threadId: conversationId,
+              threadId: discordChannelId,
             })) ?? undefined;
         }
       } else {
