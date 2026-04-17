@@ -7,6 +7,14 @@ import {
   type OpenClawConfig,
 } from "../config/config.js";
 import { clearPluginManifestRegistryCache } from "../plugins/manifest-registry.js";
+import { loadEnabledClaudeBundleCommands } from "../plugins/bundle-commands.js";
+import {
+  createBundleMcpTempHarness,
+  createEnabledPluginEntries,
+  withBundleHomeEnv,
+  writeBundleTextFiles,
+  writeClaudeBundleManifest,
+} from "../plugins/bundle-mcp.test-support.js";
 import { withPathResolutionEnv } from "../test-utils/env.js";
 import { createFixtureSuite } from "../test-utils/fixture-suite.js";
 import { createTempHomeEnv, type TempHomeEnv } from "../test-utils/temp-home.js";
@@ -27,6 +35,7 @@ import {
 } from "./skills/home-env.test-support.js";
 
 const fixtureSuite = createFixtureSuite("openclaw-skills-suite-");
+const bundleHarness = createBundleMcpTempHarness();
 let tempHome: TempHomeEnv | null = null;
 let skillsHomeEnv: SkillsHomeEnvSnapshot | null = null;
 
@@ -95,6 +104,7 @@ afterAll(async () => {
     tempHome = null;
   }
   await fixtureSuite.cleanup();
+  await bundleHarness.cleanup();
 });
 
 afterEach(() => {
@@ -214,52 +224,63 @@ describe("buildWorkspaceSkillCommandSpecs", () => {
   });
 
   it("includes enabled Claude bundle markdown commands as native OpenClaw slash commands", async () => {
-    const workspaceDir = await makeWorkspace();
-    const pluginRoot = path.join(tempHome!.home, ".openclaw", "extensions", "compound-bundle");
-    await fs.mkdir(path.join(pluginRoot, ".claude-plugin"), { recursive: true });
-    await fs.mkdir(path.join(pluginRoot, "commands"), { recursive: true });
-    await fs.writeFile(
-      path.join(pluginRoot, ".claude-plugin", "plugin.json"),
-      `${JSON.stringify({ name: "compound-bundle" }, null, 2)}\n`,
-      "utf-8",
-    );
-    await fs.writeFile(
-      path.join(pluginRoot, "commands", "workflows-review.md"),
-      [
-        "---",
-        "name: workflows:review",
-        "description: Review code with a structured checklist",
-        "---",
-        "Review the branch carefully.",
-        "",
-      ].join("\n"),
-      "utf-8",
-    );
+    await withBundleHomeEnv(bundleHarness, "openclaw-skills-bundle", async ({ homeDir, workspaceDir }) => {
+      const pluginRoot = await writeClaudeBundleManifest({
+        homeDir,
+        pluginId: "compound-bundle",
+        manifest: { name: "compound-bundle" },
+      });
+      await writeBundleTextFiles(pluginRoot, {
+        "commands/workflows-review.md": [
+          "---",
+          "name: workflows:review",
+          "description: Review code with a structured checklist",
+          "---",
+          "Review the branch carefully.",
+          "",
+        ].join("\n"),
+      });
 
-    const commands = buildWorkspaceSkillCommandSpecs(workspaceDir, {
-      ...resolveTestSkillDirs(workspaceDir),
-      config: {
+      const config = {
         plugins: {
-          entries: {
-            "compound-bundle": { enabled: true },
-          },
+          entries: createEnabledPluginEntries(["compound-bundle"]),
         },
-      },
-    });
+      };
 
-    expect(commands).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          name: "workflows_review",
-          skillName: "workflows:review",
-          description: "Review code with a structured checklist",
-          promptTemplate: "Review the branch carefully.",
-        }),
-      ]),
-    );
-    expect(
-      commands.find((entry) => entry.skillName === "workflows:review")?.sourceFilePath,
-    ).toContain(path.join(pluginRoot, "commands", "workflows-review.md"));
+      const bundleCommands = loadEnabledClaudeBundleCommands({
+        workspaceDir,
+        cfg: config,
+      });
+      expect(bundleCommands).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            pluginId: "compound-bundle",
+            rawName: "workflows:review",
+            description: "Review code with a structured checklist",
+            promptTemplate: "Review the branch carefully.",
+          }),
+        ]),
+      );
+
+      const commands = buildWorkspaceSkillCommandSpecs(workspaceDir, {
+        ...resolveTestSkillDirs(workspaceDir),
+        config,
+      });
+
+      expect(commands).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: "workflows_review",
+            skillName: "workflows:review",
+            description: "Review code with a structured checklist",
+            promptTemplate: "Review the branch carefully.",
+          }),
+        ]),
+      );
+      expect(
+        commands.find((entry) => entry.skillName === "workflows:review")?.sourceFilePath,
+      ).toContain(path.join(pluginRoot, "commands", "workflows-review.md"));
+    });
   });
 });
 
