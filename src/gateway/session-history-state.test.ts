@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
+import { HEARTBEAT_PROMPT } from "../auto-reply/heartbeat.js";
 import { buildSessionHistorySnapshot, SessionHistorySseState } from "./session-history-state.js";
 import * as sessionUtils from "./session-utils.js";
 
@@ -74,5 +75,91 @@ describe("SessionHistorySseState", () => {
     expect(snapshot.history.items).toBe(snapshot.history.messages);
     expect(snapshot.history.messages[0]?.__openclaw?.seq).toBe(2);
     expect(snapshot.rawTranscriptSeq).toBe(2);
+  });
+
+  test("filters mixed system-line plus heartbeat prompt entries from snapshot history", () => {
+    const snapshot = buildSessionHistorySnapshot({
+      rawMessages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text:
+                "System: [2026-04-17 12:20:33 AKDT] Gateway restart restart ok\n" +
+                "System: [2026-04-17 12:20:33 AKDT] Run: openclaw doctor --non-interactive\n\n" +
+                HEARTBEAT_PROMPT,
+            },
+          ],
+          __openclaw: { seq: 1 },
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "HEARTBEAT_OK" }],
+          __openclaw: { seq: 2 },
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "kept" }],
+          __openclaw: { seq: 3 },
+        },
+      ],
+    });
+
+    expect(snapshot.history.messages).toEqual([
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "kept" }],
+        __openclaw: { seq: 3 },
+      },
+    ]);
+    expect(snapshot.rawTranscriptSeq).toBe(3);
+  });
+
+  test("filters inline appended mixed system-line plus heartbeat entries", () => {
+    const state = SessionHistorySseState.fromRawSnapshot({
+      target: { sessionId: "sess-main" },
+      rawMessages: [],
+    });
+
+    const appendedUser = state.appendInlineMessage({
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text:
+              "System: [2026-04-17 12:20:33 AKDT] Gateway restart restart ok\n\n" + HEARTBEAT_PROMPT,
+          },
+        ],
+      },
+    });
+    const appendedAck = state.appendInlineMessage({
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "HEARTBEAT_OK" }],
+      },
+    });
+    const appendedReply = state.appendInlineMessage({
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "kept" }],
+      },
+    });
+
+    expect(appendedUser).toBeNull();
+    expect(appendedAck).toBeNull();
+    expect(appendedReply?.message).toEqual({
+      role: "assistant",
+      content: [{ type: "text", text: "kept" }],
+      __openclaw: { seq: 3 },
+    });
+    expect(state.snapshot().messages).toEqual([
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "kept" }],
+        __openclaw: { seq: 3 },
+      },
+    ]);
   });
 });

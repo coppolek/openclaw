@@ -1,6 +1,7 @@
 import {
   DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
   sanitizeChatHistoryMessages,
+  stripRuntimeInjectedContent,
 } from "./server-methods/chat.js";
 import { attachOpenClawTranscriptMeta, readSessionMessages } from "./session-utils.js";
 
@@ -99,10 +100,11 @@ export function buildSessionHistorySnapshot(params: {
   limit?: number;
   cursor?: string;
 }): SessionHistorySnapshot {
+  const sanitizedRawMessages = stripRuntimeInjectedContent(params.rawMessages);
   const history = paginateSessionMessages(
     toSessionHistoryMessages(
       sanitizeChatHistoryMessages(
-        params.rawMessages,
+        sanitizedRawMessages,
         params.maxChars ?? DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
       ),
     ),
@@ -178,7 +180,10 @@ export class SessionHistorySseState {
       ...(typeof update.messageId === "string" ? { id: update.messageId } : {}),
       seq: this.rawTranscriptSeq,
     });
-    const sanitized = sanitizeChatHistoryMessages([nextMessage], this.maxChars);
+    const sanitized = sanitizeChatHistoryMessages(
+      stripRuntimeInjectedContent([nextMessage]),
+      this.maxChars,
+    );
     if (sanitized.length === 0) {
       return null;
     }

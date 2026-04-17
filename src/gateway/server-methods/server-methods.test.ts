@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { emitAgentEvent } from "../../infra/agent-events.js";
 import { formatZonedTimestamp } from "../../infra/format-time/format-datetime.js";
+import { HEARTBEAT_PROMPT } from "../../auto-reply/heartbeat.js";
+import { PLANNING_ONLY_RETRY_INSTRUCTION } from "../../agents/pi-embedded-runner/run/incomplete-turn.js";
 import {
   buildSystemRunApprovalBinding,
   buildSystemRunApprovalEnvBinding,
@@ -22,6 +24,7 @@ import {
   resolveEffectiveChatHistoryMaxChars,
   sanitizeChatHistoryMessages,
   sanitizeChatSendMessageInput,
+  stripRuntimeInjectedContent,
 } from "./chat.js";
 import { createExecApprovalHandlers } from "./exec-approval.js";
 import { logsHandlers } from "./logs.js";
@@ -298,6 +301,144 @@ describe("sanitizeChatHistoryMessages", () => {
         role: "assistant",
         content: [{ type: "text", text: "real reply" }],
         timestamp: 3,
+      },
+    ]);
+  });
+
+  it("drops leaked heartbeat prompt + ack from chat history", () => {
+    const result = sanitizeChatHistoryMessages([
+      {
+        role: "user",
+        content: [{ type: "text", text: "hello" }],
+        timestamp: 1,
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text:
+              'Sender (untrusted metadata):\n```json\n{"label":"openclaw-control-ui"}\n```\n\n[Fri 2026-04-17 11:19 AKDT] ' +
+              HEARTBEAT_PROMPT,
+          },
+        ],
+        timestamp: 2,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "HEARTBEAT_OK" }],
+        timestamp: 3,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "real reply" }],
+        timestamp: 4,
+      },
+    ]);
+
+    expect(result).toEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "hello" }],
+        timestamp: 1,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "real reply" }],
+        timestamp: 4,
+      },
+    ]);
+  });
+
+  it("drops leaked internal retry and exec prompts from chat history", () => {
+    const result = sanitizeChatHistoryMessages([
+      {
+        role: "user",
+        content: [{ type: "text", text: PLANNING_ONLY_RETRY_INSTRUCTION }],
+        timestamp: 1,
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text:
+              "An async command you ran earlier has completed. The result is shown in the system messages above. " +
+              "Handle the result internally. Do not relay it to the user unless explicitly requested.",
+          },
+        ],
+        timestamp: 2,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "done" }],
+        timestamp: 3,
+      },
+    ]);
+
+    expect(result).toEqual([
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "done" }],
+        timestamp: 3,
+      },
+    ]);
+  });
+});
+
+describe("stripRuntimeInjectedContent", () => {
+  it("strips leading system-event lines and leaves the actual user text", () => {
+    const result = stripRuntimeInjectedContent([
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text:
+              "System: [2026-04-17 11:55:13 AKDT] Gateway restart ok\n" +
+              "System: [2026-04-17 11:55:13 AKDT] Run: openclaw doctor --non-interactive\n\n" +
+              HEARTBEAT_PROMPT,
+          },
+        ],
+        timestamp: 1,
+      },
+    ]);
+
+    expect(result).toEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: HEARTBEAT_PROMPT }],
+        timestamp: 1,
+      },
+    ]);
+  });
+
+  it("drops user messages that are only system-event lines", () => {
+    const result = stripRuntimeInjectedContent([
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text:
+              "System (untrusted): [2026-04-17 11:46:19 AKDT] Exec completed (tidy-nud, code 0) :: done\n" +
+              "System: [2026-04-17 11:55:13 AKDT] Gateway restart ok",
+          },
+        ],
+        timestamp: 1,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "kept" }],
+        timestamp: 2,
+      },
+    ]);
+
+    expect(result).toEqual([
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "kept" }],
+        timestamp: 2,
       },
     ]);
   });

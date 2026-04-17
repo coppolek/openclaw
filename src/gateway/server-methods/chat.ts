@@ -7,9 +7,22 @@ import { resolveThinkingDefault } from "../../agents/model-selection.js";
 import { rewriteTranscriptEntriesInSessionFile } from "../../agents/pi-embedded-runner/transcript-rewrite.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { dispatchInboundMessage } from "../../auto-reply/dispatch.js";
+import {
+  DEFAULT_HEARTBEAT_ACK_MAX_CHARS,
+  HEARTBEAT_PROMPT,
+  stripHeartbeatToken,
+} from "../../auto-reply/heartbeat.js";
+import { isHeartbeatUserMessage } from "../../auto-reply/heartbeat-filter.js";
 import type { ReplyPayload } from "../../auto-reply/reply-payload.js";
 import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.js";
+import { stripInboundMetadata } from "../../auto-reply/reply/strip-inbound-meta.js";
 import type { MsgContext } from "../../auto-reply/templating.js";
+import {
+  ACK_EXECUTION_FAST_PATH_INSTRUCTION,
+  EMPTY_RESPONSE_RETRY_INSTRUCTION,
+  PLANNING_ONLY_RETRY_INSTRUCTION,
+  REASONING_ONLY_RETRY_INSTRUCTION,
+} from "../../agents/pi-embedded-runner/run/incomplete-turn.js";
 import { extractCanvasFromText } from "../../chat/canvas-render.js";
 import { resolveSessionFilePath } from "../../config/sessions.js";
 import { jsonUtf8Bytes } from "../../infra/json-utf8-bytes.js";
@@ -162,6 +175,167 @@ const CHANNEL_AGNOSTIC_SESSION_SCOPES = new Set([
   "topic",
 ]);
 const CHANNEL_SCOPED_SESSION_SHAPES = new Set(["direct", "dm", "group", "channel"]);
+const STARTUP_CONTEXT_PREFIX = "[Startup context loaded by runtime]";
+const SYSTEM_EVENT_LINE_RE = /^System(?: \(untrusted\))?: \[/;
+
+function extractUserMessageText(
+  entry: Record<string, unknown>,
+): { text: string; field: "content-array" | "content-string" | "text"; blockIndex?: number } | null {
+  if (Array.isArray(entry.content)) {
+    for (let i = 0; i < entry.content.length; i++) {
+      const item = entry.content[i];
+      if (item && typeof item === "object") {
+        const block = item as Record<string, unknown>;
+        if (block.type === "text" && typeof block.text === "string") {
+          return { text: block.text, field: "content-array", blockIndex: i };
+        }
+      }
+    }
+    return null;
+  }
+  if (typeof entry.content === "string") {
+    return { text: entry.content, field: "content-string" };
+  }
+  if (typeof entry.text === "string") {
+    return { text: entry.text, field: "text" };
+  }
+  return null;
+}
+
+function stripStartupContextBlock(text: string): string {
+  if (!text.startsWith(STARTUP_CONTEXT_PREFIX)) {
+    return text;
+  }
+
+  const lines = text.split("\n");
+  let endOfBlockIdx = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() === "" && i + 1 < lines.length) {
+      const nextLine = lines[i + 1].trim();
+      if (
+        nextLine &&
+        !nextLine.startsWith("[") &&
+        !nextLine.startsWith("BEGIN_") &&
+        !nextLine.startsWith("END_") &&
+        !nextLine.startsWith("```") &&
+        !nextLine.startsWith("Bootstrap ") &&
+        !nextLine.startsWith("Recent ") &&
+        !nextLine.startsWith("Treat ") &&
+        !nextLine.startsWith("Do not ") &&
+        !nextLine.startsWith("You are starting")
+      ) {
+        endOfBlockIdx = lines.slice(0, i + 1).join("\n").length;
+        break;
+      }
+    }
+  }
+
+  if (endOfBlockIdx >= 0) {
+    return text.slice(endOfBlockIdx).trim();
+  }
+
+  return "";
+}
+
+function stripSystemEventLines(text: string): string {
+  const lines = text.split("\n");
+  let firstUserLineIdx = -1;
+  let seenSystemLine = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (SYSTEM_EVENT_LINE_RE.test(lines[i])) {
+      seenSystemLine = true;
+      continue;
+    }
+    if (seenSystemLine && lines[i].trim() === "") {
+      continue;
+    }
+    if (seenSystemLine) {
+      firstUserLineIdx = i;
+      break;
+    }
+    break;
+  }
+  if (!seenSystemLine) {
+    return text;
+  }
+  if (firstUserLineIdx < 0) {
+    return "";
+  }
+  return lines.slice(firstUserLineIdx).join("\n");
+}
+
+function stripRuntimeContentFromText(text: string): string {
+  const afterSystemStrip = stripSystemEventLines(text);
+  const afterStartupStrip = stripStartupContextBlock(afterSystemStrip);
+
+  if (afterStartupStrip !== text) {
+    return afterStartupStrip.trim();
+  }
+
+  return text;
+}
+
+function stripRuntimeContentFromMessage(
+  message: unknown,
+): { message: unknown; changed: boolean; empty: boolean } {
+  if (!message || typeof message !== "object") {
+    return { message, changed: false, empty: false };
+  }
+  const entry = message as Record<string, unknown>;
+  const role = typeof entry.role === "string" ? entry.role.toLowerCase() : "";
+  if (role !== "user") {
+    return { message, changed: false, empty: false };
+  }
+  const extracted = extractUserMessageText(entry);
+  if (!extracted) {
+    return { message, changed: false, empty: false };
+  }
+  const stripped = stripRuntimeContentFromText(extracted.text);
+  if (stripped === extracted.text) {
+    return { message, changed: false, empty: false };
+  }
+  if (!stripped) {
+    return { message, changed: true, empty: true };
+  }
+  const updated = { ...entry };
+  if (extracted.field === "content-array") {
+    updated.content = (entry.content as unknown[]).map((item, idx) => {
+      if (idx === extracted.blockIndex && item && typeof item === "object") {
+        const block = item as Record<string, unknown>;
+        if (block.type === "text" && typeof block.text === "string") {
+          return { ...block, text: stripped };
+        }
+      }
+      return item;
+    });
+  } else if (extracted.field === "content-string") {
+    updated.content = stripped;
+  } else {
+    updated.text = stripped;
+  }
+  return { message: updated, changed: true, empty: false };
+}
+
+export function stripRuntimeInjectedContent(messages: unknown[]): unknown[] {
+  if (messages.length === 0) {
+    return messages;
+  }
+  let changed = false;
+  const result: unknown[] = [];
+  for (const message of messages) {
+    const res = stripRuntimeContentFromMessage(message);
+    if (res.empty) {
+      changed = true;
+      continue;
+    }
+    if (res.changed) {
+      changed = true;
+    }
+    result.push(res.message);
+  }
+  return changed ? result : messages;
+}
 
 export function resolveEffectiveChatHistoryMaxChars(
   cfg: { gateway?: { webchat?: { chatHistoryMaxChars?: number } } },
@@ -898,14 +1072,11 @@ function sanitizeChatHistoryMessage(
  * When `entry.text` is present it takes precedence over `entry.content` to avoid
  * dropping messages that carry real text alongside a stale `content: "NO_REPLY"`.
  */
-function extractAssistantTextForSilentCheck(message: unknown): string | undefined {
+function extractHistoryText(message: unknown): string | undefined {
   if (!message || typeof message !== "object") {
     return undefined;
   }
   const entry = message as Record<string, unknown>;
-  if (entry.role !== "assistant") {
-    return undefined;
-  }
   if (typeof entry.text === "string") {
     return entry.text;
   }
@@ -928,6 +1099,75 @@ function extractAssistantTextForSilentCheck(message: unknown): string | undefine
     texts.push(typed.text);
   }
   return texts.length > 0 ? texts.join("\n") : undefined;
+}
+
+/**
+ * Extract the visible text from an assistant history message for silent-token checks.
+ * Returns `undefined` for non-assistant messages or messages with no extractable text.
+ * When `entry.text` is present it takes precedence over `entry.content` to avoid
+ * dropping messages that carry real text alongside a stale `content: "NO_REPLY"`.
+ */
+function extractAssistantTextForSilentCheck(message: unknown): string | undefined {
+  if (!message || typeof message !== "object") {
+    return undefined;
+  }
+  const entry = message as Record<string, unknown>;
+  if (entry.role !== "assistant") {
+    return undefined;
+  }
+  return extractHistoryText(message);
+}
+
+function extractUserTextForInternalHistoryCheck(message: unknown): string | undefined {
+  if (!message || typeof message !== "object") {
+    return undefined;
+  }
+  const entry = message as Record<string, unknown>;
+  if (entry.role !== "user") {
+    return undefined;
+  }
+  const text = extractHistoryText(message);
+  if (typeof text !== "string") {
+    return undefined;
+  }
+  const stripped = stripInboundMetadata(text).trim();
+  return stripped || undefined;
+}
+
+function isHeartbeatOnlyAssistantHistoryMessage(message: unknown): boolean {
+  const text = extractAssistantTextForSilentCheck(message);
+  if (text === undefined) {
+    return false;
+  }
+  return stripHeartbeatToken(text, {
+    mode: "heartbeat",
+    maxAckChars: DEFAULT_HEARTBEAT_ACK_MAX_CHARS,
+  }).shouldSkip;
+}
+
+function shouldDropUserHistoryMessage(message: unknown): boolean {
+  const text = extractUserTextForInternalHistoryCheck(message);
+  if (!text) {
+    return false;
+  }
+  if (isHeartbeatUserMessage({ role: "user", content: text }, HEARTBEAT_PROMPT)) {
+    return true;
+  }
+  if (
+    text === PLANNING_ONLY_RETRY_INSTRUCTION ||
+    text === REASONING_ONLY_RETRY_INSTRUCTION ||
+    text === EMPTY_RESPONSE_RETRY_INSTRUCTION ||
+    text === ACK_EXECUTION_FAST_PATH_INSTRUCTION
+  ) {
+    return true;
+  }
+  return (
+    text.startsWith(
+      "An async command you ran earlier has completed. The result is shown in the system messages above.",
+    ) ||
+    text.startsWith("A scheduled reminder has been triggered. The reminder content is:") ||
+    text.startsWith("A scheduled cron event was triggered, but no event content was found.")
+  );
 }
 
 function hasAssistantNonTextContent(message: unknown): boolean {
@@ -955,7 +1195,12 @@ function shouldDropAssistantHistoryMessage(message: unknown): boolean {
     return true;
   }
   const text = extractAssistantTextForSilentCheck(message);
-  if (text === undefined || !isSuppressedControlReplyText(text)) {
+  if (text === undefined) {
+    return false;
+  }
+  const shouldDropTextOnly =
+    isSuppressedControlReplyText(text) || isHeartbeatOnlyAssistantHistoryMessage(message);
+  if (!shouldDropTextOnly) {
     return false;
   }
   return !hasAssistantNonTextContent(message);
@@ -971,12 +1216,20 @@ export function sanitizeChatHistoryMessages(
   let changed = false;
   const next: unknown[] = [];
   for (const message of messages) {
+    if (shouldDropUserHistoryMessage(message)) {
+      changed = true;
+      continue;
+    }
     if (shouldDropAssistantHistoryMessage(message)) {
       changed = true;
       continue;
     }
     const res = sanitizeChatHistoryMessage(message, maxChars);
     changed ||= res.changed;
+    if (shouldDropUserHistoryMessage(res.message)) {
+      changed = true;
+      continue;
+    }
     if (shouldDropAssistantHistoryMessage(res.message)) {
       changed = true;
       continue;
@@ -1639,8 +1892,9 @@ export const chatHandlers: GatewayRequestHandlers = {
     const effectiveMaxChars = resolveEffectiveChatHistoryMaxChars(cfg, maxChars);
     const sliced = rawMessages.length > max ? rawMessages.slice(-max) : rawMessages;
     const sanitized = stripEnvelopeFromMessages(sliced);
+    const withoutRuntimeContent = stripRuntimeInjectedContent(sanitized);
     const normalized = augmentChatHistoryWithCanvasBlocks(
-      sanitizeChatHistoryMessages(sanitized, effectiveMaxChars),
+      sanitizeChatHistoryMessages(withoutRuntimeContent, effectiveMaxChars),
     );
     const maxHistoryBytes = getMaxChatHistoryMessagesBytes();
     const perMessageHardCap = Math.min(CHAT_HISTORY_MAX_SINGLE_MESSAGE_BYTES, maxHistoryBytes);
