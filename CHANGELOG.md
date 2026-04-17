@@ -4,6 +4,10 @@ Docs: https://docs.openclaw.ai
 
 ## Unreleased
 
+### Changes
+
+- Inworld/TTS: add Inworld as a built-in speech provider plugin with streaming synthesis, voice listing, and PCM telephony output. Models: `inworld-tts-1.5-max`, `inworld-tts-1.5-mini`, `inworld-tts-1-max`, `inworld-tts-1`. Auth via `messages.tts.providers.inworld.apiKey` or `INWORLD_API_KEY`. (#55972)
+
 ### Fixes
 
 - Onboarding/non-interactive: preserve existing gateway auth tokens during re-onboard so active local gateway clients are not disconnected by an implicit token rotation. (#67821) Thanks @BKF-Gitty.
