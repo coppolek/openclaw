@@ -155,10 +155,14 @@ export function buildOpenGroupPolicyConfigureRouteAllowlistWarning(params: {
 
 export function collectOpenGroupPolicyRestrictSendersWarnings(
   params: Parameters<typeof buildOpenGroupPolicyRestrictSendersWarning>[0] & {
-    groupPolicy: "open" | "allowlist" | "disabled";
+    groupPolicy: GroupPolicy;
   },
 ): string[] {
-  if (params.groupPolicy !== "open") {
+  // "members" is a Telegram-only policy; non-Telegram runtimes that consume
+  // this collector normalize it to effectively open access (see
+  // normalizeNonTelegramGroupPolicy), so the open-policy restrict-senders
+  // warning must fire for both "open" and "members" to avoid silent bypass.
+  if (params.groupPolicy !== "open" && params.groupPolicy !== "members") {
     return [];
   }
   return [buildOpenGroupPolicyRestrictSendersWarning(params)];
@@ -311,7 +315,7 @@ export function createAllowlistProviderOpenWarningCollector<ResolvedAccount>(par
 }
 
 export function collectOpenGroupPolicyRouteAllowlistWarnings(params: {
-  groupPolicy: "open" | "allowlist" | "disabled";
+  groupPolicy: "open" | "allowlist" | "disabled" | "members";
   routeAllowlistConfigured: boolean;
   restrictSenders: Parameters<typeof buildOpenGroupPolicyRestrictSendersWarning>[0];
   noRouteAllowlist: Parameters<typeof buildOpenGroupPolicyNoRouteAllowlistWarning>[0];
@@ -348,7 +352,7 @@ export function createAllowlistProviderRouteAllowlistWarningCollector<ResolvedAc
 }
 
 export function collectOpenGroupPolicyConfiguredRouteWarnings(params: {
-  groupPolicy: "open" | "allowlist" | "disabled";
+  groupPolicy: "open" | "allowlist" | "disabled" | "members";
   routeAllowlistConfigured: boolean;
   configureRouteAllowlist: Parameters<typeof buildOpenGroupPolicyConfigureRouteAllowlistWarning>[0];
   missingRouteAllowlist: Parameters<typeof buildOpenGroupPolicyWarning>[0];

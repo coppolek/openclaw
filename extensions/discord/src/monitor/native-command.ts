@@ -47,7 +47,10 @@ import {
   resolveTextChunksWithFallback,
 } from "openclaw/plugin-sdk/reply-payload";
 import { createSubsystemLogger, logVerbose } from "openclaw/plugin-sdk/runtime-env";
-import { resolveOpenProviderRuntimeGroupPolicy } from "openclaw/plugin-sdk/runtime-group-policy";
+import {
+  normalizeNonTelegramGroupPolicy,
+  resolveOpenProviderRuntimeGroupPolicy,
+} from "openclaw/plugin-sdk/runtime-group-policy";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
@@ -202,11 +205,13 @@ function resolveDiscordGuildNativeCommandAuthorized(params: {
   ownerAllowListConfigured: boolean;
   ownerAllowed: boolean;
 }) {
-  const { groupPolicy } = resolveOpenProviderRuntimeGroupPolicy({
+  const { groupPolicy: rawGroupPolicy } = resolveOpenProviderRuntimeGroupPolicy({
     providerConfigPresent: params.cfg.channels?.discord !== undefined,
     groupPolicy: params.discordConfig?.groupPolicy,
     defaultGroupPolicy: params.cfg.channels?.defaults?.groupPolicy,
   });
+  // Normalize "members" to "open": Discord has no Bot API member-check equivalent.
+  const groupPolicy = normalizeNonTelegramGroupPolicy(rawGroupPolicy);
   const policyAuthorizer = resolveDiscordChannelPolicyCommandAuthorizer({
     groupPolicy,
     guildInfo: params.guildInfo,
@@ -482,11 +487,13 @@ async function resolveDiscordNativeAutocompleteAuthorized(params: {
     return false;
   }
   if (useAccessGroups && interaction.guild) {
-    const { groupPolicy } = resolveOpenProviderRuntimeGroupPolicy({
+    const { groupPolicy: rawGroupPolicy } = resolveOpenProviderRuntimeGroupPolicy({
       providerConfigPresent: cfg.channels?.discord !== undefined,
       groupPolicy: discordConfig?.groupPolicy,
       defaultGroupPolicy: cfg.channels?.defaults?.groupPolicy,
     });
+    // Normalize "members" to "open": Discord has no Bot API member-check equivalent.
+    const groupPolicy = normalizeNonTelegramGroupPolicy(rawGroupPolicy);
     const policyAuthorizer = resolveDiscordChannelPolicyCommandAuthorizer({
       groupPolicy,
       guildInfo,
@@ -898,11 +905,13 @@ async function dispatchDiscordCommandInteraction(params: {
     return;
   }
   if (useAccessGroups && interaction.guild) {
-    const { groupPolicy } = resolveOpenProviderRuntimeGroupPolicy({
+    const { groupPolicy: rawGroupPolicy } = resolveOpenProviderRuntimeGroupPolicy({
       providerConfigPresent: cfg.channels?.discord !== undefined,
       groupPolicy: discordConfig?.groupPolicy,
       defaultGroupPolicy: cfg.channels?.defaults?.groupPolicy,
     });
+    // Normalize "members" to "open": Discord has no Bot API member-check equivalent.
+    const groupPolicy = normalizeNonTelegramGroupPolicy(rawGroupPolicy);
     const policyAuthorizer = resolveDiscordChannelPolicyCommandAuthorizer({
       groupPolicy,
       guildInfo,
