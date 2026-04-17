@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { loadConfig } from "../config/config.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
@@ -9,6 +11,7 @@ import {
 import { resolveOpenClawAgentDir } from "./agent-paths.js";
 import type { ModelCatalogEntry, ModelInputType } from "./model-catalog.types.js";
 import { ensureOpenClawModelsJson } from "./models-config.js";
+import { resolveProvidersForModelsJsonWithDeps } from "./models-config.plan.js";
 import { normalizeProviderId } from "./provider-id.js";
 
 const log = createSubsystemLogger("model-catalog");
@@ -40,6 +43,82 @@ let hasLoggedModelCatalogError = false;
 const defaultImportPiSdk = () => import("./pi-model-discovery-runtime.js");
 let importPiSdk = defaultImportPiSdk;
 let modelSuppressionPromise: Promise<typeof import("./model-suppression.runtime.js")> | undefined;
+
+async function getConfiguredProviderIds(
+  config: OpenClawConfig,
+  agentDir: string,
+): Promise<Set<string> | null> {
+  try {
+    const resolvedProviders = await resolveProvidersForModelsJsonWithDeps({
+      cfg: config,
+      agentDir,
+      env: process.env,
+    });
+    const configuredProviderIds = new Set(
+      Object.keys(resolvedProviders)
+        .map((provider) => normalizeProviderId(provider))
+        .filter(Boolean),
+    );
+    const raw = await readFile(path.join(agentDir, "models.json"), "utf8");
+    const parsed = JSON.parse(raw) as { providers?: Record<string, unknown> } | null;
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      !parsed.providers ||
+      typeof parsed.providers !== "object"
+    ) {
+      return configuredProviderIds;
+    }
+
+    for (const provider of Object.keys(parsed.providers)) {
+      const normalizedProviderId = normalizeProviderId(provider);
+      if (normalizedProviderId) {
+        configuredProviderIds.add(normalizedProviderId);
+      }
+    }
+    return configuredProviderIds;
+  } catch {
+    // Fail open when provider metadata is unavailable so we do not hide real models.
+    return null;
+  }
+}
+
+function isShadowedByQualifiedAggregatorEntry(
+  entry: ModelCatalogEntry,
+  candidate: ModelCatalogEntry,
+): boolean {
+  const providerId = normalizeProviderId(entry.provider);
+  if (!providerId || normalizeProviderId(candidate.provider) === providerId) {
+    return false;
+  }
+  const candidateId = candidate.id.trim();
+  const slash = candidateId.indexOf("/");
+  if (slash <= 0) {
+    return false;
+  }
+  const candidatePrefix = normalizeProviderId(candidateId.slice(0, slash));
+  const candidateModelId = candidateId.slice(slash + 1).trim().toLowerCase();
+  return candidatePrefix === providerId && candidateModelId === entry.id.trim().toLowerCase();
+}
+
+function filterShadowedProviderEntries(
+  entries: ModelCatalogEntry[],
+  configuredProviderIds: ReadonlySet<string> | null,
+): ModelCatalogEntry[] {
+  if (entries.length <= 1 || !configuredProviderIds) {
+    return entries;
+  }
+  return entries.filter((entry) => {
+    const providerId = normalizeProviderId(entry.provider);
+    if (!providerId || configuredProviderIds.has(providerId)) {
+      return true;
+    }
+    return !entries.some(
+      (candidate) =>
+        candidate !== entry && isShadowedByQualifiedAggregatorEntry(entry, candidate),
+    );
+  });
+}
 
 function shouldLogModelCatalogTiming(): boolean {
   return process.env.OPENCLAW_DEBUG_INGRESS_TIMING === "1";
@@ -116,13 +195,12 @@ export async function loadModelCatalog(params?: {
       const agentDir = resolveOpenClawAgentDir();
       const { shouldSuppressBuiltInModel } = await loadModelSuppression();
       logStage("catalog-deps-ready");
-      const { join } = await import("node:path");
       const authStorage = piSdk.discoverAuthStorage(agentDir);
       logStage("auth-storage-ready");
       const registry = instantiatePiModelRegistry(
         piSdk,
         authStorage,
-        join(agentDir, "models.json"),
+        path.join(agentDir, "models.json"),
       );
       logStage("registry-ready");
       const entries = Array.isArray(registry) ? registry : registry.getAll();
@@ -175,13 +253,16 @@ export async function loadModelCatalog(params?: {
         }
       }
       logStage("plugin-models-merged", `entries=${models.length}`);
+      const configuredProviderIds = await getConfiguredProviderIds(cfg, agentDir);
+      const filteredModels = filterShadowedProviderEntries(models, configuredProviderIds);
+      logStage("provider-shadows-filtered", `entries=${filteredModels.length}`);
 
-      if (models.length === 0) {
+      if (filteredModels.length === 0) {
         // If we found nothing, don't cache this result so we can try again.
         modelCatalogPromise = null;
       }
 
-      const sorted = sortModels(models);
+      const sorted = sortModels(filteredModels);
       logStage("complete", `entries=${sorted.length}`);
       return sorted;
     } catch (error) {
