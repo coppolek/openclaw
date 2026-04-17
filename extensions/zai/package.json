@@ -4,6 +4,9 @@
   "private": true,
   "description": "OpenClaw Z.AI provider plugin",
   "type": "module",
+  "dependencies": {
+    "@mariozechner/pi-ai": "0.68.1"
+  },
   "devDependencies": {
     "@openclaw/plugin-sdk": "workspace:*"
   },
