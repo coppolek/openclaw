@@ -923,7 +923,10 @@ describe("QmdMemoryManager", () => {
         const name = args[args.indexOf("--name") + 1] ?? "";
         const flag = args.includes("--glob") ? "--glob" : args.includes("--mask") ? "--mask" : "";
         addFlagCalls.push(flag);
-        const pattern = args[args.indexOf("--glob") + 1] ?? args[args.indexOf("--mask") + 1] ?? "";
+        const globIdx = args.indexOf("--glob");
+        const maskIdx = args.indexOf("--mask");
+        const pattern =
+          (globIdx !== -1 ? args[globIdx + 1] : maskIdx !== -1 ? args[maskIdx + 1] : "") ?? "";
         listedCollections.set(name, { path: pathArg, pattern });
         queueMicrotask(() => child.closeWith(0));
         return child;
@@ -935,8 +938,14 @@ describe("QmdMemoryManager", () => {
     await manager.close();
 
     expect(addFlagCalls).toEqual(["--mask", "--mask"]);
-    expect(listedCollections.has("memory-root-main")).toBe(true);
-    expect(listedCollections.has("memory-dir-main")).toBe(true);
+    expect(listedCollections.get("memory-root-main")).toEqual({
+      path: workspaceDir,
+      pattern: "MEMORY.md",
+    });
+    expect(listedCollections.get("memory-dir-main")).toEqual({
+      path: workspaceDir,
+      pattern: "**/*.md",
+    });
     expect(logWarnMock).not.toHaveBeenCalledWith(
       expect.stringContaining("retrying with legacy compatibility flag"),
     );
