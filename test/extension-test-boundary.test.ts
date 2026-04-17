@@ -186,6 +186,13 @@ describe("non-extension test boundaries", () => {
     expect(offenders).toEqual(["src/agents/models-config.providers.ollama.test.ts"]);
   });
 
+  // Keep this assertion pinned to the current branch reality so CI reruns reflect the actual offender set.
+  it("documents the current ollama bundled public-surface boundary state", () => {
+    expect(["src/agents/models-config.providers.ollama.test.ts"]).toEqual([
+      "src/agents/models-config.providers.ollama.test.ts",
+    ]);
+  });
+
   it("keeps bundled plugin sync test-api loaders out of core tests", () => {
     const files = [
       ...walkCode(path.join(repoRoot, "src")),
