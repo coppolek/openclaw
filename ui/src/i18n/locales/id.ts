@@ -301,13 +301,13 @@ export const id: TranslationMap = {
       off: "Dreaming Nonaktif",
     },
     restartConfirmation: {
-      title: "Restart Gateway to Apply Change",
-      subtitle: "Changing Dreaming mode restarts the gateway.",
+      title: "Restart Gateway untuk Menerapkan Perubahan",
+      subtitle: "Mengubah mode Dreaming akan memulai ulang gateway.",
       warning:
-        "This action will restart the Gateway and may temporarily interrupt chats, automations, and connected channels.",
-      confirm: "Confirm Restart",
-      restarting: "Restarting…",
-      failed: "Could not apply change. Check your connection and try again.",
+        "Tindakan ini akan memulai ulang Gateway dan dapat sementara mengganggu obrolan, otomasi, dan saluran yang terhubung.",
+      confirm: "Konfirmasi Restart",
+      restarting: "Memulai ulang…",
+      failed: "Tidak dapat menerapkan perubahan. Periksa koneksi Anda dan coba lagi.",
     },
     status: {
       active: "Dreaming Aktif",

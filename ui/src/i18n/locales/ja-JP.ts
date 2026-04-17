@@ -305,13 +305,13 @@ export const ja_JP: TranslationMap = {
       off: "Dreaming オフ",
     },
     restartConfirmation: {
-      title: "Restart Gateway to Apply Change",
-      subtitle: "Changing Dreaming mode restarts the gateway.",
+      title: "変更を適用するためにGatewayを再起動",
+      subtitle: "Dreamingモードを変更するとGatewayが再起動します。",
       warning:
-        "This action will restart the Gateway and may temporarily interrupt chats, automations, and connected channels.",
-      confirm: "Confirm Restart",
-      restarting: "Restarting…",
-      failed: "Could not apply change. Check your connection and try again.",
+        "この操作はGatewayを再起動し、一時的にチャット、自動化、接続されたチャンネルが中断される可能性があります。",
+      confirm: "再起動を確認",
+      restarting: "再起動中…",
+      failed: "変更を適用できませんでした。接続を確認して再度お試しください。",
     },
     status: {
       active: "Dreaming 有効",

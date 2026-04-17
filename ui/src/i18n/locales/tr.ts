@@ -306,13 +306,13 @@ export const tr: TranslationMap = {
       off: "Dreaming Kapalı",
     },
     restartConfirmation: {
-      title: "Restart Gateway to Apply Change",
-      subtitle: "Changing Dreaming mode restarts the gateway.",
+      title: "Değişikliği Uygulamak için Gateway'i Yeniden Başlat",
+      subtitle: "Dreaming modunu değiştirmek gateway'i yeniden başlatır.",
       warning:
-        "This action will restart the Gateway and may temporarily interrupt chats, automations, and connected channels.",
-      confirm: "Confirm Restart",
-      restarting: "Restarting…",
-      failed: "Could not apply change. Check your connection and try again.",
+        "Bu işlem Gateway'i yeniden başlatacak ve sohbetleri, otomasyonları ve bağlı kanalları geçici olarak kesintiye uğratabilir.",
+      confirm: "Yeniden Başlatmayı Onayla",
+      restarting: "Yeniden başlatılıyor…",
+      failed: "Değişiklik uygulanamadı. Bağlantınızı kontrol edin ve tekrar deneyin.",
     },
     status: {
       active: "Dreaming Etkin",

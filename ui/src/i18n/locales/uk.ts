@@ -304,13 +304,13 @@ export const uk: TranslationMap = {
       off: "Сновидіння вимкнено",
     },
     restartConfirmation: {
-      title: "Restart Gateway to Apply Change",
-      subtitle: "Changing Dreaming mode restarts the gateway.",
+      title: "Перезапустити Gateway для застосування змін",
+      subtitle: "Зміна режиму Dreaming перезапускає gateway.",
       warning:
-        "This action will restart the Gateway and may temporarily interrupt chats, automations, and connected channels.",
-      confirm: "Confirm Restart",
-      restarting: "Restarting…",
-      failed: "Could not apply change. Check your connection and try again.",
+        "Ця дія перезапустить Gateway і може тимчасово перервати чати, автоматизації та підключені канали.",
+      confirm: "Підтвердити перезапуск",
+      restarting: "Перезапуск…",
+      failed: "Не вдалося застосувати зміни. Перевірте з'єднання та спробуйте знову.",
     },
     status: {
       active: "Сновидіння активне",

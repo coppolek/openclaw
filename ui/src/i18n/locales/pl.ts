@@ -303,13 +303,13 @@ export const pl: TranslationMap = {
       off: "Dreaming wyłączone",
     },
     restartConfirmation: {
-      title: "Restart Gateway to Apply Change",
-      subtitle: "Changing Dreaming mode restarts the gateway.",
+      title: "Uruchom ponownie bramę, aby zastosować zmianę",
+      subtitle: "Zmiana trybu Dreaming powoduje ponowne uruchomienie bramy.",
       warning:
-        "This action will restart the Gateway and may temporarily interrupt chats, automations, and connected channels.",
-      confirm: "Confirm Restart",
-      restarting: "Restarting…",
-      failed: "Could not apply change. Check your connection and try again.",
+        "Ta akcja spowoduje ponowne uruchomienie bramy i może tymczasowo przerwać czaty, automatyzacje i połączone kanały.",
+      confirm: "Potwierdź ponowne uruchomienie",
+      restarting: "Uruchamianie ponowne…",
+      failed: "Nie można zastosować zmiany. Sprawdź połączenie i spróbuj ponownie.",
     },
     status: {
       active: "Dreaming aktywne",

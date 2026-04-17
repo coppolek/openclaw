@@ -300,13 +300,13 @@ export const ko: TranslationMap = {
       off: "드리밍 꺼짐",
     },
     restartConfirmation: {
-      title: "Restart Gateway to Apply Change",
-      subtitle: "Changing Dreaming mode restarts the gateway.",
+      title: "게이트웨이 재시작하여 변경 적용",
+      subtitle: "드리밍 모드 변경 시 게이트웨이가 재시작됩니다.",
       warning:
-        "This action will restart the Gateway and may temporarily interrupt chats, automations, and connected channels.",
-      confirm: "Confirm Restart",
-      restarting: "Restarting…",
-      failed: "Could not apply change. Check your connection and try again.",
+        "이 작업은 게이트웨이를 재시작하며 채팅, 자동화, 연결된 채널을 일시적으로 중단시킬 수 있습니다.",
+      confirm: "재시작 확인",
+      restarting: "재시작 중…",
+      failed: "변경을 적용할 수 없습니다. 연결을 확인하고 다시 시도하세요.",
     },
     status: {
       active: "드리밍 활성",

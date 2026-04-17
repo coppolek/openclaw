@@ -304,13 +304,13 @@ export const fr: TranslationMap = {
       off: "Rêverie désactivée",
     },
     restartConfirmation: {
-      title: "Restart Gateway to Apply Change",
-      subtitle: "Changing Dreaming mode restarts the gateway.",
+      title: "Redémarrer la Gateway pour appliquer le changement",
+      subtitle: "Modifier le mode Dreaming redémarre la gateway.",
       warning:
-        "This action will restart the Gateway and may temporarily interrupt chats, automations, and connected channels.",
-      confirm: "Confirm Restart",
-      restarting: "Restarting…",
-      failed: "Could not apply change. Check your connection and try again.",
+        "Cette action redémarrera la Gateway et pourra temporairement interrompre les conversations, les automatisations et les canaux connectés.",
+      confirm: "Confirmer le redémarrage",
+      restarting: "Redémarrage en cours…",
+      failed: "Impossible d'appliquer le changement. Vérifiez votre connexion et réessayez.",
     },
     status: {
       active: "Rêverie active",
