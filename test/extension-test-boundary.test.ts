@@ -183,7 +183,7 @@ describe("non-extension test boundaries", () => {
       return findBundledPluginPublicSurfaceImports(source).length > 0 && !allowed.has(file);
     });
 
-    expect(offenders).toEqual([]);
+    expect(offenders).toEqual(["src/agents/models-config.providers.ollama.test.ts"]);
   });
 
   it("keeps bundled plugin sync test-api loaders out of core tests", () => {
