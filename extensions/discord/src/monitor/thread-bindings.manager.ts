@@ -609,7 +609,10 @@ export function createThreadBindingManager(
       if (!targetSessionKey) {
         return null;
       }
-      const conversationId = normalizeOptionalString(input.conversation.conversationId) ?? "";
+      // Strip "channel:" prefix — must not appear in raw Discord API calls. It survives
+      // into bind() via resolvePluginConversationRefForThreadBinding's early return,
+      // bypassing the resolveConversationIdFromTargets stripping step.
+      const conversationId = (normalizeOptionalString(input.conversation.conversationId) ?? "").replace(/^channel:/i, "");
       const placement = input.placement === "child" ? "child" : "current";
       const metadata = input.metadata ?? {};
       const label = normalizeOptionalString(metadata.label);
