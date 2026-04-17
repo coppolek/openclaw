@@ -3,8 +3,8 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { detectMime } from "../../media/mime.js";
-import { chunkFixedSize } from "./chunking/fixed-size.js";
 import { runTasksWithConcurrency } from "../../utils/run-with-concurrency.js";
+import { chunkFixedSize } from "./chunking/fixed-size.js";
 import { estimateStructuredEmbeddingInputBytes } from "./embedding-input-limits.js";
 import { type EmbeddingInput } from "./embedding-inputs.js";
 import { isFileMissingError } from "./fs-utils.js";
@@ -14,6 +14,9 @@ import {
   type MemoryMultimodalModality,
   type MemoryMultimodalSettings,
 } from "./multimodal.js";
+
+export type { MemoryChunk } from "./chunking/types.js";
+import type { MemoryChunk } from "./chunking/types.js";
 
 export type MemoryFileEntry = {
   path: string;
@@ -26,14 +29,6 @@ export type MemoryFileEntry = {
   contentText?: string;
   modality?: MemoryMultimodalModality;
   mimeType?: string;
-};
-
-export type MemoryChunk = {
-  startLine: number;
-  endLine: number;
-  text: string;
-  hash: string;
-  embeddingInput?: EmbeddingInput;
 };
 
 export type MultimodalMemoryChunk = {
