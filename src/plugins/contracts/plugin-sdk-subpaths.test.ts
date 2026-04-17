@@ -960,6 +960,7 @@ describe("plugin-sdk subpath exports", () => {
         "ensureOllamaModelPulled",
         "promptAndConfigureOllama",
         "promptAndConfigureVllm",
+        "buildAtomProvider",
         "buildVllmProvider",
         "buildSglangProvider",
         "OLLAMA_DEFAULT_BASE_URL",
@@ -967,6 +968,7 @@ describe("plugin-sdk subpath exports", () => {
         "VLLM_DEFAULT_BASE_URL",
       ],
     });
+    expectSourceOmitsImportPattern("provider-setup", "./atom.js");
     expectSourceOmitsImportPattern("provider-setup", "./vllm.js");
     expectSourceOmitsImportPattern("provider-setup", "./sglang.js");
     expectSourceMentions("provider-auth", [
@@ -1000,10 +1002,12 @@ describe("plugin-sdk subpath exports", () => {
         "discoverOpenAICompatibleSelfHostedProvider",
         "configureOpenAICompatibleSelfHostedProviderNonInteractive",
       ],
-      omits: ["buildVllmProvider", "buildSglangProvider"],
+      omits: ["buildAtomProvider", "buildVllmProvider", "buildSglangProvider"],
     });
+    expectSourceOmitsImportPattern("self-hosted-provider-setup", "./atom.js");
     expectSourceOmitsImportPattern("self-hosted-provider-setup", "./vllm.js");
     expectSourceOmitsImportPattern("self-hosted-provider-setup", "./sglang.js");
+    expectSourceOmitsSnippet("agent-runtime", "./atom.js");
     expectSourceOmitsSnippet("agent-runtime", "./sglang.js");
     expectSourceOmitsSnippet("agent-runtime", "./vllm.js");
     expectSourceOmitsSnippet("agent-runtime", "../../extensions/");

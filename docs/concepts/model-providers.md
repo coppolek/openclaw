@@ -672,6 +672,34 @@ Plugin-owned capability split:
 - Image understanding is plugin-owned `MiniMax-VL-01` on both MiniMax auth paths
 - Web search stays on provider id `minimax`
 
+### ATOM
+
+ATOM ships as a bundled provider plugin for AMD GPU inference with
+OpenAI-compatible servers:
+
+- Provider: `atom`
+- Auth: Optional (depends on your server)
+- Default base URL: `http://127.0.0.1:8000/v1`
+
+To opt in to auto-discovery locally (any value works if your server does not
+enforce auth):
+
+```bash
+export ATOM_API_KEY="atom-local"
+```
+
+Then set a model (replace with one of the IDs returned by `/v1/models`):
+
+```json5
+{
+  agents: {
+    defaults: { model: { primary: "atom/your-model-id" } },
+  },
+}
+```
+
+See [/providers/atom](/providers/atom) for setup details.
+
 ### LM Studio
 
 LM Studio ships as a bundled provider plugin which uses the native API:
