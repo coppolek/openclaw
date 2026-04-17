@@ -41,6 +41,12 @@ describe("Discord bind() — channel: prefix handling", () => {
     setRuntimeConfigSnapshot({
       plugins: { entries: { discord: { enabled: true } } },
     });
+    // Spy on all discord-api functions that may be called across both paths.
+    // resolveChannelIdForBinding must always be a spy so placement=current tests
+    // can assert it was NOT called — vi.restoreAllMocks() runs before each test.
+    vi.spyOn(discordThreadBindingApi, "resolveChannelIdForBinding").mockResolvedValue(
+      PARENT_CHANNEL_ID,
+    );
     vi.spyOn(discordThreadBindingApi, "createWebhookForChannel").mockResolvedValue({
       webhookId: "wh-1",
       webhookToken: "tok-1",
@@ -50,9 +56,6 @@ describe("Discord bind() — channel: prefix handling", () => {
 
   describe("placement === 'child' (thread spawn)", () => {
     beforeEach(() => {
-      vi.spyOn(discordThreadBindingApi, "resolveChannelIdForBinding").mockResolvedValue(
-        PARENT_CHANNEL_ID,
-      );
       vi.spyOn(discordThreadBindingApi, "createThreadForBinding").mockResolvedValue("thread-created");
     });
 
