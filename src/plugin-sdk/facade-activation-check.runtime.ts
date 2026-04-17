@@ -57,7 +57,9 @@ const cachedFacadePublicSurfaceAccessByKey = new Map<
 export type FacadePluginManifestLike = Pick<
   PluginManifestRecord,
   "id" | "origin" | "enabledByDefault" | "rootDir" | "channels"
->;
+> & {
+  alwaysAllowedRuntimeApi?: boolean;
+};
 
 type FacadeModuleLocation = {
   modulePath: string;
