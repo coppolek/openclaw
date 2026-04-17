@@ -8,7 +8,11 @@ import { emitSessionTranscriptUpdate } from "../sessions/transcript-events.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { formatContextLimitTruncationNotice } from "./pi-embedded-runner/tool-result-context-guard.js";
 import {
+  applyToolResultDetailsPolicy,
   DEFAULT_MAX_LIVE_TOOL_RESULT_CHARS,
+  DEFAULT_TOOL_RESULT_DETAILS_MAX_CHARS,
+  DEFAULT_TOOL_RESULT_DETAILS_PERSIST_MODE,
+  type ToolResultDetailsPersistPolicy,
   truncateToolResultMessage,
 } from "./pi-embedded-runner/tool-result-truncation.js";
 import {
@@ -20,22 +24,38 @@ import { makeMissingToolResult, sanitizeToolCallInputs } from "./session-transcr
 import { extractToolCallsFromAssistant, extractToolResultId } from "./tool-call-id.js";
 
 /**
- * Truncate oversized text content blocks in a tool result message.
- * Returns the original message if under the limit, or a new message with
- * truncated text blocks otherwise.
+ * Truncate oversized text content blocks in a tool result message, and apply
+ * the details-persistence policy. Returns the original message if neither
+ * change is needed.
  */
-function capToolResultSize(msg: AgentMessage, maxChars: number): AgentMessage {
+function capToolResultSize(
+  msg: AgentMessage,
+  maxChars: number,
+  detailsPolicy: ToolResultDetailsPersistPolicy,
+): AgentMessage {
   if ((msg as { role?: string }).role !== "toolResult") {
     return msg;
   }
-  return truncateToolResultMessage(msg, maxChars, {
+  const textCapped = truncateToolResultMessage(msg, maxChars, {
     suffix: (truncatedChars) => formatContextLimitTruncationNotice(truncatedChars),
     minKeepChars: 2_000,
   });
+  return applyToolResultDetailsPolicy(textCapped, detailsPolicy);
 }
 
 function resolveMaxToolResultChars(opts?: { maxToolResultChars?: number }): number {
   return Math.max(1, opts?.maxToolResultChars ?? DEFAULT_MAX_LIVE_TOOL_RESULT_CHARS);
+}
+
+function resolveDetailsPolicy(opts?: {
+  toolResultDetailsPersist?: ToolResultDetailsPersistPolicy;
+}): ToolResultDetailsPersistPolicy {
+  return (
+    opts?.toolResultDetailsPersist ?? {
+      mode: DEFAULT_TOOL_RESULT_DETAILS_PERSIST_MODE,
+      maxChars: DEFAULT_TOOL_RESULT_DETAILS_MAX_CHARS,
+    }
+  );
 }
 
 function normalizePersistedToolResultName(
@@ -104,6 +124,7 @@ export function installSessionToolResultGuard(
       event: PluginHookBeforeMessageWriteEvent,
     ) => PluginHookBeforeMessageWriteResult | undefined;
     maxToolResultChars?: number;
+    toolResultDetailsPersist?: ToolResultDetailsPersistPolicy;
   },
 ): {
   flushPendingToolResults: () => void;
@@ -129,6 +150,7 @@ export function installSessionToolResultGuard(
   const allowSyntheticToolResults = opts?.allowSyntheticToolResults ?? true;
   const beforeWrite = opts?.beforeMessageWriteHook;
   const maxToolResultChars = resolveMaxToolResultChars(opts);
+  const detailsPolicy = resolveDetailsPolicy(opts);
 
   /**
    * Run the before_message_write hook. Returns the (possibly modified) message,
@@ -163,7 +185,7 @@ export function installSessionToolResultGuard(
           }),
         );
         if (flushed) {
-          originalAppend(capToolResultSize(flushed, maxToolResultChars) as never);
+          originalAppend(capToolResultSize(flushed, maxToolResultChars, detailsPolicy) as never);
         }
       }
     }
@@ -198,11 +220,8 @@ export function installSessionToolResultGuard(
         pendingState.delete(id);
       }
       const normalizedToolResult = normalizePersistedToolResultName(nextMessage, toolName);
-      // Apply hard size cap before persistence to prevent oversized tool results
-      // from consuming the entire context window on subsequent LLM calls.
-      const capped = capToolResultSize(persistMessage(normalizedToolResult), maxToolResultChars);
       const persisted = applyBeforeWriteHook(
-        persistToolResult(capped, {
+        persistToolResult(persistMessage(normalizedToolResult), {
           toolCallId: id ?? undefined,
           toolName,
           isSynthetic: false,
@@ -211,7 +230,13 @@ export function installSessionToolResultGuard(
       if (!persisted) {
         return undefined;
       }
-      return originalAppend(capToolResultSize(persisted, maxToolResultChars) as never);
+      // Apply hard size cap + details policy exactly once, after hook/transforms,
+      // to prevent oversized tool results from consuming the entire context
+      // window. Capping twice would re-truncate the `{__truncated, preview}`
+      // marker into a marker-of-marker and lose the breadcrumb.
+      return originalAppend(
+        capToolResultSize(persisted, maxToolResultChars, detailsPolicy) as never,
+      );
     }
 
     // Skip tool call extraction for aborted/errored assistant messages.
