@@ -1208,6 +1208,7 @@ export async function runReplyAgent(params: {
       activeSessionStore,
       storePath,
       resolvedVerboseLevel,
+      normalizeMediaPaths: normalizeReplyMediaPaths,
     });
 
     if (runOutcome.kind === "final") {
