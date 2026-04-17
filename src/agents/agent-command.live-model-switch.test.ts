@@ -10,6 +10,16 @@ const state = vi.hoisted(() => ({
   clearAgentRunContextMock: vi.fn(),
   updateSessionStoreAfterAgentRunMock: vi.fn(),
   deliverAgentCommandResultMock: vi.fn(),
+  resolveSessionMock: vi.fn(() => ({
+    sessionId: "session-1",
+    sessionKey: "agent:main",
+    sessionEntry: { sessionId: "session-1", updatedAt: Date.now() },
+    sessionStore: {},
+    storePath: "/tmp/store.json",
+    isNewSession: true,
+    persistedThinking: undefined,
+    persistedVerbose: undefined,
+  })),
 }));
 
 vi.mock("./model-fallback.js", () => ({
@@ -54,16 +64,12 @@ vi.mock("./command/session-store.runtime.js", () => ({
 }));
 
 vi.mock("./command/session.js", () => ({
-  resolveSession: () => ({
-    sessionId: "session-1",
-    sessionKey: "agent:main",
-    sessionEntry: { sessionId: "session-1", updatedAt: Date.now() },
-    sessionStore: {},
-    storePath: "/tmp/store.json",
-    isNewSession: true,
-    persistedThinking: undefined,
-    persistedVerbose: undefined,
-  }),
+  resolveSession: (...args: unknown[]) => state.resolveSessionMock(...args),
+}));
+
+vi.mock("../sessions/session-key-utils.js", () => ({
+  isAcpSessionKey: (value?: string | null) => value?.includes(":acp:") === true,
+  isSubagentSessionKey: (value?: string | null) => value?.includes(":subagent:") === true,
 }));
 
 vi.mock("./command/types.js", () => ({}));
@@ -494,6 +500,47 @@ describe("agentCommand – LiveSessionModelSwitchError retry", () => {
     expect(state.resolveEffectiveModelFallbacksMock.mock.calls[1][0]).toMatchObject({
       hasSessionModelOverride: true,
     });
+  });
+
+  it("does not pass stale sessionEntry.spawnedBy for top-level sessions", async () => {
+    const runAttemptCalls: Array<{ spawnedBy?: string }> = [];
+    state.runWithModelFallbackMock.mockImplementation(async (params: FallbackRunnerParams) => {
+      const result = await params.run(params.provider, params.model);
+      return {
+        result,
+        provider: params.provider,
+        model: params.model,
+        attempts: [],
+      };
+    });
+    state.runAgentAttemptMock.mockImplementation(async (params: { spawnedBy?: string }) => {
+      runAttemptCalls.push({ spawnedBy: params.spawnedBy });
+      return makeSuccessResult("anthropic", "claude");
+    });
+
+    const { agentCommand } = await import("./agent-command.js");
+    state.resolveSessionMock.mockReturnValue({
+      sessionId: "session-1",
+      sessionKey: "agent:main:telegram:group:-1003710118964",
+      sessionEntry: {
+        sessionId: "session-1",
+        updatedAt: Date.now(),
+        spawnedBy: "agent:main:subagent:stale-child",
+      },
+      sessionStore: {},
+      storePath: "/tmp/store.json",
+      isNewSession: false,
+      persistedThinking: undefined,
+      persistedVerbose: undefined,
+    });
+
+    await agentCommand({
+      message: "hello",
+      to: "+1234567890",
+      senderIsOwner: true,
+    });
+
+    expect(runAttemptCalls[0]?.spawnedBy).toBeUndefined();
   });
 
   it("does not flip hasSessionModelOverride on auth-only switch with same model", async () => {
