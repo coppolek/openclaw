@@ -943,7 +943,7 @@ describe("QmdMemoryManager", () => {
       pattern: "MEMORY.md",
     });
     expect(listedCollections.get("memory-dir-main")).toEqual({
-      path: workspaceDir,
+      path: path.join(workspaceDir, "memory"),
       pattern: "**/*.md",
     });
     expect(logWarnMock).not.toHaveBeenCalledWith(
