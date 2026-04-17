@@ -10,6 +10,16 @@ const state = vi.hoisted(() => ({
   clearAgentRunContextMock: vi.fn(),
   updateSessionStoreAfterAgentRunMock: vi.fn(),
   deliverAgentCommandResultMock: vi.fn(),
+  resolveSessionMock: vi.fn(() => ({
+    sessionId: "session-1",
+    sessionKey: "agent:main",
+    sessionEntry: { sessionId: "session-1", updatedAt: Date.now() },
+    sessionStore: {},
+    storePath: "/tmp/store.json",
+    isNewSession: true,
+    persistedThinking: undefined,
+    persistedVerbose: undefined,
+  })),
 }));
 
 vi.mock("./model-fallback.js", () => ({
@@ -26,12 +36,12 @@ vi.mock("./command/attempt-execution.runtime.js", () => ({
   persistAcpTurnTranscript: vi.fn(),
   persistSessionEntry: vi.fn(),
   prependInternalEventContext: (_body: string) => _body,
-  runAgentAttempt: (...args: unknown[]) => state.runAgentAttemptMock(...args),
+  runAgentAttempt: (arg: unknown) => state.runAgentAttemptMock(arg),
   sessionFileHasContent: vi.fn(async () => false),
 }));
 
 vi.mock("./command/delivery.runtime.js", () => ({
-  deliverAgentCommandResult: (...args: unknown[]) => state.deliverAgentCommandResultMock(...args),
+  deliverAgentCommandResult: (arg: unknown) => state.deliverAgentCommandResultMock(arg),
 }));
 
 vi.mock("./command/run-context.js", () => ({
@@ -49,21 +59,16 @@ vi.mock("./command/run-context.js", () => ({
 }));
 
 vi.mock("./command/session-store.runtime.js", () => ({
-  updateSessionStoreAfterAgentRun: (...args: unknown[]) =>
-    state.updateSessionStoreAfterAgentRunMock(...args),
+  updateSessionStoreAfterAgentRun: (arg: unknown) => state.updateSessionStoreAfterAgentRunMock(arg),
 }));
 
 vi.mock("./command/session.js", () => ({
-  resolveSession: () => ({
-    sessionId: "session-1",
-    sessionKey: "agent:main",
-    sessionEntry: { sessionId: "session-1", updatedAt: Date.now() },
-    sessionStore: {},
-    storePath: "/tmp/store.json",
-    isNewSession: true,
-    persistedThinking: undefined,
-    persistedVerbose: undefined,
-  }),
+  resolveSession: () => state.resolveSessionMock(),
+}));
+
+vi.mock("../sessions/session-key-utils.js", () => ({
+  isAcpSessionKey: (value?: string | null) => value?.includes(":acp:") === true,
+  isSubagentSessionKey: (value?: string | null) => value?.includes(":subagent:") === true,
 }));
 
 vi.mock("./command/types.js", () => ({}));
@@ -148,10 +153,10 @@ vi.mock("../config/sessions/transcript-resolve.runtime.js", () => ({
 }));
 
 vi.mock("../infra/agent-events.js", () => ({
-  clearAgentRunContext: (...args: unknown[]) => state.clearAgentRunContextMock(...args),
-  emitAgentEvent: (...args: unknown[]) => state.emitAgentEventMock(...args),
+  clearAgentRunContext: (arg: unknown) => state.clearAgentRunContextMock(arg),
+  emitAgentEvent: (arg: unknown) => state.emitAgentEventMock(arg),
   onAgentEvent: vi.fn(),
-  registerAgentRunContext: (...args: unknown[]) => state.registerAgentRunContextMock(...args),
+  registerAgentRunContext: (arg: unknown) => state.registerAgentRunContextMock(arg),
 }));
 
 vi.mock("../infra/outbound/session-context.js", () => ({
@@ -441,8 +446,8 @@ describe("agentCommand – LiveSessionModelSwitchError retry", () => {
       };
     });
 
-    state.runAgentAttemptMock.mockImplementation(async (...args: unknown[]) => {
-      const attemptParams = args[0] as { authProfileProvider?: string } | undefined;
+    state.runAgentAttemptMock.mockImplementation(async (arg: unknown) => {
+      const attemptParams = arg as { authProfileProvider?: string } | undefined;
       capturedAuthProfileProvider = attemptParams?.authProfileProvider;
       return makeSuccessResult("openai", "gpt-5.4");
     });
@@ -494,6 +499,47 @@ describe("agentCommand – LiveSessionModelSwitchError retry", () => {
     expect(state.resolveEffectiveModelFallbacksMock.mock.calls[1][0]).toMatchObject({
       hasSessionModelOverride: true,
     });
+  });
+
+  it("does not pass stale sessionEntry.spawnedBy for top-level sessions", async () => {
+    const runAttemptCalls: Array<{ spawnedBy?: string }> = [];
+    state.runWithModelFallbackMock.mockImplementation(async (params: FallbackRunnerParams) => {
+      const result = await params.run(params.provider, params.model);
+      return {
+        result,
+        provider: params.provider,
+        model: params.model,
+        attempts: [],
+      };
+    });
+    state.runAgentAttemptMock.mockImplementation(async (params: { spawnedBy?: string }) => {
+      runAttemptCalls.push({ spawnedBy: params.spawnedBy });
+      return makeSuccessResult("anthropic", "claude");
+    });
+
+    const { agentCommand } = await import("./agent-command.js");
+    state.resolveSessionMock.mockReturnValue({
+      sessionId: "session-1",
+      sessionKey: "agent:main:telegram:group:-1003710118964",
+      sessionEntry: {
+        sessionId: "session-1",
+        updatedAt: Date.now(),
+        spawnedBy: "agent:main:subagent:stale-child",
+      } as { sessionId: string; updatedAt: number; spawnedBy?: string },
+      sessionStore: {},
+      storePath: "/tmp/store.json",
+      isNewSession: false,
+      persistedThinking: undefined,
+      persistedVerbose: undefined,
+    });
+
+    await agentCommand({
+      message: "hello",
+      to: "+1234567890",
+      senderIsOwner: true,
+    });
+
+    expect(runAttemptCalls[0]?.spawnedBy).toBeUndefined();
   });
 
   it("does not flip hasSessionModelOverride on auth-only switch with same model", async () => {

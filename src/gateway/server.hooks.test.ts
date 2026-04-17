@@ -22,6 +22,8 @@ const HOOK_TOKEN = "hook-secret";
 
 afterEach(() => {
   vi.restoreAllMocks();
+  cronIsolatedRun.mockReset();
+  drainSystemEvents(resolveMainKey());
 });
 
 function buildHookJsonHeaders(options?: {

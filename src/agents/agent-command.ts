@@ -33,6 +33,7 @@ import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
 import { applyVerboseOverride } from "../sessions/level-overrides.js";
 import { applyModelOverrideToSessionEntry } from "../sessions/model-overrides.js";
 import { resolveSendPolicy } from "../sessions/send-policy.js";
+import { isAcpSessionKey, isSubagentSessionKey } from "../sessions/session-key-utils.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { sanitizeForLog } from "../terminal/ansi.js";
 import { resolveMessageChannel } from "../utils/message-channel.js";
@@ -855,7 +856,11 @@ async function agentCommandInternal(
           runContext.messageChannel,
           opts.replyChannel ?? opts.channel,
         );
-        const spawnedBy = normalizedSpawned.spawnedBy ?? sessionEntry?.spawnedBy;
+        const spawnedBy =
+          normalizedSpawned.spawnedBy ??
+          (isSubagentSessionKey(sessionKey) || isAcpSessionKey(sessionKey)
+            ? sessionEntry?.spawnedBy
+            : undefined);
         const effectiveFallbacksOverride = resolveEffectiveModelFallbacks({
           cfg,
           agentId: sessionAgentId,
