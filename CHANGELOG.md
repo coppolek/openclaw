@@ -4,6 +4,10 @@ Docs: https://docs.openclaw.ai
 
 ## Unreleased
 
+### Changes
+
+- Slack/monitor: add `ignoreOtherMentions` channel option to skip messages that mention other users or bots without mentioning the configured bot, reducing noise in busy channels. (#55570) Thanks @pingren.
+
 ### Fixes
 
 - Onboarding/non-interactive: preserve existing gateway auth tokens during re-onboard so active local gateway clients are not disconnected by an implicit token rotation. (#67821) Thanks @BKF-Gitty.
