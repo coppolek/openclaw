@@ -193,6 +193,49 @@ describe("web outbound", () => {
     );
   });
 
+  it("forces voice-note media type when audioAsVoice is true", async () => {
+    const buf = Buffer.from("voice-bytes");
+    loadWebMediaMock.mockResolvedValueOnce({
+      buffer: buf,
+      contentType: "application/octet-stream",
+      kind: "document",
+      fileName: "voice.ogg",
+    });
+
+    await sendMessageWhatsApp("+1555", "voice override", {
+      verbose: false,
+      mediaUrl: "/tmp/voice.ogg",
+      audioAsVoice: true,
+    });
+
+    expect(sendMessage).toHaveBeenLastCalledWith(
+      "+1555",
+      "voice override",
+      buf,
+      "audio/ogg; codecs=opus",
+    );
+  });
+
+  it("does not force voice-note for non-audio files when audioAsVoice is true", async () => {
+    const buf = Buffer.from("pdf");
+    loadWebMediaMock.mockResolvedValueOnce({
+      buffer: buf,
+      contentType: "application/pdf",
+      kind: "document",
+      fileName: "file.pdf",
+    });
+
+    await sendMessageWhatsApp("+1555", "doc", {
+      verbose: false,
+      mediaUrl: "/tmp/file.pdf",
+      audioAsVoice: true,
+    });
+
+    expect(sendMessage).toHaveBeenLastCalledWith("+1555", "doc", buf, "application/pdf", {
+      fileName: "file.pdf",
+    });
+  });
+
   it("maps video with caption", async () => {
     const buf = Buffer.from("video");
     loadWebMediaMock.mockResolvedValueOnce({

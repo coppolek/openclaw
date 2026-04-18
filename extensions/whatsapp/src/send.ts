@@ -3,6 +3,7 @@ import { loadConfig, type OpenClawConfig } from "openclaw/plugin-sdk/config-runt
 import { resolveMarkdownTableMode } from "openclaw/plugin-sdk/config-runtime";
 import { generateSecureUuid } from "openclaw/plugin-sdk/core";
 import { normalizePollInput, type PollInput } from "openclaw/plugin-sdk/media-runtime";
+import { isAudioFileName } from "openclaw/plugin-sdk/media-runtime";
 import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
 import { getChildLogger } from "openclaw/plugin-sdk/text-runtime";
 import { redactIdentifier } from "openclaw/plugin-sdk/text-runtime";
@@ -61,6 +62,7 @@ export async function sendMessageWhatsApp(
     mediaLocalRoots?: readonly string[];
     mediaReadFile?: (filePath: string) => Promise<Buffer>;
     gifPlayback?: boolean;
+    audioAsVoice?: boolean;
     accountId?: string;
   },
 ): Promise<{ messageId: string; toJid: string }> {
@@ -114,17 +116,32 @@ export async function sendMessageWhatsApp(
       const caption = text || undefined;
       mediaBuffer = media.buffer;
       mediaType = media.contentType ?? "application/octet-stream";
+      const forceVoiceDelivery =
+        options.audioAsVoice === true &&
+        (media.contentType?.startsWith("audio/") === true ||
+          isAudioFileName(media.fileName) ||
+          isAudioFileName(primaryMediaUrl));
+      if (forceVoiceDelivery) {
+        // Honor [[audio_as_voice]] regardless of media.kind; WhatsApp expects
+        // explicit opus codec for best PTT compatibility.
+        mediaType =
+          media.contentType === "audio/ogg"
+            ? "audio/ogg; codecs=opus"
+            : media.contentType?.startsWith("audio/")
+              ? media.contentType
+              : "audio/ogg; codecs=opus";
+      }
       if (media.kind === "audio") {
         // WhatsApp expects explicit opus codec for PTT voice notes.
         mediaType =
           media.contentType === "audio/ogg"
             ? "audio/ogg; codecs=opus"
             : (media.contentType ?? "application/octet-stream");
-      } else if (media.kind === "video") {
+      } else if (!forceVoiceDelivery && media.kind === "video") {
         text = caption ?? "";
-      } else if (media.kind === "image") {
+      } else if (!forceVoiceDelivery && media.kind === "image") {
         text = caption ?? "";
-      } else {
+      } else if (!forceVoiceDelivery) {
         text = caption ?? "";
         documentFileName = media.fileName;
       }
