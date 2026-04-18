@@ -659,6 +659,7 @@ describe("msteams monitor handler authz", () => {
     expect(dispatched?.ctxPayload).toMatchObject({
       BodyForAgent:
         "[Thread history]\nAlice: Allowed context\n[/Thread history]\n\nCurrent message",
+      GroupSpace: "team123",
     });
     expect(
       String((dispatched?.ctxPayload as { BodyForAgent?: string }).BodyForAgent),
