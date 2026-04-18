@@ -49,6 +49,7 @@ Docs: https://docs.openclaw.ai
 - Agents/TTS: report failed speech synthesis as a real tool error so unconfigured providers no longer feed successful TTS failure output back into agent loops. (#67980) Thanks @lawrence3699.
 - Gateway/wake: allow unknown properties on wake payloads so external senders like Paperclip can attach opaque metadata without failing schema validation. (#68355) Thanks @kagura-agent.
 - Matrix: honor `channels.matrix.network.dangerouslyAllowPrivateNetwork` when creating clients for private-network homeservers. (#68332) Thanks @kagura-agent.
+- Providers/retry: skip SDK retry on 429 responses whose `retry-after` exceeds 60 seconds (configurable via `OPENCLAW_SDK_RETRY_MAX_WAIT_SECONDS`) by injecting `x-should-retry: false`, so quota-exhaustion errors (e.g. Anthropic's multi-minute throttle) surface immediately to the model failover layer instead of blocking the run on a long sleep. Parses both standard `retry-after` (seconds or HTTP-date) and the `retry-after-ms` variant used by OpenAI; Google/Ollama SDKs ignore the header, making the override a safe no-op there.
 
 ## 2026.4.15
 
