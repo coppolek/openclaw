@@ -8,6 +8,7 @@ import { isTimeoutErrorMessage } from "./pi-embedded-helpers/errors.js";
 import type { FailoverReason } from "./pi-embedded-helpers/types.js";
 
 const ABORT_TIMEOUT_RE = /request was aborted|request aborted/i;
+const SESSION_LOCK_ERROR_RE = /\bsession file locked\b/i;
 
 export class FailoverError extends Error {
   readonly reason: FailoverReason;
@@ -190,8 +191,31 @@ function getErrorCause(err: unknown): unknown {
   return (err as { cause?: unknown }).cause;
 }
 
+function isSessionLockError(err: unknown, seen: Set<object> = new Set()): boolean {
+  const directMessage = readDirectErrorMessage(err);
+  if (directMessage && SESSION_LOCK_ERROR_RE.test(directMessage)) {
+    return true;
+  }
+  if (!err || typeof err !== "object") {
+    return false;
+  }
+  if (seen.has(err)) {
+    return false;
+  }
+  seen.add(err);
+  const candidate = err as { error?: unknown; cause?: unknown; reason?: unknown };
+  return (
+    isSessionLockError(candidate.error, seen) ||
+    isSessionLockError(candidate.cause, seen) ||
+    isSessionLockError(candidate.reason, seen)
+  );
+}
+
 function hasTimeoutHint(err: unknown): boolean {
   if (!err) {
+    return false;
+  }
+  if (isSessionLockError(err)) {
     return false;
   }
   if (readErrorName(err) === "TimeoutError") {
@@ -242,6 +266,10 @@ function resolveFailoverClassificationFromError(err: unknown): FailoverClassific
       kind: "reason",
       reason: err.reason,
     };
+  }
+  // Session lock contention is local infrastructure pressure, not a provider failure.
+  if (isSessionLockError(err)) {
+    return null;
   }
 
   const classification = classifyFailoverSignal(normalizeErrorSignal(err));
