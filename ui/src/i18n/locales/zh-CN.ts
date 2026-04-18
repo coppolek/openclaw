@@ -846,4 +846,22 @@ export const zh_CN: TranslationMap = {
       nameRequiredShort: "名称为必填。",
     },
   },
+  agents: {
+    overview: {
+      title: "概览",
+      subtitle: "工作区路径和身份元数据",
+      workspace: "工作区",
+      primaryModel: "主模型",
+      skillsFilter: "技能筛选",
+      allSkills: "全部技能",
+      selected: "已选 {count} 个",
+      unsavedChanges: "您有未保存的配置更改",
+      modelSelection: "模型选择",
+      notSet: "未设置",
+      inheritDefault: "继承默认值",
+      inheritDefaultWithModel: "Inherit default ({model})",
+      modelPlaceholder: "provider/model",
+      fallbacks: "备选模型",
+    },
+  },
 };

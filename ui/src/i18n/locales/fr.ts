@@ -870,4 +870,22 @@ export const fr: TranslationMap = {
       nameRequiredShort: "Nom obligatoire.",
     },
   },
+  agents: {
+    overview: {
+      title: "Aperçu",
+      subtitle: "Chemins de workspace et métadonnées d'identité.",
+      workspace: "Espace de travail",
+      primaryModel: "Modèle principal",
+      skillsFilter: "Filtre de compétences",
+      allSkills: "Toutes les compétences",
+      selected: "{count} sélectionnés",
+      unsavedChanges: "Vous avez des modifications de configuration non enregistrées.",
+      modelSelection: "Sélection du modèle",
+      notSet: "Non défini",
+      inheritDefault: "Hériter par défaut",
+      inheritDefaultWithModel: "Hériter par défaut ({model})",
+      modelPlaceholder: "provider/model",
+      fallbacks: "Solutions de repli",
+    },
+  },
 };

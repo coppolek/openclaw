@@ -852,4 +852,22 @@ export const en: TranslationMap = {
       nameRequiredShort: "Name required.",
     },
   },
+  agents: {
+    overview: {
+      title: "Overview",
+      subtitle: "Workspace paths and identity metadata.",
+      workspace: "Workspace",
+      primaryModel: "Primary Model",
+      skillsFilter: "Skills Filter",
+      allSkills: "all skills",
+      selected: "{count} selected",
+      unsavedChanges: "You have unsaved config changes.",
+      modelSelection: "Model Selection",
+      notSet: "Not set",
+      inheritDefault: "Inherit default",
+      inheritDefaultWithModel: "Inherit default ({model})",
+      modelPlaceholder: "provider/model",
+      fallbacks: "Fallbacks",
+    },
+  },
 };

@@ -852,4 +852,22 @@ export const ko: TranslationMap = {
       nameRequiredShort: "이름이 필요합니다.",
     },
   },
+  agents: {
+    overview: {
+      title: "개요",
+      subtitle: "워크스페이스 경로 및 ID 메타데이터.",
+      workspace: "워크스페이스",
+      primaryModel: "기본 모델",
+      skillsFilter: "기술 필터",
+      allSkills: "모든 기술",
+      selected: "{count} 개 선택됨",
+      unsavedChanges: "저장되지 않은 구성 변경 사항이 있습니다.",
+      modelSelection: "모델 선택",
+      notSet: "설정되지 않음",
+      inheritDefault: "기본값 상속",
+      inheritDefaultWithModel: "기본값 상속 ({model})",
+      modelPlaceholder: "provider/model",
+      fallbacks: "폴백",
+    },
+  },
 };

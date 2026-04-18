@@ -867,4 +867,22 @@ export const uk: TranslationMap = {
       nameRequiredShort: "Потрібна назва.",
     },
   },
+  agents: {
+    overview: {
+      title: "Огляд",
+      subtitle: "Шляхи робочої ділянки та метадані ідентичності.",
+      workspace: "Робоча ділянка",
+      primaryModel: "Основна модель",
+      skillsFilter: "Фільтр навичок",
+      allSkills: "Усі навички",
+      selected: "{count} вибрано",
+      unsavedChanges: "У вас є незбережені зміни конфігурації.",
+      modelSelection: "Вибір моделі",
+      notSet: "Не встановлено",
+      inheritDefault: "Успадкувати за замовчуванням",
+      inheritDefaultWithModel: "Успадкувати за замовчуванням ({model})",
+      modelPlaceholder: "provider/model",
+      fallbacks: "Резервні",
+    },
+  },
 };

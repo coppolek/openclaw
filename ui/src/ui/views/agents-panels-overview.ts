@@ -100,12 +100,12 @@ export function renderAgentOverview(params: {
 
   return html`
     <section class="card">
-      <div class="card-title">Overview</div>
-      <div class="card-sub">Workspace paths and identity metadata.</div>
+      <div class="card-title">${t("agents.overview.title")}</div>
+      <div class="card-sub">${t("agents.overview.subtitle")}</div>
 
       <div class="agents-overview-grid" style="margin-top: 16px;">
         <div class="agent-kv">
-          <div class="label">Workspace</div>
+          <div class="label">${t("agents.overview.workspace")}</div>
           <div>
             <button
               type="button"
@@ -118,11 +118,11 @@ export function renderAgentOverview(params: {
           </div>
         </div>
         <div class="agent-kv">
-          <div class="label">Primary Model</div>
+          <div class="label">${t("agents.overview.primaryModel")}</div>
           <div class="mono">${model}</div>
         </div>
         <div class="agent-kv">
-          <div class="label">Skills Filter</div>
+          <div class="label">${t("agents.overview.skillsFilter")}</div>
           <div>${skillFilter ? `${skillCount} selected` : "all skills"}</div>
         </div>
       </div>
@@ -130,13 +130,13 @@ export function renderAgentOverview(params: {
       ${configDirty
         ? html`
             <div class="callout warn" style="margin-top: 16px">
-              You have unsaved config changes.
+              ${t("agents.overview.unsavedChanges")}
             </div>
           `
         : nothing}
 
       <div class="agent-model-select" style="margin-top: 20px;">
-        <div class="label">Model Selection</div>
+        <div class="label">${t("agents.overview.modelSelection")}</div>
         <div class="agent-model-fields">
           <label class="field">
             <span>Primary model${isDefault ? " (default)" : ""}</span>
@@ -147,7 +147,7 @@ export function renderAgentOverview(params: {
                 onModelChange(agent.id, (e.target as HTMLSelectElement).value || null)}
             >
               ${isDefault
-                ? html` <option value="">Not set</option> `
+                ? html` <option value="">${t("agents.overview.notSet")}</option> `
                 : html`
                     <option value="">
                       ${defaultPrimary ? `Inherit default (${defaultPrimary})` : "Inherit default"}
@@ -157,7 +157,7 @@ export function renderAgentOverview(params: {
             </select>
           </label>
           <div class="field">
-            <span>Fallbacks</span>
+            <span>${t("agents.overview.fallbacks")}</span>
             <div
               class="agent-chip-input"
               @click=${(e: Event) => {

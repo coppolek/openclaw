@@ -859,4 +859,22 @@ export const id: TranslationMap = {
       nameRequiredShort: "Nama wajib diisi.",
     },
   },
+  agents: {
+    overview: {
+      title: "Ringkasan",
+      subtitle: "Jalur ruang kerja dan metadata identitas.",
+      workspace: "Ruang kerja",
+      primaryModel: "Model utama",
+      skillsFilter: "Filter keterampilan",
+      allSkills: "semua keterampilan",
+      selected: "{count} dipilih",
+      unsavedChanges: "Anda memiliki perubahan konfigurasi yang belum disimpan.",
+      modelSelection: "Pemilihan model",
+      notSet: "Tidak disetel",
+      inheritDefault: "Warisi default",
+      inheritDefaultWithModel: "Warisi default ({model})",
+      modelPlaceholder: "provider/model",
+      fallbacks: "Fallback",
+    },
+  },
 };

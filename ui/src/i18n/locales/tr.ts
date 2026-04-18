@@ -867,4 +867,22 @@ export const tr: TranslationMap = {
       nameRequiredShort: "Ad gerekli.",
     },
   },
+  agents: {
+    overview: {
+      title: "Genel Bakış",
+      subtitle: "Çalışma alanı yolları ve kimlik meta verileri.",
+      workspace: "Çalışma alanı",
+      primaryModel: "Birincil model",
+      skillsFilter: "Beceri filtresi",
+      allSkills: "Tüm beceriler",
+      selected: "{count} seçildi",
+      unsavedChanges: "Kaydedilmemiş yapılandırma değişiklikleriniz var.",
+      modelSelection: "Model seçimi",
+      notSet: "Ayarlanmadı",
+      inheritDefault: "Varsayılanı devral",
+      inheritDefaultWithModel: "Varsayılanı devral ({model})",
+      modelPlaceholder: "provider/model",
+      fallbacks: "Yedekler",
+    },
+  },
 };

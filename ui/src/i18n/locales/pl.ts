@@ -871,4 +871,22 @@ export const pl: TranslationMap = {
       nameRequiredShort: "Nazwa jest wymagana.",
     },
   },
+  agents: {
+    overview: {
+      title: "Przegląd",
+      subtitle: "Ścieżki przestrzeni roboczej i metadane tożsamości.",
+      workspace: "Przestrzeń robocza",
+      primaryModel: "Model główny",
+      skillsFilter: "Filtr umiejętności",
+      allSkills: "Wszystkie umiejętności",
+      selected: "{count} wybrano",
+      unsavedChanges: "Masz niezapisane zmiany konfiguracji.",
+      modelSelection: "Wybór modelu",
+      notSet: "Nie ustawiono",
+      inheritDefault: "Dziedzicz domyślne",
+      inheritDefaultWithModel: "Dziedzicz domyślne ({model})",
+      modelPlaceholder: "provider/model",
+      fallbacks: "Rezerwowe",
+    },
+  },
 };

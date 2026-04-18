@@ -863,4 +863,22 @@ export const pt_BR: TranslationMap = {
       nameRequiredShort: "Nome obrigatório.",
     },
   },
+  agents: {
+    overview: {
+      title: "Visão geral",
+      subtitle: "Caminhos do espaço de trabalho e metadados de identidade.",
+      workspace: "Espaço de trabalho",
+      primaryModel: "Modelo principal",
+      skillsFilter: "Filtro de habilidades",
+      allSkills: "Todas as habilidades",
+      selected: "{count} selecionados",
+      unsavedChanges: "Você tem alterações de configuração não salvas.",
+      modelSelection: "Seleção de modelo",
+      notSet: "Não definido",
+      inheritDefault: "Herdar padrão",
+      inheritDefaultWithModel: "Herdar padrão ({model})",
+      modelPlaceholder: "provider/model",
+      fallbacks: "Alternativas",
+    },
+  },
 };

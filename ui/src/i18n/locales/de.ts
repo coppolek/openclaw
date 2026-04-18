@@ -874,4 +874,22 @@ export const de: TranslationMap = {
       nameRequiredShort: "Name erforderlich.",
     },
   },
+  agents: {
+    overview: {
+      title: "Übersicht",
+      subtitle: "Arbeitsbereichspfade und Identitätsmetadaten.",
+      workspace: "Arbeitsbereich",
+      primaryModel: "Primäres Modell",
+      skillsFilter: "Skill-Filter",
+      allSkills: "Alle Skills",
+      selected: "{count} ausgewählt",
+      unsavedChanges: "Sie haben nicht gespeicherte Konfigurationsänderungen.",
+      modelSelection: "Modellauswahl",
+      notSet: "Nicht festgelegt",
+      inheritDefault: "Standard erben",
+      inheritDefaultWithModel: "Standard erben ({model})",
+      modelPlaceholder: "provider/model",
+      fallbacks: "Ausweichoptionen",
+    },
+  },
 };

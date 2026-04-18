@@ -865,4 +865,22 @@ export const ja_JP: TranslationMap = {
       nameRequiredShort: "名前は必須です。",
     },
   },
+  agents: {
+    overview: {
+      title: "概要",
+      subtitle: "ワークスペースパスとアイデンティティメタデータ。",
+      workspace: "ワークスペース",
+      primaryModel: "プライマリモデル",
+      skillsFilter: "スキルフィルター",
+      allSkills: "全スキル",
+      selected: "{count} 件選択",
+      unsavedChanges: "構成の変更が保存されていません。",
+      modelSelection: "モデル選択",
+      notSet: "未設定",
+      inheritDefault: "デフォルトを継承",
+      inheritDefaultWithModel: "デフォルトを継承（{model}）",
+      modelPlaceholder: "provider/model",
+      fallbacks: "フォールバック",
+    },
+  },
 };
