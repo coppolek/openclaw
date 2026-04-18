@@ -21798,6 +21798,23 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
             },
             additionalProperties: false,
           },
+          configBackup: {
+            type: "object",
+            properties: {
+              enabled: {
+                type: "boolean",
+              },
+              keepBackups: {
+                type: "integer",
+                exclusiveMinimum: 0,
+                maximum: 9007199254740991,
+              },
+              autoRollback: {
+                type: "boolean",
+              },
+            },
+            additionalProperties: false,
+          },
         },
         additionalProperties: false,
         title: "Gateway",
@@ -22191,25 +22208,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                 url: {
                   type: "string",
                   format: "uri",
-                },
-                headers: {
-                  type: "object",
-                  propertyNames: {
-                    type: "string",
-                  },
-                  additionalProperties: {
-                    anyOf: [
-                      {
-                        type: "string",
-                      },
-                      {
-                        type: "number",
-                      },
-                      {
-                        type: "boolean",
-                      },
-                    ],
-                  },
                 },
               },
               additionalProperties: {},

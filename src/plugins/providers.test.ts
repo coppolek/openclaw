@@ -11,7 +11,6 @@ type IsPluginRegistryLoadInFlight = typeof import("./loader.js").isPluginRegistr
 type LoadPluginManifestRegistry =
   typeof import("./manifest-registry.js").loadPluginManifestRegistry;
 type ApplyPluginAutoEnable = typeof import("../config/plugin-auto-enable.js").applyPluginAutoEnable;
-type SetActivePluginRegistry = typeof import("./runtime.js").setActivePluginRegistry;
 
 const resolveRuntimePluginRegistryMock = vi.fn<ResolveRuntimePluginRegistry>();
 const loadOpenClawPluginsMock = vi.fn<LoadOpenClawPlugins>();
@@ -26,7 +25,7 @@ let resolveEnabledProviderPluginIds: typeof import("./providers.js").resolveEnab
 let resolveDiscoveredProviderPluginIds: typeof import("./providers.js").resolveDiscoveredProviderPluginIds;
 let resolveDiscoverableProviderOwnerPluginIds: typeof import("./providers.js").resolveDiscoverableProviderOwnerPluginIds;
 let resolvePluginProviders: typeof import("./providers.runtime.js").resolvePluginProviders;
-let setActivePluginRegistry: SetActivePluginRegistry;
+let setActivePluginRegistry: typeof import("./runtime.js").setActivePluginRegistry;
 
 function createManifestProviderPlugin(params: {
   id: string;
@@ -266,10 +265,24 @@ function expectProviderRuntimeRegistryLoad(params?: { config?: unknown; env?: No
 describe("resolvePluginProviders", () => {
   beforeAll(async () => {
     vi.resetModules();
-    loadPluginManifestRegistryMock.mockReturnValue({
-      plugins: [],
-      diagnostics: [],
-    });
+    vi.doMock("./loader.js", () => ({
+      loadOpenClawPlugins: (...args: Parameters<LoadOpenClawPlugins>) =>
+        loadOpenClawPluginsMock(...args),
+    }));
+    vi.doMock("../config/plugin-auto-enable.js", () => ({
+      applyPluginAutoEnable: (...args: Parameters<ApplyPluginAutoEnable>) =>
+        applyPluginAutoEnableMock(...args),
+    }));
+    vi.doMock("./manifest-registry.js", () => ({
+      loadPluginManifestRegistry: (...args: Parameters<LoadPluginManifestRegistry>) =>
+        loadPluginManifestRegistryMock(...args),
+    }));
+    ({ resolveOwningPluginIdsForProvider } = await import("./providers.js"));
+    ({ resolvePluginProviders } = await import("./providers.runtime.js"));
+  });
+
+  beforeEach(async () => {
+    loadOpenClawPluginsMock.mockReset();
     vi.doMock("./loader.js", () => ({
       loadOpenClawPlugins: (...args: Parameters<LoadOpenClawPlugins>) =>
         loadOpenClawPluginsMock(...args),
@@ -307,10 +320,6 @@ describe("resolvePluginProviders", () => {
 
   beforeEach(() => {
     setActivePluginRegistry(createEmptyPluginRegistry());
-    resolveRuntimePluginRegistryMock.mockReset();
-    loadOpenClawPluginsMock.mockReset();
-    isPluginRegistryLoadInFlightMock.mockReset();
-    isPluginRegistryLoadInFlightMock.mockReturnValue(false);
     const provider: ProviderPlugin = {
       id: "demo-provider",
       label: "Demo Provider",
@@ -318,13 +327,12 @@ describe("resolvePluginProviders", () => {
     };
     const registry = createEmptyPluginRegistry();
     registry.providers.push({ pluginId: "google", provider, source: "bundled" });
-    resolveRuntimePluginRegistryMock.mockReturnValue(registry);
     loadOpenClawPluginsMock.mockReturnValue(registry);
     loadPluginManifestRegistryMock.mockReset();
     applyPluginAutoEnableMock.mockReset();
     applyPluginAutoEnableMock.mockImplementation(
       (params): PluginAutoEnableResult => ({
-        config: params.config ?? ({} as OpenClawConfig),
+        config: params.config ?? {},
         changes: [],
         autoEnabledReasons: {},
       }),
@@ -369,7 +377,7 @@ describe("resolvePluginProviders", () => {
     expectResolvedProviders(providers, [
       { id: "demo-provider", label: "Demo Provider", auth: [], pluginId: "google" },
     ]);
-    expect(resolveRuntimePluginRegistryMock).toHaveBeenCalledWith(
+    expect(loadOpenClawPluginsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         workspaceDir: "/workspace/explicit",
         env,

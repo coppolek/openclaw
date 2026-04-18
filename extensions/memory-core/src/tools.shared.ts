@@ -1,6 +1,8 @@
 import { Type } from "@sinclair/typebox";
 import {
+  extractUserIdFromSessionKey,
   listMemoryCorpusSupplements,
+  parseAgentSessionKey,
   resolveMemorySearchConfig,
   resolveSessionAgentId,
   type MemoryCorpusGetResult,
@@ -9,6 +11,54 @@ import {
   type OpenClawConfig,
 } from "openclaw/plugin-sdk/memory-core-host-runtime-core";
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
+
+// Session-type markers that follow the platform token in a session key.
+// e.g. "agent:main:telegram:dm:123" — "dm" is a session-type marker, "telegram" is the platform.
+// Using structural detection instead of a hardcoded platform list avoids missing new channels.
+const SESSION_TYPE_MARKERS = new Set(["direct", "dm", "group", "channel"]);
+
+/**
+ * Extract the platform name from a session key based on session key structure.
+ * A session key segment like "<platform>:<session-type>:<id>" identifies the platform
+ * by its position before a known session-type marker.
+ */
+function extractPlatformFromSessionKey(sessionKey: string | undefined | null): string | null {
+  const parsed = parseAgentSessionKey(sessionKey);
+  if (!parsed?.rest) {
+    return null;
+  }
+  const tokens = parsed.rest.split(":").filter(Boolean);
+  // The platform is the token immediately before a session-type marker.
+  if (tokens.length >= 2 && SESSION_TYPE_MARKERS.has(tokens[1])) {
+    return tokens[0].toLowerCase();
+  }
+  return null;
+}
+
+/**
+ * Produce a platform-scoped user ID like "discord:12345" for memory isolation.
+ * If the senderId already contains a colon it is treated as already-prefixed and
+ * returned unchanged. Otherwise the platform is extracted from the session key
+ * and prepended.
+ */
+function addPlatformPrefixToSenderId(params: {
+  senderId: string | undefined | null;
+  sessionKey: string | undefined | null;
+}): string | undefined {
+  const { senderId, sessionKey } = params;
+  if (!senderId) {
+    return undefined;
+  }
+  // Already prefixed (e.g. "discord:12345") — preserve as-is.
+  if (senderId.includes(":")) {
+    return senderId;
+  }
+  const platform = extractPlatformFromSessionKey(sessionKey);
+  if (platform) {
+    return `${platform}:${senderId}`;
+  }
+  return senderId;
+}
 
 type MemoryToolRuntime = typeof import("./tools.runtime.js");
 type MemorySearchManagerResult = Awaited<
@@ -43,6 +93,7 @@ export const MemoryGetSchema = Type.Object({
 export function resolveMemoryToolContext(options: {
   config?: OpenClawConfig;
   agentSessionKey?: string;
+  senderId?: string;
 }) {
   const cfg = options.config;
   if (!cfg) {
@@ -55,12 +106,25 @@ export function resolveMemoryToolContext(options: {
   if (!resolveMemorySearchConfig(cfg, agentId)) {
     return null;
   }
-  return { cfg, agentId };
+  const rawUserId = extractUserIdFromSessionKey(options.agentSessionKey);
+  const userId = rawUserId
+    ? addPlatformPrefixToSenderId({
+        senderId: rawUserId,
+        sessionKey: options.agentSessionKey,
+      })
+    : options.senderId
+      ? addPlatformPrefixToSenderId({
+          senderId: options.senderId,
+          sessionKey: options.agentSessionKey,
+        })
+      : undefined;
+  return { cfg, agentId, userId };
 }
 
 export async function getMemoryManagerContext(params: {
   cfg: OpenClawConfig;
   agentId: string;
+  userId?: string;
 }): Promise<
   | {
       manager: NonNullable<MemorySearchManagerResult["manager"]>;
@@ -75,6 +139,7 @@ export async function getMemoryManagerContext(params: {
 export async function getMemoryManagerContextWithPurpose(params: {
   cfg: OpenClawConfig;
   agentId: string;
+  userId?: string;
   purpose?: "default" | "status";
 }): Promise<
   | {
@@ -88,6 +153,7 @@ export async function getMemoryManagerContextWithPurpose(params: {
   const { manager, error } = await getMemorySearchManager({
     cfg: params.cfg,
     agentId: params.agentId,
+    userId: params.userId,
     purpose: params.purpose,
   });
   return manager ? { manager } : { error };
@@ -97,12 +163,17 @@ export function createMemoryTool(params: {
   options: {
     config?: OpenClawConfig;
     agentSessionKey?: string;
+    senderId?: string;
   };
   label: string;
   name: string;
   description: string;
   parameters: typeof MemorySearchSchema | typeof MemoryGetSchema;
-  execute: (ctx: { cfg: OpenClawConfig; agentId: string }) => AnyAgentTool["execute"];
+  execute: (ctx: {
+    cfg: OpenClawConfig;
+    agentId: string;
+    userId?: string;
+  }) => AnyAgentTool["execute"];
 }): AnyAgentTool | null {
   const ctx = resolveMemoryToolContext(params.options);
   if (!ctx) {

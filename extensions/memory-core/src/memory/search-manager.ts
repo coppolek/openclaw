@@ -15,6 +15,7 @@ import {
   type MemorySyncProgressUpdate,
   type ResolvedQmdConfig,
 } from "openclaw/plugin-sdk/memory-core-host-engine-storage";
+import { resolveMemorySearchConfig } from "openclaw/plugin-sdk/memory-core-host-runtime-core";
 
 const MEMORY_SEARCH_MANAGER_CACHE_KEY = Symbol.for("openclaw.memorySearchManagerCache");
 type MemorySearchManagerCacheStore = {
@@ -54,6 +55,7 @@ export type MemorySearchManagerResult = {
 export async function getMemorySearchManager(params: {
   cfg: OpenClawConfig;
   agentId: string;
+  userId?: string;
   purpose?: "default" | "status";
 }): Promise<MemorySearchManagerResult> {
   const resolved = resolveMemoryBackendConfig(params);
@@ -97,9 +99,12 @@ export async function getMemorySearchManager(params: {
     } else {
       try {
         const { QmdMemoryManager } = await loadQmdManagerModule();
+        const settings = resolveMemorySearchConfig(params.cfg, params.agentId);
+        const effectiveUserId = settings?.isolation.enabled ? params.userId : undefined;
         const primary = await QmdMemoryManager.create({
           cfg: params.cfg,
           agentId: params.agentId,
+          userId: effectiveUserId,
           resolved,
           mode: statusOnly ? "status" : "full",
         });
