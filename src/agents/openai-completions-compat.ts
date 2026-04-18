@@ -29,6 +29,24 @@ function isDefaultRouteProvider(provider: string | undefined, ...ids: string[]) 
   return provider !== undefined && ids.includes(provider);
 }
 
+// Known local OpenAI-compatible inference servers that honor
+// `stream_options.include_usage` the same way Ollama does. Anything not in
+// this set continues to fall through to the generic compat rules.
+const KNOWN_LOCAL_OPENAI_COMPAT_PROVIDERS = new Set<string>([
+  "vllm",
+  "localai",
+  "sglang",
+  "llama-cpp",
+  "llama.cpp",
+  "llamacpp",
+  "jan",
+  "lmstudio",
+  "lm-studio",
+  "text-generation-webui",
+  "tabby",
+  "tabbyapi",
+]);
+
 export function resolveOpenAICompletionsCompatDefaults(
   input: OpenAICompletionsCompatDefaultsInput,
 ): OpenAICompletionsCompatDefaults {
@@ -67,6 +85,8 @@ export function resolveOpenAICompletionsCompatDefaults(
     knownProviderFamily === "mistral" ||
     (isDefaultRoute && isDefaultRouteProvider(provider, "chutes"));
   const isOllamaCompatProvider = provider === "ollama";
+  const isKnownLocalOpenAICompatProvider =
+    provider !== undefined && KNOWN_LOCAL_OPENAI_COMPAT_PROVIDERS.has(provider.toLowerCase());
 
   return {
     supportsStore:
@@ -77,8 +97,15 @@ export function resolveOpenAICompletionsCompatDefaults(
       knownProviderFamily !== "mistral" &&
       endpointClass !== "xai-native" &&
       !usesExplicitProxyLikeEndpoint,
+    // Known local OpenAI-compatible inference servers (vLLM, LocalAI, SGLang,
+    // llama.cpp --server, Jan, LM Studio, text-generation-webui, TabbyAPI)
+    // implement `stream_options.include_usage` the same way Ollama does.
+    // Without opting them in, streaming responses carry no `usage` field and
+    // session totalTokens stays stale, rendering `unknown/Nk (?%)` in
+    // `openclaw status`. See #47639.
     supportsUsageInStreaming:
       isOllamaCompatProvider ||
+      isKnownLocalOpenAICompatProvider ||
       (!isNonStandard && (!usesConfiguredNonOpenAIEndpoint || supportsNativeStreamingUsageCompat)),
     maxTokensField: usesMaxTokens ? "max_tokens" : "max_completion_tokens",
     thinkingFormat: isZai ? "zai" : isOpenRouterLike ? "openrouter" : "openai",
