@@ -190,6 +190,7 @@ type RunPreparedReplyParams = {
   storePath?: string;
   workspaceDir: string;
   abortedLastRun: boolean;
+  conversationalFreeform?: boolean;
 };
 
 export async function runPreparedReply(
@@ -239,6 +240,7 @@ export async function runPreparedReply(
     resolvedElevatedLevel,
     execOverrides,
     abortedLastRun,
+    conversationalFreeform,
   } = params;
   const useFastReplyRuntime = shouldUseReplyFastTestRuntime({
     cfg,
@@ -454,6 +456,7 @@ export async function runPreparedReply(
       prefixedBody: prefixedBodyCore,
       threadContextNote,
       systemEventBlocks: drainedSystemEventBlocks,
+      conversationalFreeform,
     });
   };
   const skillResult =

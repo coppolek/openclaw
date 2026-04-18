@@ -57,7 +57,7 @@ describe("google-antigravity provider normalization", () => {
     expect(normalized?.openai).toBe(providers.openai);
   });
 
-  it("returns original providers object when no antigravity IDs need normalization", () => {
+  it("preserves provider content when no antigravity IDs need normalization", () => {
     const agentDir = mkdtempSync(join(tmpdir(), "openclaw-test-"));
     const providers = {
       "google-antigravity": buildProvider(["gemini-3-pro-low", "claude-opus-4-6-thinking"]),
@@ -65,7 +65,11 @@ describe("google-antigravity provider normalization", () => {
 
     const normalized = normalizeProviders({ providers, agentDir });
 
-    expect(normalized).toBe(providers);
+    expect(normalized).toEqual(providers);
+    expect(normalized?.["google-antigravity"]?.models.map((model) => model.id)).toEqual([
+      "gemini-3-pro-low",
+      "claude-opus-4-6-thinking",
+    ]);
   });
 });
 
@@ -89,7 +93,7 @@ describe("google-vertex provider normalization", () => {
     expect(normalized?.openai).toBe(providers.openai);
   });
 
-  it("returns original providers object when no google-vertex IDs need normalization", () => {
+  it("preserves provider content when no google-vertex IDs need normalization", () => {
     const agentDir = mkdtempSync(join(tmpdir(), "openclaw-test-"));
     const providers = {
       "google-vertex": buildProvider(["gemini-3.1-flash-lite-preview", "gemini-3-flash-preview"], {
@@ -99,6 +103,10 @@ describe("google-vertex provider normalization", () => {
 
     const normalized = normalizeProviders({ providers, agentDir });
 
-    expect(normalized).toBe(providers);
+    expect(normalized).toEqual(providers);
+    expect(normalized?.["google-vertex"]?.models.map((model) => model.id)).toEqual([
+      "gemini-3.1-flash-lite-preview",
+      "gemini-3-flash-preview",
+    ]);
   });
 });

@@ -306,6 +306,8 @@ function buildExecutionBiasSection(params: { isMinimal: boolean }) {
     "Use a real tool call or concrete action first when the task is actionable; do not stop at a plan or promise-to-act reply.",
     "Commentary-only turns are incomplete when tools are available and the next action is clear.",
     "If the work will take multiple steps or a while to finish, send one short progress update before or while acting.",
+    "In conversational replies, prefer acting over asking for reassurance when the next safe step is already clear.",
+    "Do not pad progress with repeated confirmation-seeking or explanation-first phrasing when you can just continue the work.",
     "",
   ];
 }
@@ -712,6 +714,9 @@ export function buildAgentSystemPrompt(params: {
         "Narrate only when it helps: multi-step work, complex/challenging problems, sensitive actions (e.g., deletions), or when the user explicitly asks.",
         "Keep narration brief and value-dense; avoid repeating obvious steps.",
         "Use plain human language for narration unless in a technical context.",
+        "In conversational exchanges, open with a response or action, not unnecessary explanation-first framing.",
+        "Preserve persona signals in wording and reply shape when they support continuity, clarity, and task completion.",
+        "Use lists and headings when they improve scanning or execution, not by default.",
         "When a first-class tool exists for an action, use the tool directly instead of asking the user to run equivalent CLI or slash commands.",
         buildExecApprovalPromptGuidance({
           runtimeChannel: params.runtimeInfo?.channel,
