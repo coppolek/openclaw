@@ -1,8 +1,6 @@
 import type { MsgContext } from "openclaw/plugin-sdk/reply-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { normalizeChatType } from "../../../../src/channels/chat-type.js";
-import { resolveConversationLabel } from "../../../../src/channels/conversation-label.js";
-import { validateSenderIdentity } from "../../../../src/channels/sender-identity.js";
+import { expectChannelInboundContextContract as expectInboundContextContract } from "../../../../src/channels/plugins/contracts/test-helpers.js";
 
 const { sendTypingMock, sendReadReceiptMock, dispatchInboundMessageMock, capture } = vi.hoisted(
   () => {
@@ -436,18 +434,6 @@ const { createBaseSignalEventHandlerDeps, createSignalReceiveEvent } =
   await import("./event-handler.test-harness.js");
 const { createSignalEventHandler } = await import("./event-handler.js");
 
-function expectInboundContextContract(ctx: MsgContext) {
-  expect(validateSenderIdentity(ctx)).toEqual([]);
-  expect(ctx.Body).toBeTypeOf("string");
-  expect(ctx.BodyForAgent).toBeTypeOf("string");
-  expect(ctx.BodyForCommands).toBeTypeOf("string");
-
-  const chatType = normalizeChatType(ctx.ChatType);
-  if (chatType && chatType !== "direct") {
-    const label = ctx.ConversationLabel?.trim() || resolveConversationLabel(ctx);
-    expect(label).toBeTruthy();
-  }
-}
 describe("signal createSignalEventHandler inbound context", () => {
   beforeEach(() => {
     delete capture.ctx;
