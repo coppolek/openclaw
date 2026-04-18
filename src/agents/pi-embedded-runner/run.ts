@@ -537,8 +537,14 @@ export async function runEmbeddedPiAgent(
         failoverReason: FailoverReason | null,
       ): AuthProfileFailureReason | null => {
         // Timeouts are transport/model-path failures, not auth health signals,
-        // so they should not persist auth-profile failure state.
-        if (!failoverReason || failoverReason === "timeout") {
+        // so they should not persist auth-profile failure state. Incomplete
+        // responses are a model-content signal (empty / reasoning-only), not
+        // an auth health issue, so they are treated the same way.
+        if (
+          !failoverReason ||
+          failoverReason === "timeout" ||
+          failoverReason === "incomplete_response"
+        ) {
           return null;
         }
         return failoverReason;
@@ -1792,6 +1798,58 @@ export async function runEmbeddedPiAgent(
             timedOut,
             attempt,
           });
+          // When same-model retries (reasoning-only, empty-response) cannot
+          // recover the turn and fallbacks are configured, rotate to the next
+          // fallback model instead of surfacing "Agent couldn't generate a
+          // response" to the user. Only fires when the attempt is replay-safe
+          // — `hadPotentialSideEffects` turns (messaging tool sends, mutating
+          // tool calls, successful cron adds) must preserve the existing
+          // "verify before retrying" warning path so a fallback retry does
+          // not duplicate already-executed external actions. Aborted / timed
+          // out flows keep their existing terminal branches. Callers without
+          // any configured fallback also fall through unchanged.
+          //
+          // Note: for toolUse-style incomplete terminal turns with no visible
+          // text, `resolveIncompleteTurnPayloadText` can return non-null on
+          // the first attempt (no per-turn retry instruction applies), so
+          // this branch can fire before the reasoning-only / empty-response
+          // retry ceilings are hit. Fallback is still the right move there —
+          // same-model retries are not defined for that case — but the
+          // replay-safe gate above keeps it safe.
+          if (
+            incompleteTurnText &&
+            !aborted &&
+            !timedOut &&
+            fallbackConfigured &&
+            attempt.replayMetadata.replaySafe
+          ) {
+            const incompleteTurnDecision = resolveRunFailoverDecision({
+              stage: "incomplete_turn",
+              fallbackConfigured,
+            });
+            if (incompleteTurnDecision.action === "fallback_model") {
+              const failoverStatus = resolveFailoverStatus(incompleteTurnDecision.reason);
+              traceAttempts.push({
+                provider: activeErrorContext.provider,
+                model: activeErrorContext.model,
+                result: "fallback_model",
+                reason: incompleteTurnDecision.reason,
+                stage: "incomplete_turn",
+                ...(typeof failoverStatus === "number" ? { status: failoverStatus } : {}),
+              });
+              log.warn(
+                `incomplete turn detected with fallbacks configured: runId=${params.runId} sessionId=${params.sessionId} ` +
+                  `provider=${activeErrorContext.provider}/${activeErrorContext.model} — rotating to configured fallback model`,
+              );
+              throw new FailoverError(incompleteTurnText, {
+                reason: incompleteTurnDecision.reason,
+                provider: activeErrorContext.provider,
+                model: activeErrorContext.model,
+                profileId: lastProfileId,
+                status: failoverStatus,
+              });
+            }
+          }
           if (reasoningOnlyRetriesExhausted && !finalAssistantVisibleText) {
             log.warn(
               `reasoning-only retries exhausted: runId=${params.runId} sessionId=${params.sessionId} ` +
