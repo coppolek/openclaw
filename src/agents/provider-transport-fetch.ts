@@ -8,6 +8,42 @@ import {
   resolveProviderRequestPolicyConfig,
 } from "./provider-request-config.js";
 
+const DEFAULT_MAX_RETRY_AFTER_SECONDS = 60;
+
+function parseRetryAfterSeconds(headers: Headers): number | undefined {
+  const msHeader = headers.get("retry-after-ms");
+  if (msHeader) {
+    const ms = parseFloat(msHeader);
+    if (Number.isFinite(ms) && ms >= 0) {
+      return ms / 1000;
+    }
+  }
+  const header = headers.get("retry-after");
+  if (header) {
+    const seconds = parseFloat(header);
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return seconds;
+    }
+    const timestamp = Date.parse(header);
+    if (!Number.isNaN(timestamp)) {
+      const delta = (timestamp - Date.now()) / 1000;
+      return delta >= 0 ? delta : 0;
+    }
+  }
+  return undefined;
+}
+
+function getMaxRetryAfterSeconds(): number {
+  const raw = process.env.OPENCLAW_SDK_RETRY_MAX_WAIT_SECONDS;
+  if (raw) {
+    const parsed = parseFloat(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return DEFAULT_MAX_RETRY_AFTER_SECONDS;
+}
+
 function buildManagedResponse(response: Response, release: () => Promise<void>): Response {
   if (!response.body) {
     void release();
@@ -127,6 +163,24 @@ export function buildGuardedModelFetch(model: Model<Api>): typeof fetch {
       allowCrossOriginUnsafeRedirectReplay: false,
       ...(requestConfig.allowPrivateNetwork ? { policy: { allowPrivateNetwork: true } } : {}),
     });
-    return buildManagedResponse(result.response, result.release);
+    // 429 with retry-after exceeding the ceiling signals quota exhaustion, not
+    // transient throttling. Inject `x-should-retry: false` so Stainless-based
+    // SDKs (Anthropic, OpenAI) skip the long sleep and surface the error for
+    // OpenClaw's model-failover layer. Other SDKs (Google, Ollama) ignore the
+    // header, making this a safe no-op for them.
+    let response = result.response;
+    if (response.status === 429) {
+      const retryAfterSeconds = parseRetryAfterSeconds(response.headers);
+      if (retryAfterSeconds !== undefined && retryAfterSeconds > getMaxRetryAfterSeconds()) {
+        const headers = new Headers(response.headers);
+        headers.set("x-should-retry", "false");
+        response = new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        });
+      }
+    }
+    return buildManagedResponse(response, result.release);
   };
 }
