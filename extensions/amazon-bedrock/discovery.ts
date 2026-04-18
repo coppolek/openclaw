@@ -38,10 +38,17 @@ const DEFAULT_MAX_TOKENS = 4096;
  */
 const KNOWN_CONTEXT_WINDOWS: Record<string, number> = {
   // Anthropic Claude
+  "anthropic.claude-opus-4-7": 1_000_000,
   "anthropic.claude-opus-4-6-v1": 1_000_000,
   "anthropic.claude-sonnet-4-6": 1_000_000,
   "anthropic.claude-sonnet-4-5-20250929-v1:0": 200_000,
+  "anthropic.claude-sonnet-4-20250514-v1:0": 200_000,
+  "anthropic.claude-opus-4-5-20251101-v1:0": 200_000,
+  "anthropic.claude-opus-4-1-20250805-v1:0": 200_000,
+  "anthropic.claude-opus-4-20250514-v1:0": 200_000,
   "anthropic.claude-haiku-4-5-20251001-v1:0": 200_000,
+  "anthropic.claude-3-5-haiku-20241022-v1:0": 200_000,
+  "anthropic.claude-3-haiku-20240307-v1:0": 200_000,
   // Amazon Nova
   "amazon.nova-premier-v1:0": 1_000_000,
   "amazon.nova-pro-v1:0": 300_000,
@@ -62,29 +69,110 @@ const KNOWN_CONTEXT_WINDOWS: Record<string, number> = {
   "mistral.mistral-small-2402-v1:0": 32_000,
   // DeepSeek
   "deepseek.r1-v1:0": 128_000,
+  "deepseek.v3-v1:0": 128_000,
+  "deepseek.v3.2": 128_000,
   // Cohere
   "cohere.command-r-plus-v1:0": 128_000,
   "cohere.command-r-v1:0": 128_000,
   // AI21
   "ai21.jamba-1-5-large-v1:0": 256_000,
   "ai21.jamba-1-5-mini-v1:0": 256_000,
+  // Google Gemma
+  "google.gemma-3-27b-it": 128_000,
+  "google.gemma-3-12b-it": 128_000,
+  "google.gemma-3-4b-it": 128_000,
 };
 
 /**
  * Resolve the real context window for a Bedrock model ID.
  * Strips inference profile prefixes (us., eu., ap., global.) before lookup.
  */
-function resolveKnownContextWindow(modelId: string): number | undefined {
-  if (KNOWN_CONTEXT_WINDOWS[modelId]) {
-    return KNOWN_CONTEXT_WINDOWS[modelId];
+/**
+ * Known max output tokens for Bedrock models.
+ *
+ * These values balance response quality against Bedrock's token quota burndown:
+ * at request start, Bedrock reserves input_tokens + max_tokens from your TPM
+ * quota. For Claude 3.7+ models, output tokens burn at 5x rate. Setting
+ * max_tokens too high wastes quota capacity and reduces concurrent throughput;
+ * setting too low truncates responses.
+ *
+ * Values here are intentionally conservative — pi's buildBaseOptions caps at
+ * 32K anyway, and thinking budget is added separately by adjustMaxTokensForThinking.
+ *
+ * Sources: https://docs.aws.amazon.com/bedrock/latest/userguide/quotas-token-burndown.html
+ *          https://platform.claude.com/docs/en/about-claude/models/overview
+ */
+const KNOWN_MAX_TOKENS: Record<string, number> = {
+  // Anthropic Claude — conservative to avoid quota burndown waste.
+  // Actual limits: Opus 4.7 = 128K, Sonnet/Opus 4.6 = 64K, older = 64K.
+  // Thinking budget is added on top by the runtime, not counted here.
+  "anthropic.claude-opus-4-7": 16_384,
+  "anthropic.claude-opus-4-6-v1": 16_384,
+  "anthropic.claude-sonnet-4-6": 16_384,
+  "anthropic.claude-sonnet-4-5-20250929-v1:0": 8_192,
+  "anthropic.claude-sonnet-4-20250514-v1:0": 8_192,
+  "anthropic.claude-opus-4-5-20251101-v1:0": 8_192,
+  "anthropic.claude-opus-4-1-20250805-v1:0": 8_192,
+  "anthropic.claude-opus-4-20250514-v1:0": 8_192,
+  "anthropic.claude-haiku-4-5-20251001-v1:0": 8_192,
+  "anthropic.claude-3-5-haiku-20241022-v1:0": 4_096,
+  "anthropic.claude-3-haiku-20240307-v1:0": 4_096,
+  // Amazon Nova — max output is 5K for all Nova text models
+  "amazon.nova-premier-v1:0": 5_120,
+  "amazon.nova-pro-v1:0": 5_120,
+  "amazon.nova-lite-v1:0": 5_120,
+  "amazon.nova-micro-v1:0": 5_120,
+  "amazon.nova-2-lite-v1:0": 5_120,
+  // Meta Llama — varies by model, 4K-128K
+  "meta.llama3-3-70b-instruct-v1:0": 8_192,
+  "meta.llama3-2-90b-instruct-v1:0": 4_096,
+  "meta.llama3-2-11b-instruct-v1:0": 4_096,
+  "meta.llama3-2-3b-instruct-v1:0": 4_096,
+  "meta.llama3-2-1b-instruct-v1:0": 4_096,
+  "meta.llama3-1-405b-instruct-v1:0": 8_192,
+  "meta.llama3-1-70b-instruct-v1:0": 8_192,
+  "meta.llama3-1-8b-instruct-v1:0": 4_096,
+  // DeepSeek
+  "deepseek.r1-v1:0": 16_384,
+  "deepseek.v3-v1:0": 8_192,
+  "deepseek.v3.2": 8_192,
+  // AI21 Jamba
+  "ai21.jamba-1-5-large-v1:0": 4_096,
+  "ai21.jamba-1-5-mini-v1:0": 4_096,
+};
+
+/**
+ * Resolve a known value from a lookup table, stripping inference profile prefixes.
+ * Used for both context windows and max tokens.
+ */
+function resolveKnownValue(modelId: string, table: Record<string, number>): number | undefined {
+  if (table[modelId] !== undefined) {
+    return table[modelId];
   }
   // Strip regional inference profile prefix
   const stripped = modelId.replace(/^(?:us|eu|ap|global)\./, "");
-  if (stripped !== modelId && KNOWN_CONTEXT_WINDOWS[stripped]) {
-    return KNOWN_CONTEXT_WINDOWS[stripped];
+  if (stripped !== modelId && table[stripped] !== undefined) {
+    return table[stripped];
   }
   return undefined;
 }
+
+/**
+ * Resolve the real context window for a Bedrock model ID.
+ * Strips inference profile prefixes (us., eu., ap., global.) before lookup.
+ */
+function resolveKnownContextWindow(modelId: string): number | undefined {
+  return resolveKnownValue(modelId, KNOWN_CONTEXT_WINDOWS);
+}
+
+/**
+ * Resolve the recommended max output tokens for a Bedrock model ID.
+ * Returns values optimized for Bedrock's quota burndown mechanism.
+ */
+function resolveKnownMaxTokens(modelId: string): number | undefined {
+  return resolveKnownValue(modelId, KNOWN_MAX_TOKENS);
+}
+
 const DEFAULT_COST = {
   input: 0,
   output: 0,
@@ -226,7 +314,7 @@ function toModelDefinition(
     input: mapInputModalities(summary),
     cost: DEFAULT_COST,
     contextWindow: resolveKnownContextWindow(id) ?? defaults.contextWindow,
-    maxTokens: defaults.maxTokens,
+    maxTokens: resolveKnownMaxTokens(id) ?? defaults.maxTokens,
   };
 }
 
@@ -347,7 +435,9 @@ function resolveInferenceProfiles(
       contextWindow: baseModel?.contextWindow
         ?? resolveKnownContextWindow(profile.inferenceProfileId ?? "")
         ?? defaults.contextWindow,
-      maxTokens: baseModel?.maxTokens ?? defaults.maxTokens,
+      maxTokens: baseModel?.maxTokens
+        ?? resolveKnownMaxTokens(profile.inferenceProfileId ?? "")
+        ?? defaults.maxTokens,
     });
   }
   return discovered;
