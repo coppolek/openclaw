@@ -1904,15 +1904,17 @@ export const chatHandlers: GatewayRequestHandlers = {
     const max = Math.min(hardMax, requested);
     const effectiveMaxChars = resolveEffectiveChatHistoryMaxChars(cfg, maxChars);
     const sliced = rawMessages.length > max ? rawMessages.slice(-max) : rawMessages;
-    const sanitized = stripEnvelopeFromMessages(sliced);
-    const withoutRuntimeContent = stripRuntimeInjectedContent(sanitized);
+    // Suppress leaked internal runtime prompts before stripping envelopes,
+    // so sentinel detection still sees trusted inbound metadata.
+    const withoutRuntimeContent = stripRuntimeInjectedContent(sliced);
     const normalized = augmentChatHistoryWithCanvasBlocks(
       sanitizeChatHistoryMessages(withoutRuntimeContent, effectiveMaxChars),
     );
+    const sanitized = stripEnvelopeFromMessages(normalized);
     const maxHistoryBytes = getMaxChatHistoryMessagesBytes();
     const perMessageHardCap = Math.min(CHAT_HISTORY_MAX_SINGLE_MESSAGE_BYTES, maxHistoryBytes);
     const replaced = replaceOversizedChatHistoryMessages({
-      messages: normalized,
+      messages: sanitized,
       maxSingleMessageBytes: perMessageHardCap,
     });
     const capped = capArrayByJsonBytes(replaced.messages, maxHistoryBytes).items;

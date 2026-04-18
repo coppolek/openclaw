@@ -27,6 +27,7 @@ import {
   sanitizeChatSendMessageInput,
   stripRuntimeInjectedContent,
 } from "./chat.js";
+import { stripEnvelopeFromMessages } from "../chat-sanitize.js";
 import { createExecApprovalHandlers } from "./exec-approval.js";
 import { logsHandlers } from "./logs.js";
 
@@ -549,6 +550,76 @@ describe("stripRuntimeInjectedContent", () => {
         timestamp: 1,
       },
     ]);
+  });
+});
+
+describe("chat.history sanitization ordering", () => {
+  function concatAllTextFields(messages: unknown[]): string {
+    return messages
+      .map((m) => {
+        if (!m || typeof m !== "object") return "";
+        const entry = m as Record<string, unknown>;
+        const text =
+          typeof entry.text === "string"
+            ? entry.text
+            : typeof entry.content === "string"
+              ? entry.content
+              : Array.isArray(entry.content)
+                ? (entry.content
+                    .filter((b) => b && typeof b === "object")
+                    .map((b) => (b as { type?: unknown; text?: unknown }).text)
+                    .filter((t): t is string => typeof t === "string")
+                    .join("\n"))
+                : "";
+        return typeof text === "string" ? text : "";
+      })
+      .join("\n");
+  }
+
+  it("drops leaked runtime prompt tokens even after envelope stripping", () => {
+    const messages = [
+      {
+        role: "user",
+        content: [{ type: "text", text: "hello" }],
+        timestamp: 1,
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text:
+              'Sender (untrusted metadata):\n```json\n{"label":"openclaw-control-ui"}\n```\n\n[Fri 2026-04-17 11:19 AKDT] ' +
+              HEARTBEAT_PROMPT,
+          },
+        ],
+        timestamp: 2,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "HEARTBEAT_OK" }],
+        timestamp: 3,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "real reply" }],
+        timestamp: 4,
+      },
+    ];
+
+    // Old ordering (envelope first) is what caused the P1 to reproduce.
+    const oldOrdering = sanitizeChatHistoryMessages(
+      stripRuntimeInjectedContent(stripEnvelopeFromMessages(messages)),
+    );
+    expect(concatAllTextFields(oldOrdering)).toContain(HEARTBEAT_PROMPT);
+
+    // New ordering: suppress leaked internal tokens before envelopes remove provenance.
+    const newOrdering = stripEnvelopeFromMessages(
+      sanitizeChatHistoryMessages(stripRuntimeInjectedContent(messages)),
+    );
+    expect(concatAllTextFields(newOrdering)).not.toContain(HEARTBEAT_PROMPT);
+    expect(concatAllTextFields(newOrdering)).toContain("hello");
+    expect(concatAllTextFields(newOrdering)).toContain("real reply");
   });
 });
 
