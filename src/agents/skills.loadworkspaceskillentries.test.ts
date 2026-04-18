@@ -93,7 +93,11 @@ describe("loadWorkspaceSkillEntries", () => {
       }),
     );
 
-    expect(entries).toEqual([]);
+    // Bundled plugin skills with enabledByDefault may appear from the
+    // repo-level extensions/ directory.  Filter them out so the assertion
+    // still catches regressions where workspace/managed skills leak in.
+    const nonPluginEntries = entries.filter((e) => e.skill.source !== "openclaw-extra");
+    expect(nonPluginEntries).toEqual([]);
   });
 
   it("includes plugin-shipped skills when the plugin is enabled", async () => {
