@@ -33,7 +33,7 @@ export function registerBrowserAgentDebugRoutes(
           targetId: tab.targetId,
           level: normalizeOptionalString(level),
         });
-        res.json({ ok: true, messages, targetId: tab.targetId });
+        res.json({ ok: true, messages });
       },
     });
   });
