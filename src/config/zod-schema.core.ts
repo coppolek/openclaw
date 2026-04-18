@@ -761,11 +761,8 @@ export function getLiteLLMMediaRoutingAliasRef(ref: string | undefined): string 
   );
 }
 
-export function formatLiteLLMMediaRoutingAliasMessage(model: string): string {
-  return (
-    "LiteLLM routing aliases are not allowed in tools.media. Use a direct provider " +
-    `(for example openai/gpt-4o-mini) or a concrete LiteLLM model id instead of litellm/${model}.`
-  );
+export function formatLiteLLMMediaRoutingAliasMessage(): string {
+  return "Invalid media model reference. Use a direct provider/model id instead.";
 }
 
 function addLiteLLMMediaAliasIssue(params: {
@@ -780,7 +777,7 @@ function addLiteLLMMediaAliasIssue(params: {
   params.ctx.addIssue({
     code: z.ZodIssueCode.custom,
     path: [...params.pathPrefix, "model"],
-    message: formatLiteLLMMediaRoutingAliasMessage(model),
+    message: formatLiteLLMMediaRoutingAliasMessage(),
   });
 }
 
