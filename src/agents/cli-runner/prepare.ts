@@ -156,6 +156,7 @@ export async function prepareCliRunContext(
         authEpoch,
         extraSystemPromptHash,
         mcpConfigHash: preparedBackend.mcpConfigHash,
+        legacyMcpConfigHash: preparedBackend.legacyMcpConfigHash,
       })
     : params.cliSessionId
       ? { sessionId: params.cliSessionId }
