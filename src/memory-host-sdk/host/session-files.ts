@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { stripInboundMetadata } from "../../auto-reply/reply/strip-inbound-meta.js";
-import { isUsageCountedSessionTranscriptFileName } from "../../config/sessions/artifacts.js";
+import { isPrimarySessionTranscriptFileName } from "../../config/sessions/artifacts.js";
 import { resolveSessionTranscriptsDirForAgent } from "../../config/sessions/paths.js";
 import { loadSessionStore } from "../../config/sessions/store-load.js";
 import { redactSensitiveText } from "../../logging/redact.js";
@@ -165,7 +165,7 @@ export async function listSessionFilesForAgent(agentId: string): Promise<string[
     return entries
       .filter((entry) => entry.isFile())
       .map((entry) => entry.name)
-      .filter((name) => isUsageCountedSessionTranscriptFileName(name))
+      .filter((name) => isPrimarySessionTranscriptFileName(name) && !name.includes(".checkpoint."))
       .map((name) => path.join(dir, name));
   } catch {
     return [];
