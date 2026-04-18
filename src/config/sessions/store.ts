@@ -17,6 +17,7 @@ import type { DeliveryContext } from "../../utils/delivery-context.types.js";
 import { getFileStatSnapshot } from "../cache-utils.js";
 import { enforceSessionDiskBudget, type SessionDiskBudgetSweepResult } from "./disk-budget.js";
 import { deriveSessionMetaPatch } from "./metadata.js";
+import { resolveSessionFilePath, resolveSessionFilePathOptions } from "./paths.js";
 import {
   dropSessionStoreObjectCache,
   getSerializedSessionStore,
@@ -40,6 +41,8 @@ import {
   pruneStaleEntries,
   resolveMaintenanceConfig,
   rotateSessionFile,
+  rotateTranscriptFile,
+  rotateTranscriptFiles,
   type ResolvedSessionMaintenanceConfig,
   type SessionMaintenanceWarning,
 } from "./store-maintenance.js";
@@ -127,14 +130,23 @@ export {
   pruneStaleEntries,
   resolveMaintenanceConfig,
   rotateSessionFile,
+  rotateTranscriptFile,
+  rotateTranscriptFiles,
 };
 export type { ResolvedSessionMaintenanceConfig, SessionMaintenanceWarning };
 
 type SaveSessionStoreOptions = {
   /** Skip pruning, capping, and rotation (e.g. during one-time migrations). */
   skipMaintenance?: boolean;
-  /** Active session key for warn-only maintenance. */
+  /** Active session key for warn-only maintenance and per-write transcript rotation. */
   activeSessionKey?: string;
+  /**
+   * Allow bulk transcript rotation (full-directory walk) when no activeSessionKey
+   * is provided. Only set this from explicit maintenance entry points (e.g.
+   * sessions-cleanup). Runtime call sites that simply lack an activeSessionKey
+   * should NOT set this — they must skip the expensive scan.
+   */
+  bulkTranscriptRotation?: boolean;
   /**
    * Session keys that are allowed to drop persisted ACP metadata during this update.
    * All other updates preserve existing `entry.acp` blocks when callers replace the
@@ -329,6 +341,33 @@ async function saveSessionStoreUnlocked(
 
       // Rotate the on-disk file if it exceeds the size threshold.
       await rotateSessionFile(storePath, maintenance.rotateBytes);
+
+      // Rotate oversized transcript files.
+      const activeSessionKey = opts?.activeSessionKey?.trim();
+      if (maintenance.transcriptRotateBytes != null && maintenance.transcriptRotateBytes > 0) {
+        if (opts?.bulkTranscriptRotation) {
+          // Bulk path (explicit maintenance only): scan the full sessions
+          // directory so pre-existing oversized transcripts get cleaned up.
+          // This covers all transcripts including the active one, so no
+          // separate hot-path call is needed.
+          await rotateTranscriptFiles({ storePath, maintenance });
+        } else if (activeSessionKey) {
+          // Hot path (per-write): only check the active transcript to avoid an
+          // expensive full-directory walk on every save.
+          const activeEntry = store[activeSessionKey];
+          if (activeEntry?.sessionId) {
+            const transcriptPath = resolveSessionFilePath(
+              activeEntry.sessionId,
+              activeEntry,
+              resolveSessionFilePathOptions({ storePath }),
+            );
+            await rotateTranscriptFile({ transcriptPath, maintenance });
+          }
+        }
+        // When neither flag is set (e.g. heartbeat updates without an
+        // activeSessionKey), skip transcript rotation entirely to avoid
+        // an expensive directory walk under the store lock.
+      }
 
       const diskBudget = await enforceSessionDiskBudget({
         store,
