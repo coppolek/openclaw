@@ -22,6 +22,7 @@ type GatewayPluginBootstrapParams = {
   cfg: OpenClawConfig;
   activationSourceConfig?: OpenClawConfig;
   workspaceDir: string;
+  cache?: boolean;
   log: GatewayPluginBootstrapLog;
   coreGatewayHandlers: Record<string, GatewayRequestHandler>;
   baseMethods: string[];
@@ -72,6 +73,7 @@ export function prepareGatewayPluginLoad(params: GatewayPluginBootstrapParams) {
     activationSourceConfig,
     autoEnabledReasons: autoEnabled.autoEnabledReasons,
     workspaceDir: params.workspaceDir,
+    cache: params.cache ?? false,
     log: params.log,
     coreGatewayHandlers: params.coreGatewayHandlers,
     baseMethods: params.baseMethods,

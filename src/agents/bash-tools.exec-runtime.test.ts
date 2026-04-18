@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { scopedHeartbeatWakeOptions } from "../routing/session-key.js";
 
 const requestHeartbeatNowMock = vi.hoisted(() => vi.fn());
 const enqueueSystemEventMock = vi.hoisted(() => vi.fn());
@@ -322,10 +323,9 @@ describe("emitExecSystemEvent", () => {
       },
     });
     expect(requestHeartbeatNowMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        reason: "exec-event",
-        sessionKey: "agent:ops:main",
-      }),
+      expect.objectContaining(
+        scopedHeartbeatWakeOptions("agent:ops:main", { reason: "exec-event" }),
+      ),
     );
   });
 
@@ -340,9 +340,9 @@ describe("emitExecSystemEvent", () => {
       contextKey: "exec:run-global",
     });
     expect(requestHeartbeatNowMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        reason: "exec-event",
-      }),
+      expect.objectContaining(
+        scopedHeartbeatWakeOptions("global", { reason: "exec-event" }),
+      ),
     );
   });
 
