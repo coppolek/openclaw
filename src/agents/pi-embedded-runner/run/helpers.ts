@@ -128,6 +128,7 @@ export function buildErrorAgentMeta(params: {
   lastRunPromptUsage: UsageSnapshot | undefined;
   lastAssistant?: { usage?: unknown } | null;
   lastTurnTotal?: number;
+  promptTokensOverride?: number;
 }): EmbeddedPiAgentMeta {
   const usageMeta = buildUsageAgentMetaFields({
     usageAccumulator: params.usageAccumulator,
@@ -141,7 +142,13 @@ export function buildErrorAgentMeta(params: {
     model: params.model,
     ...(usageMeta.usage ? { usage: usageMeta.usage } : {}),
     ...(usageMeta.lastCallUsage ? { lastCallUsage: usageMeta.lastCallUsage } : {}),
-    ...(usageMeta.promptTokens ? { promptTokens: usageMeta.promptTokens } : {}),
+    // Fixed: Only treat a zero promptTokens override as authoritative when it
+    // comes from a nonzero context (i.e. we actually got a successful snapshot,
+    // not a spurious zero from a failing vLLM call). (Greptile)
+    promptTokens:
+      params.promptTokensOverride !== undefined && params.promptTokensOverride > 0
+        ? params.promptTokensOverride
+        : usageMeta.promptTokens,
   };
 }
 

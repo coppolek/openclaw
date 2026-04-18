@@ -1,5 +1,5 @@
-import sharp from "sharp";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { isSharpAvailable } from "../media/image-ops.js";
 
 const { infoMock, warnMock } = vi.hoisted(() => ({
   infoMock: vi.fn(),
@@ -25,6 +25,7 @@ vi.mock("../logging/subsystem.js", () => {
 import { sanitizeContentBlocksImages } from "./tool-images.js";
 
 async function createLargePng(): Promise<Buffer> {
+  const { default: sharp } = await import("sharp");
   const width = 2001;
   const height = 8;
   const raw = Buffer.alloc(width * height * 3, 0x7f);
@@ -35,7 +36,9 @@ async function createLargePng(): Promise<Buffer> {
     .toBuffer();
 }
 
-describe("tool-images log context", () => {
+const SHARP_AVAILABLE = await isSharpAvailable();
+
+describe.runIf(SHARP_AVAILABLE)("tool-images log context", () => {
   let png: Buffer;
 
   beforeAll(async () => {

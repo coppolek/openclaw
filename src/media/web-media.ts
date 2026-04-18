@@ -10,6 +10,7 @@ import { fetchRemoteMedia } from "./fetch.js";
 import {
   convertHeicToJpeg,
   hasAlphaChannel,
+  isSharpAvailable,
   optimizeImageToPng,
   resizeToJpeg,
 } from "./image-ops.js";
@@ -311,8 +312,21 @@ async function optimizeImageWithFallback(params: {
   buffer: Buffer;
   cap: number;
   meta?: { contentType?: string; fileName?: string };
-}): Promise<OptimizedImage> {
+}): Promise<OptimizedImage & { originalFormat?: string }> {
   const { buffer, cap, meta } = params;
+
+  if (!(await isSharpAvailable())) {
+    const isPng =
+      meta?.contentType === "image/png" || meta?.fileName?.toLowerCase().endsWith(".png");
+    return {
+      buffer,
+      optimizedSize: buffer.length,
+      resizeSide: 0,
+      format: isPng ? "png" : "jpeg",
+      originalFormat: meta?.contentType,
+    };
+  }
+
   const isPng = meta?.contentType === "image/png" || meta?.fileName?.toLowerCase().endsWith(".png");
   const hasAlpha = isPng && (await hasAlphaChannel(buffer));
 
@@ -372,9 +386,10 @@ async function loadWebMediaInternal(
       throw new Error(formatCapReduce("Media", cap, optimized.buffer.length));
     }
 
-    const contentType = optimized.format === "png" ? "image/png" : "image/jpeg";
+    const contentType =
+      optimized.originalFormat || (optimized.format === "png" ? "image/png" : "image/jpeg");
     const fileName =
-      optimized.format === "jpeg" && meta && isHeicSource(meta)
+      optimized.format === "jpeg" && !optimized.originalFormat && meta && isHeicSource(meta)
         ? toJpegFileName(meta.fileName)
         : meta?.fileName;
 

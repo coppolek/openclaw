@@ -1265,6 +1265,7 @@ export async function runEmbeddedPiAgent(
                     lastRunPromptUsage,
                     lastAssistant: sessionLastAssistant,
                     lastTurnTotal,
+                    promptTokensOverride: derivePromptTokens(attempt.attemptUsage),
                   }),
                   systemPromptReport: attempt.systemPromptReport,
                   finalPromptText: attempt.finalPromptText,
@@ -1304,6 +1305,7 @@ export async function runEmbeddedPiAgent(
                     lastRunPromptUsage,
                     lastAssistant: sessionLastAssistant,
                     lastTurnTotal,
+                    promptTokensOverride: derivePromptTokens(attempt.attemptUsage),
                   }),
                   systemPromptReport: attempt.systemPromptReport,
                   finalPromptText: attempt.finalPromptText,
@@ -1613,7 +1615,8 @@ export async function runEmbeddedPiAgent(
             model: sessionLastAssistant?.model ?? model.id,
             usage: usageMeta.usage,
             lastCallUsage: usageMeta.lastCallUsage,
-            promptTokens: usageMeta.promptTokens,
+            // Fixed: Use derivePromptTokens to replace the non-existent promptTokens property (Type Error)
+            promptTokens: usageMeta.promptTokens ?? derivePromptTokens(attempt.attemptUsage),
             compactionCount: autoCompactionCount > 0 ? autoCompactionCount : undefined,
           };
           const finalAssistantVisibleText = resolveFinalAssistantVisibleText(sessionLastAssistant);
