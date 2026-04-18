@@ -419,8 +419,9 @@ export async function updateSessionStore<T>(
   opts?: SaveSessionStoreOptions,
 ): Promise<T> {
   return await withSessionStoreLock(storePath, async () => {
-    // Always re-read inside the lock to avoid clobbering concurrent writers.
-    const store = loadSessionStore(storePath, { skipCache: true });
+    // withSessionStoreLock provides exclusive access; the cache is always
+    // current after each saveSessionStoreUnlocked call, so a disk re-read is redundant.
+    const store = loadSessionStore(storePath);
     const previousAcpByKey = collectAcpMetadataSnapshot(store);
     const result = await mutator(store);
     preserveExistingAcpMetadata({
@@ -643,7 +644,7 @@ export async function updateSessionStoreEntry(params: {
 }): Promise<SessionEntry | null> {
   const { storePath, sessionKey, update } = params;
   return await withSessionStoreLock(storePath, async () => {
-    const store = loadSessionStore(storePath, { skipCache: true });
+    const store = loadSessionStore(storePath);
     const resolved = resolveSessionStoreEntry({ store, sessionKey });
     const existing = resolved.existing;
     if (!existing) {
