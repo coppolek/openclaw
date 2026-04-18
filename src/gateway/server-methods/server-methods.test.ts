@@ -431,6 +431,40 @@ describe("sanitizeChatHistoryMessages", () => {
       },
     ]);
   });
+
+  it("keeps plain user text that quotes system lines plus an internal prompt prefix", () => {
+    const quotedSystemAndPrompt =
+      "System: [2026-04-17 11:55:13 AKDT] Gateway restart ok\n" +
+      "System: [2026-04-17 11:55:13 AKDT] Run: openclaw doctor --non-interactive\n\n" +
+      EXEC_COMPLETION_PROMPT_PREFIX +
+      " Please don't hide this, I'm pasting it as an example.";
+
+    const result = sanitizeChatHistoryMessages([
+      {
+        role: "user",
+        content: [{ type: "text", text: quotedSystemAndPrompt }],
+        timestamp: 1,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "kept" }],
+        timestamp: 2,
+      },
+    ]);
+
+    expect(result).toEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: quotedSystemAndPrompt }],
+        timestamp: 1,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "kept" }],
+        timestamp: 2,
+      },
+    ]);
+  });
 });
 
 describe("stripRuntimeInjectedContent", () => {

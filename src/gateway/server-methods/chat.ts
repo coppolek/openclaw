@@ -9,6 +9,8 @@ import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { dispatchInboundMessage } from "../../auto-reply/dispatch.js";
 import { HEARTBEAT_PROMPT } from "../../auto-reply/heartbeat.js";
 import {
+  buildCronEventPrompt,
+  buildExecEventPrompt,
   CRON_NO_CONTENT_PROMPT_PREFIX,
   EXEC_COMPLETION_PROMPT_PREFIX,
   REMINDER_PROMPT_PREFIX,
@@ -185,6 +187,32 @@ const STARTUP_CONTEXT_LINES = [
   "Do not claim you manually read files unless the user asks.",
 ] as const;
 const SYSTEM_EVENT_LINE_RE = /^System(?: \(untrusted\))?: \[/;
+const RUNTIME_PROMPT_TEMPLATE_SENTINEL = "__OPENCLAW_RUNTIME_EVENT__";
+const INTERNAL_CRON_NO_CONTENT_PROMPT = buildCronEventPrompt([], { deliverToUser: false });
+const USER_CRON_NO_CONTENT_PROMPT = buildCronEventPrompt([], { deliverToUser: true });
+const INTERNAL_EXEC_COMPLETION_PROMPT = buildExecEventPrompt({ deliverToUser: false });
+const USER_EXEC_COMPLETION_PROMPT = buildExecEventPrompt({ deliverToUser: true });
+const INTERNAL_REMINDER_PROMPT_TEMPLATE = buildCronEventPrompt(
+  [RUNTIME_PROMPT_TEMPLATE_SENTINEL],
+  { deliverToUser: false },
+);
+const USER_REMINDER_PROMPT_TEMPLATE = buildCronEventPrompt([RUNTIME_PROMPT_TEMPLATE_SENTINEL], {
+  deliverToUser: true,
+});
+
+function matchesTemplateWithDynamicBody(text: string, template: string, marker: string): boolean {
+  const markerIndex = template.indexOf(marker);
+  if (markerIndex < 0) {
+    return text === template;
+  }
+  const prefix = template.slice(0, markerIndex);
+  const suffix = template.slice(markerIndex + marker.length);
+  return (
+    text.startsWith(prefix) &&
+    text.endsWith(suffix) &&
+    text.length > prefix.length + suffix.length
+  );
+}
 
 function extractUserMessageText(
   entry: Record<string, unknown>,
@@ -1140,9 +1168,20 @@ function isRuntimePromptText(text: string): boolean {
   }
   return (
     isHeartbeatUserMessage({ role: "user", content: trimmed }, HEARTBEAT_PROMPT) ||
-    trimmed.startsWith(EXEC_COMPLETION_PROMPT_PREFIX) ||
-    trimmed.startsWith(REMINDER_PROMPT_PREFIX) ||
-    trimmed.startsWith(CRON_NO_CONTENT_PROMPT_PREFIX)
+    trimmed === INTERNAL_EXEC_COMPLETION_PROMPT ||
+    trimmed === USER_EXEC_COMPLETION_PROMPT ||
+    trimmed === INTERNAL_CRON_NO_CONTENT_PROMPT ||
+    trimmed === USER_CRON_NO_CONTENT_PROMPT ||
+    matchesTemplateWithDynamicBody(
+      trimmed,
+      INTERNAL_REMINDER_PROMPT_TEMPLATE,
+      RUNTIME_PROMPT_TEMPLATE_SENTINEL,
+    ) ||
+    matchesTemplateWithDynamicBody(
+      trimmed,
+      USER_REMINDER_PROMPT_TEMPLATE,
+      RUNTIME_PROMPT_TEMPLATE_SENTINEL,
+    )
   );
 }
 
@@ -1159,10 +1198,11 @@ function shouldDropUserHistoryMessage(message: unknown): boolean {
     return false;
   }
   const runtimeText = stripRuntimeContentFromText(text);
-  if (runtimeText !== text && isRuntimePromptText(runtimeText)) {
+  const hasRuntimeEnvelope = hasRuntimeEnvelopeText(rawText);
+  if (runtimeText !== text && hasRuntimeEnvelope && isRuntimePromptText(runtimeText)) {
     return true;
   }
-  if (!hasRuntimeEnvelopeText(rawText)) {
+  if (!hasRuntimeEnvelope) {
     return false;
   }
   if (isHeartbeatUserMessage({ role: "user", content: text }, HEARTBEAT_PROMPT)) {
