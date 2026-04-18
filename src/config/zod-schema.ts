@@ -1,10 +1,14 @@
 import { z } from "zod";
 import { parseByteSize } from "../cli/parse-bytes.js";
 import { parseDurationMs } from "../cli/parse-duration.js";
+import { getBundledMediaProviderDefaults } from "../media-understanding/bundled-defaults.js";
+import { resolveConfiguredMediaEntryCapabilities } from "../media-understanding/entry-capabilities.js";
+import { normalizeMediaProviderId } from "../media-understanding/provider-id.js";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeStringifiedOptionalString,
 } from "../shared/string-coerce.js";
+import type { MediaUnderstandingModelConfig } from "./types.tools.js";
 import { ToolsSchema } from "./zod-schema.agent-runtime.js";
 import { AgentsSchema, AudioSchema, BindingsSchema, BroadcastSchema } from "./zod-schema.agents.js";
 import { ApprovalsSchema } from "./zod-schema.approvals.js";
@@ -13,6 +17,7 @@ import {
   ModelsConfigSchema,
   SecretInputSchema,
   SecretsConfigSchema,
+  getLiteLLMMediaRoutingAliasRef,
 } from "./zod-schema.core.js";
 import { HookMappingSchema, HooksGmailSchema, InternalHooksSchema } from "./zod-schema.hooks.js";
 import { PluginInstallRecordShape } from "./zod-schema.installs.js";
@@ -150,6 +155,140 @@ const SkillEntrySchema = z
     config: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
+
+type MediaAliasValidationConfig = {
+  tools?: {
+    media?: {
+      models?: Array<MediaUnderstandingModelConfig | undefined>;
+      image?: {
+        enabled?: boolean;
+        models?: Array<MediaUnderstandingModelConfig | undefined>;
+      };
+    };
+  };
+  agents?: {
+    defaults?: {
+      imageModel?: string | { primary?: string; fallbacks?: string[] };
+    };
+  };
+  models?: z.input<typeof ModelsConfigSchema>;
+};
+
+type SharedMediaImageCapability = "image" | "non-image" | "unknown";
+
+function resolveCapabilityConfigImageEntry(
+  entry: MediaUnderstandingModelConfig | undefined,
+): boolean {
+  const configuredCapabilities = entry ? resolveConfiguredMediaEntryCapabilities(entry) : undefined;
+  if (!configuredCapabilities) {
+    return Boolean(entry);
+  }
+  return configuredCapabilities.includes("image");
+}
+
+function resolveConfigProviderImageCapability(params: {
+  cfg: MediaAliasValidationConfig;
+  providerId: string;
+}): SharedMediaImageCapability {
+  const configProviders = params.cfg.models?.providers;
+  if (!configProviders || typeof configProviders !== "object") {
+    return "unknown";
+  }
+  for (const [providerKey, providerCfg] of Object.entries(configProviders)) {
+    if (normalizeMediaProviderId(providerKey) !== params.providerId) {
+      continue;
+    }
+    const hasImageModel = (providerCfg.models ?? []).some(
+      (model) => Array.isArray(model?.input) && model.input.includes("image"),
+    );
+    return hasImageModel ? "image" : "unknown";
+  }
+  return "unknown";
+}
+
+function resolveSharedMediaModelImageCapability(params: {
+  cfg: MediaAliasValidationConfig;
+  model: MediaUnderstandingModelConfig | undefined;
+}): SharedMediaImageCapability {
+  const configuredCapabilities = params.model
+    ? resolveConfiguredMediaEntryCapabilities(params.model)
+    : undefined;
+  if (configuredCapabilities) {
+    return configuredCapabilities.includes("image") ? "image" : "non-image";
+  }
+  if (!params.model) {
+    return "unknown";
+  }
+  if (params.model.type === "cli" || params.model.command) {
+    // Shared CLI entries without explicit capabilities are skipped by runtime resolution.
+    return "non-image";
+  }
+  const providerId = normalizeMediaProviderId(params.model.provider ?? "");
+  if (!providerId) {
+    return "unknown";
+  }
+  const bundledDefaults = getBundledMediaProviderDefaults(providerId);
+  if (bundledDefaults) {
+    return bundledDefaults.defaultModels?.image ? "image" : "non-image";
+  }
+  return resolveConfigProviderImageCapability({ cfg: params.cfg, providerId });
+}
+
+function toolsMediaImageCanFallBackToAgentDefaults(cfg: MediaAliasValidationConfig): boolean {
+  const media = cfg.tools?.media;
+  if (media?.image?.enabled === false) {
+    return false;
+  }
+  if (!media) {
+    return true;
+  }
+  const imageModels = media.image?.models ?? [];
+  if (imageModels.some((entry) => resolveCapabilityConfigImageEntry(entry))) {
+    return false;
+  }
+  const sharedModels = media.models ?? [];
+  if (sharedModels.length === 0) {
+    return true;
+  }
+  const sharedCapabilities = sharedModels.map((model) =>
+    resolveSharedMediaModelImageCapability({ cfg, model }),
+  );
+  if (sharedCapabilities.includes("image")) {
+    return false;
+  }
+  return sharedCapabilities.every((capability) => capability === "non-image");
+}
+
+function addToolsMediaImageFallbackAliasIssues(
+  cfg: MediaAliasValidationConfig,
+  ctx: z.RefinementCtx,
+) {
+  if (!toolsMediaImageCanFallBackToAgentDefaults(cfg)) {
+    return;
+  }
+  const imageModel = cfg.agents?.defaults?.imageModel;
+  if (!imageModel) {
+    return;
+  }
+  const addIssue = (path: Array<string | number>, ref: string | undefined) => {
+    if (!getLiteLLMMediaRoutingAliasRef(ref)) {
+      return;
+    }
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path,
+      message: "Invalid media fallback model reference. Use a direct provider/model id instead.",
+    });
+  };
+  if (typeof imageModel === "string") {
+    addIssue(["agents", "defaults", "imageModel"], imageModel);
+    return;
+  }
+  addIssue(["agents", "defaults", "imageModel", "primary"], imageModel.primary);
+  for (const [idx, ref] of (imageModel.fallbacks ?? []).entries()) {
+    addIssue(["agents", "defaults", "imageModel", "fallbacks", idx], ref);
+  }
+}
 
 const PluginEntrySchema = z
   .object({
@@ -967,6 +1106,8 @@ export const OpenClawSchema = z
   })
   .strict()
   .superRefine((cfg, ctx) => {
+    addToolsMediaImageFallbackAliasIssues(cfg, ctx);
+
     const agents = cfg.agents?.list ?? [];
     if (agents.length === 0) {
       return;

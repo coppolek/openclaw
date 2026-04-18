@@ -728,6 +728,64 @@ const ProviderOptionsSchema = z
   .record(z.string(), z.record(z.string(), ProviderOptionValueSchema))
   .optional();
 
+const LITELLM_MEDIA_ROUTING_ALIAS_MODELS = new Set(["vision", "simple", "medium", "complex"]);
+
+function normalizeLiteLLMMediaRoutingAliasModel(
+  provider: string | undefined,
+  model: string | undefined,
+): string | undefined {
+  const normalizedProvider = provider?.trim().toLowerCase();
+  const normalizedModel = model?.trim().toLowerCase();
+  if (
+    normalizedProvider !== "litellm" ||
+    !normalizedModel ||
+    !LITELLM_MEDIA_ROUTING_ALIAS_MODELS.has(normalizedModel)
+  ) {
+    return undefined;
+  }
+  return normalizedModel;
+}
+
+export function getLiteLLMMediaRoutingAliasRef(ref: string | undefined): string | undefined {
+  const trimmed = ref?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const slashIdx = trimmed.indexOf("/");
+  if (slashIdx <= 0 || slashIdx >= trimmed.length - 1) {
+    return undefined;
+  }
+  return normalizeLiteLLMMediaRoutingAliasModel(
+    trimmed.slice(0, slashIdx),
+    trimmed.slice(slashIdx + 1),
+  );
+}
+
+export function formatLiteLLMMediaRoutingAliasMessage(): string {
+  return "Invalid media model reference. Use a direct provider/model id instead.";
+}
+
+function addLiteLLMMediaAliasIssue(params: {
+  value:
+    | { provider?: string; model?: string; type?: "provider" | "cli"; command?: string }
+    | undefined;
+  ctx: z.RefinementCtx;
+  pathPrefix: Array<string | number>;
+}) {
+  if (params.value?.type === "cli" || params.value?.command) {
+    return;
+  }
+  const model = normalizeLiteLLMMediaRoutingAliasModel(params.value?.provider, params.value?.model);
+  if (!model) {
+    return;
+  }
+  params.ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: [...params.pathPrefix, "model"],
+    message: formatLiteLLMMediaRoutingAliasMessage(),
+  });
+}
+
 const MediaUnderstandingRuntimeFields = {
   prompt: z.string().optional(),
   timeoutSeconds: z.number().int().positive().optional(),
@@ -786,6 +844,20 @@ export const ToolsMediaSchema = z
     video: ToolsMediaUnderstandingSchema.optional(),
   })
   .strict()
+  .superRefine((value, ctx) => {
+    for (const [idx, entry] of (value.models ?? []).entries()) {
+      addLiteLLMMediaAliasIssue({ value: entry, ctx, pathPrefix: ["models", idx] });
+    }
+    for (const capability of ["image", "audio", "video"] as const) {
+      for (const [idx, entry] of (value[capability]?.models ?? []).entries()) {
+        addLiteLLMMediaAliasIssue({
+          value: entry,
+          ctx,
+          pathPrefix: [capability, "models", idx],
+        });
+      }
+    }
+  })
   .optional();
 
 type ToolsMediaConfigFromSchema = NonNullable<z.infer<typeof ToolsMediaSchema>>;

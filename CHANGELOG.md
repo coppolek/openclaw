@@ -64,6 +64,7 @@ Docs: https://docs.openclaw.ai
 - Agents/failover: avoid treating bare leading `402 ...` prose as billing errors while still recognizing proxy subscription failures. (#45827) Thanks @junyuc25.
 - Config/$schema: preserve root-authored `$schema` during partial config rewrites without injecting include-only schema URLs into the root config. (#47322) Thanks @EfeDurmaz16.
 - Agents/CLI delivery: run the same reply-media path normalizer the auto-reply flow uses before shipping `openclaw agent --deliver` payloads, so relative `MEDIA:./out/photo.png` tokens resolve against the agent workspace instead of being rejected downstream with `LocalMediaAccessError: Local media path is not under an allowed directory`. Thanks @frankekn.
+- Config/media: reject LiteLLM routing aliases in `tools.media` model lists and when `tools.media.image` would fall back to `agents.defaults.imageModel`, so brittle media-understanding configs fail during validation instead of at runtime. (#54872) Thanks @Kyzcreig.
 
 ## 2026.4.15
 
