@@ -42,6 +42,7 @@ function createPreparedSlackMessage() {
       channelHistories: new Map(),
       allowFrom: [],
       setSlackThreadStatus: async () => undefined,
+      logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
     },
     account: {
       accountId: "default",
@@ -68,6 +69,7 @@ function createPreparedSlackMessage() {
     isRoomish: false,
     historyKey: "history-key",
     preview: "",
+    storePath: "/tmp/test-store",
     ackReactionValue: "eyes",
     ackReactionPromise: null,
   } as never;
