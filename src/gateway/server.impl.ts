@@ -207,8 +207,14 @@ export async function startGatewayServer(
   port = 18789,
   opts: GatewayServerOptions = {},
 ): Promise<GatewayServer> {
+  const startupT0 = Date.now();
+  const _profile = (label: string) => {
+    const elapsed = Date.now() - startupT0;
+    console.error(`[startup-profile] ${label} +${elapsed}ms`);
+  };
   const minimalTestGateway =
     isVitestRuntimeEnv() && process.env.OPENCLAW_TEST_MINIMAL_GATEWAY === "1";
+  _profile("startGatewayServer entry");
 
   // Ensure all default port derivations (browser/canvas) see the actual runtime port.
   process.env.OPENCLAW_GATEWAY_PORT = String(port);
@@ -225,6 +231,7 @@ export async function startGatewayServer(
     minimalTestGateway,
     log,
   });
+  _profile("loadGatewayStartupConfigSnapshot done");
 
   const emitSecretsStateEvent = (
     code: "SECRETS_RELOADER_DEGRADED" | "SECRETS_RELOADER_RECOVERED",
@@ -301,6 +308,7 @@ export async function startGatewayServer(
     minimalTestGateway,
     log,
   });
+  _profile("prepareGatewayPluginBootstrap done");
   const {
     gatewayPluginConfigAtStart,
     defaultWorkspaceDir,
@@ -421,6 +429,7 @@ export async function startGatewayServer(
     startedAt: serverStartedAt,
   });
   log.info("starting HTTP server...");
+  _profile("createGatewayRuntimeState starting...");
   const {
     canvasHost,
     releasePluginRouteRegistry,
@@ -472,6 +481,7 @@ export async function startGatewayServer(
     logPlugins,
     getReadiness,
   });
+  _profile("createGatewayRuntimeState done");
   const {
     nodeRegistry,
     nodePresenceTimers,
@@ -737,6 +747,7 @@ export async function startGatewayServer(
       broadcast,
       context: gatewayRequestContext,
     });
+    _profile("startGatewayPostAttachRuntime starting...");
     ({
       stopGatewayUpdateCheck: runtimeState.stopGatewayUpdateCheck,
       tailscaleCleanup: runtimeState.tailscaleCleanup,
@@ -846,6 +857,7 @@ export async function startGatewayServer(
     httpServer,
     httpServers,
   });
+  _profile("startGatewayServer COMPLETE — gateway ready");
 
   return {
     close: async (opts) => {
