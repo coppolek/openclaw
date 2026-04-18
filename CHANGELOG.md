@@ -10,6 +10,10 @@ Docs: https://docs.openclaw.ai
 - Control UI/settings: overhaul the settings and slash-command experience with faster presets, quick-create flows, and refreshed command discovery. (#67819) Thanks @BunsDev.
 - macOS/gateway: add `screen.snapshot` support for macOS app nodes, including runtime plumbing, default macOS allowlisting, and docs for monitor preview flows. (#67954) Thanks @BunsDev.
 
+### Changes
+
+- Inworld/TTS: add Inworld as a built-in speech provider plugin with streaming synthesis, voice listing, and PCM telephony output. Models: `inworld-tts-1.5-max`, `inworld-tts-1.5-mini`, `inworld-tts-1-max`, `inworld-tts-1`. Auth via `messages.tts.providers.inworld.apiKey` or `INWORLD_API_KEY`. (#55972)
+
 ### Fixes
 
 - Codex/gateway: fix gateway crashes when the codex-acp subprocess terminates abruptly; pending requests now shut down gracefully instead of propagating an uncaught EPIPE through the gateway daemon and connected channels. Fixes #67886. (#67947) Thanks @openperf.

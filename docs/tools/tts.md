@@ -9,13 +9,14 @@ title: "Text-to-Speech"
 
 # Text-to-speech (TTS)
 
-OpenClaw can convert outbound replies into audio using ElevenLabs, Google Gemini, Microsoft, MiniMax, or OpenAI.
+OpenClaw can convert outbound replies into audio using ElevenLabs, Google Gemini, Inworld, Microsoft, MiniMax, or OpenAI.
 It works anywhere OpenClaw can send audio.
 
 ## Supported services
 
 - **ElevenLabs** (primary or fallback provider)
 - **Google Gemini** (primary or fallback provider; uses Gemini API TTS)
+- **Inworld** (primary or fallback provider; uses the Inworld streaming TTS API)
 - **Microsoft** (primary or fallback provider; current bundled implementation uses `node-edge-tts`)
 - **MiniMax** (primary or fallback provider; uses the T2A v2 API)
 - **OpenAI** (primary or fallback provider; also used for summaries)
@@ -35,10 +36,11 @@ or ElevenLabs.
 
 ## Optional keys
 
-If you want OpenAI, ElevenLabs, Google Gemini, or MiniMax:
+If you want ElevenLabs, Google Gemini, Inworld, MiniMax, or OpenAI:
 
 - `ELEVENLABS_API_KEY` (or `XI_API_KEY`)
 - `GEMINI_API_KEY` (or `GOOGLE_API_KEY`)
+- `INWORLD_API_KEY`
 - `MINIMAX_API_KEY`
 - `OPENAI_API_KEY`
 
@@ -54,6 +56,7 @@ so that provider must also be authenticated if you enable summaries.
 - [OpenAI Audio API reference](https://platform.openai.com/docs/api-reference/audio)
 - [ElevenLabs Text to Speech](https://elevenlabs.io/docs/api-reference/text-to-speech)
 - [ElevenLabs Authentication](https://elevenlabs.io/docs/api-reference/authentication)
+- [Inworld TTS API](https://docs.inworld.ai/docs/tts-overview)
 - [MiniMax T2A v2 API](https://platform.minimaxi.com/document/T2A%20V2)
 - [node-edge-tts](https://github.com/SchneeHertz/node-edge-tts)
 - [Microsoft Speech output formats](https://learn.microsoft.com/azure/ai-services/speech-service/rest-text-to-speech#audio-outputs)
@@ -198,6 +201,32 @@ by the bundled Google image-generation provider. Resolution order is
 `messages.tts.providers.google.apiKey` -> `models.providers.google.apiKey` ->
 `GEMINI_API_KEY` -> `GOOGLE_API_KEY`.
 
+### Inworld primary
+
+```json5
+{
+  messages: {
+    tts: {
+      auto: "always",
+      provider: "inworld",
+      providers: {
+        inworld: {
+          apiKey: "inworld_api_key",
+          baseUrl: "https://api.inworld.ai",
+          voiceId: "Dennis",
+          modelId: "inworld-tts-1.5-max",
+          temperature: 0.8,
+        },
+      },
+    },
+  },
+}
+```
+
+Inworld authenticates with HTTP Basic using a single Base64-encoded credential
+string taken from the Inworld dashboard. The provider reads the key from
+`messages.tts.providers.inworld.apiKey` or the `INWORLD_API_KEY` env var.
+
 ### Disable Microsoft speech
 
 ```json5
@@ -266,7 +295,7 @@ Then run:
   - `tagged` only sends audio when the reply includes `[[tts:key=value]]` directives or a `[[tts:text]]...[[/tts:text]]` block.
 - `enabled`: legacy toggle (doctor migrates this to `auto`).
 - `mode`: `"final"` (default) or `"all"` (includes tool/block replies).
-- `provider`: speech provider id such as `"elevenlabs"`, `"google"`, `"microsoft"`, `"minimax"`, or `"openai"` (fallback is automatic).
+- `provider`: speech provider id such as `"elevenlabs"`, `"google"`, `"inworld"`, `"microsoft"`, `"minimax"`, or `"openai"` (fallback is automatic).
 - If `provider` is **unset**, OpenClaw uses the first configured speech provider in registry auto-select order.
 - Legacy `provider: "edge"` still works and is normalized to `microsoft`.
 - `summaryModel`: optional cheap model for auto-summary; defaults to `agents.defaults.model.primary`.
@@ -278,7 +307,7 @@ Then run:
 - `maxTextLength`: hard cap for TTS input (chars). `/tts audio` fails if exceeded.
 - `timeoutMs`: request timeout (ms).
 - `prefsPath`: override the local prefs JSON path (provider/limit/summary).
-- `apiKey` values fall back to env vars (`ELEVENLABS_API_KEY`/`XI_API_KEY`, `GEMINI_API_KEY`/`GOOGLE_API_KEY`, `MINIMAX_API_KEY`, `OPENAI_API_KEY`).
+- `apiKey` values fall back to env vars (`ELEVENLABS_API_KEY`/`XI_API_KEY`, `GEMINI_API_KEY`/`GOOGLE_API_KEY`, `INWORLD_API_KEY`, `MINIMAX_API_KEY`, `OPENAI_API_KEY`).
 - `providers.elevenlabs.baseUrl`: override ElevenLabs API base URL.
 - `providers.openai.baseUrl`: override the OpenAI TTS endpoint.
   - Resolution order: `messages.tts.providers.openai.baseUrl` -> `OPENAI_TTS_BASE_URL` -> `https://api.openai.com/v1`
@@ -296,6 +325,10 @@ Then run:
 - `providers.minimax.speed`: playback speed `0.5..2.0` (default 1.0).
 - `providers.minimax.vol`: volume `(0, 10]` (default 1.0; must be greater than 0).
 - `providers.minimax.pitch`: pitch shift `-12..12` (default 0).
+- `providers.inworld.baseUrl`: override Inworld API base URL (default `https://api.inworld.ai`).
+- `providers.inworld.voiceId`: Inworld voice identifier (default `Dennis`).
+- `providers.inworld.modelId`: Inworld TTS model (default `inworld-tts-1.5-max`; also supports `inworld-tts-1.5-mini`, `inworld-tts-1-max`, `inworld-tts-1`).
+- `providers.inworld.temperature`: sampling temperature `0..2` (optional).
 - `providers.google.model`: Gemini TTS model (default `gemini-3.1-flash-tts-preview`).
 - `providers.google.voiceName`: Gemini prebuilt voice name (default `Kore`; `voice` is also accepted).
 - `providers.google.baseUrl`: override the Gemini API base URL. Only `https://generativelanguage.googleapis.com` is accepted.
