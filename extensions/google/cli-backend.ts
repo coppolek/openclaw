@@ -27,8 +27,24 @@ export function buildGoogleGeminiCliBackend(): CliBackendPlugin {
     bundleMcpMode: "gemini-system-settings",
     config: {
       command: "gemini",
-      args: ["--output-format", "json", "--prompt", "{prompt}"],
-      resumeArgs: ["--resume", "{sessionId}", "--output-format", "json", "--prompt", "{prompt}"],
+      // `--yolo` disables Gemini CLI's per-tool approval prompts. OpenClaw drives the
+      // CLI non-interactively through `--prompt`, so without it destructive built-in
+      // tools like `write_file`, `edit`, and `run_shell_command` are silently stripped
+      // from the model's toolset. Parity with the Claude (`bypassPermissions`) and
+      // Codex (`workspace-write`) CLI backends; the CLI subprocess inherits OpenClaw's
+      // workspace trust boundary, and deployments that want stricter isolation can
+      // override `agents.defaults.cliBackends.google-gemini-cli.args` to drop `--yolo`
+      // or run the gateway inside an external sandbox.
+      args: ["--yolo", "--output-format", "json", "--prompt", "{prompt}"],
+      resumeArgs: [
+        "--yolo",
+        "--resume",
+        "{sessionId}",
+        "--output-format",
+        "json",
+        "--prompt",
+        "{prompt}",
+      ],
       output: "json",
       input: "arg",
       imageArg: "@",
