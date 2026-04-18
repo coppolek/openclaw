@@ -47,6 +47,8 @@ export type PluginManifestActivation = {
    * This is metadata only; runtime loading still happens through the loader.
    */
   onProviders?: string[];
+  /** Agent harness runtime ids that should activate this plugin. */
+  onAgentHarnesses?: string[];
   /** Command ids that should activate this plugin. */
   onCommands?: string[];
   /** Channel ids that should activate this plugin. */
@@ -161,6 +163,11 @@ export type PluginManifest = {
   modelSupport?: PluginManifestModelSupport;
   /** Cheap startup activation lookup for plugin-owned CLI inference backends. */
   cliBackends?: string[];
+  /**
+   * Provider or CLI backend refs whose plugin-owned synthetic auth hook should
+   * be probed during cold model discovery before the runtime registry exists.
+   */
+  syntheticAuthRefs?: string[];
   /**
    * Plugin-owned command aliases that should resolve to this plugin during
    * config diagnostics before runtime loads.
@@ -427,6 +434,7 @@ function normalizeManifestActivation(value: unknown): PluginManifestActivation |
   }
 
   const onProviders = normalizeTrimmedStringList(value.onProviders);
+  const onAgentHarnesses = normalizeTrimmedStringList(value.onAgentHarnesses);
   const onCommands = normalizeTrimmedStringList(value.onCommands);
   const onChannels = normalizeTrimmedStringList(value.onChannels);
   const onRoutes = normalizeTrimmedStringList(value.onRoutes);
@@ -440,6 +448,7 @@ function normalizeManifestActivation(value: unknown): PluginManifestActivation |
 
   const activation = {
     ...(onProviders.length > 0 ? { onProviders } : {}),
+    ...(onAgentHarnesses.length > 0 ? { onAgentHarnesses } : {}),
     ...(onCommands.length > 0 ? { onCommands } : {}),
     ...(onChannels.length > 0 ? { onChannels } : {}),
     ...(onRoutes.length > 0 ? { onRoutes } : {}),
@@ -697,6 +706,7 @@ export function loadPluginManifest(
   const providerDiscoveryEntry = normalizeOptionalString(raw.providerDiscoveryEntry);
   const modelSupport = normalizeManifestModelSupport(raw.modelSupport);
   const cliBackends = normalizeTrimmedStringList(raw.cliBackends);
+  const syntheticAuthRefs = normalizeTrimmedStringList(raw.syntheticAuthRefs);
   const commandAliases = normalizeManifestCommandAliases(raw.commandAliases);
   const providerAuthEnvVars = normalizeStringListRecord(raw.providerAuthEnvVars);
   const providerAuthAliases = normalizeStringRecord(raw.providerAuthAliases);
@@ -731,6 +741,7 @@ export function loadPluginManifest(
       providerDiscoveryEntry,
       modelSupport,
       cliBackends,
+      syntheticAuthRefs,
       commandAliases,
       providerAuthEnvVars,
       providerAuthAliases,
@@ -805,9 +816,15 @@ export type OpenClawPackageStartup = {
   deferConfiguredChannelFullLoadUntilAfterListen?: boolean;
 };
 
+export type OpenClawPackageSetupFeatures = {
+  legacyStateMigrations?: boolean;
+  legacySessionSurfaces?: boolean;
+};
+
 export type OpenClawPackageManifest = {
   extensions?: string[];
   setupEntry?: string;
+  setupFeatures?: OpenClawPackageSetupFeatures;
   channel?: PluginPackageChannel;
   install?: PluginPackageInstall;
   startup?: OpenClawPackageStartup;
