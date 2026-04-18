@@ -23,4 +23,8 @@ export type McpServerConfig = {
 export type McpConfig = {
   /** Named MCP server definitions managed by OpenClaw. */
   servers?: Record<string, McpServerConfig>;
+  /** MCP Apps UI rendering and app-to-host bridge support. Default: disabled. */
+  apps?: {
+    enabled?: boolean;
+  };
 };

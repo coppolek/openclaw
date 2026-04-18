@@ -48,6 +48,7 @@ import {
   type GatewayHelloOk,
 } from "./gateway.ts";
 import { GatewayBrowserClient } from "./gateway.ts";
+import { setMcpAppContext } from "./mcp-app-context.ts";
 import type { Tab } from "./navigation.ts";
 import type { UiSettings } from "./storage.ts";
 import type {
@@ -271,6 +272,7 @@ export function connectGateway(host: GatewayHost, options?: ConnectGatewayOption
       host.lastError = null;
       host.lastErrorCode = null;
       host.hello = hello;
+      setMcpAppContext(client, host.sessionKey);
       applySnapshot(host, hello);
       // Reset orphaned chat run state from before disconnect.
       // Any in-flight run's final event was lost during the disconnect window.
@@ -300,6 +302,7 @@ export function connectGateway(host: GatewayHost, options?: ConnectGatewayOption
         return;
       }
       host.connected = false;
+      setMcpAppContext(null, null);
       // Code 1012 = Service Restart (expected during config saves, don't show as error)
       host.lastErrorCode =
         resolveGatewayErrorDetailCode(error) ??

@@ -69,6 +69,7 @@ export type AppViewState = {
   localMediaPreviewRoots: string[];
   embedSandboxMode: EmbedSandboxMode;
   allowExternalEmbedUrls: boolean;
+  mcpAppsEnabled: boolean;
   sessionKey: string;
   chatLoading: boolean;
   chatSending: boolean;

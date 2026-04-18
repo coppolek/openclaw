@@ -226,6 +226,12 @@ const McpServerSchema = z
 const McpConfigSchema = z
   .object({
     servers: z.record(z.string(), McpServerSchema).optional(),
+    apps: z
+      .object({
+        enabled: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .optional();

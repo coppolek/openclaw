@@ -183,6 +183,89 @@ describe("tool-cards", () => {
     });
   });
 
+  it("preserves MCP App metadata on canvas previews", () => {
+    const [card] = extractToolCards(
+      {
+        role: "tool",
+        toolName: "weather_dashboard",
+        content: JSON.stringify({
+          kind: "canvas",
+          view: {
+            id: "cv_mcp_app",
+            url: "/__openclaw__/canvas/documents/cv_mcp_app/index.html",
+          },
+          presentation: {
+            target: "assistant_message",
+            title: "Weather dashboard",
+          },
+          mcpApp: {
+            serverName: "weather",
+            toolName: "weather_dashboard",
+            uiResourceUri: "ui://weather/dashboard",
+            sessionKey: "agent:test:main",
+            toolInput: { location: "NYC" },
+            toolResult: { content: [{ type: "text", text: "Weather dashboard for NYC" }] },
+          },
+        }),
+      },
+      "msg:mcp-app",
+    );
+
+    expect(card?.preview?.mcpApp).toMatchObject({
+      serverName: "weather",
+      toolName: "weather_dashboard",
+      uiResourceUri: "ui://weather/dashboard",
+      sessionKey: "agent:test:main",
+      toolInput: { location: "NYC" },
+      toolResult: { content: [{ type: "text", text: "Weather dashboard for NYC" }] },
+    });
+  });
+
+  it("renders MCP App previews with bridge metadata", () => {
+    const container = document.createElement("div");
+    render(
+      renderToolPreview(
+        {
+          kind: "canvas",
+          surface: "assistant_message",
+          render: "url",
+          viewId: "cv_mcp_app",
+          title: "Weather dashboard",
+          mcpApp: {
+            serverName: "weather",
+            toolName: "weather_dashboard",
+            uiResourceUri: "ui://weather/dashboard",
+            sessionKey: "agent:test:main",
+            toolInput: { location: "NYC" },
+            toolResult: { content: [{ type: "text", text: "Weather dashboard for NYC" }] },
+          },
+        },
+        "chat_message",
+        { mcpAppsEnabled: true },
+      ),
+      container,
+    );
+
+    const app = container.querySelector("mcp-app-view") as
+      | (HTMLElement & {
+          mcpServerName?: string;
+          mcpToolName?: string;
+          mcpUiResourceUri?: string;
+          mcpSessionKey?: string;
+          mcpToolInput?: unknown;
+          mcpToolResult?: unknown;
+        })
+      | null;
+    expect(app?.mcpServerName).toBe("weather");
+    expect(app?.mcpToolName).toBe("weather_dashboard");
+    expect(app?.mcpUiResourceUri).toBe("ui://weather/dashboard");
+    expect(app?.mcpSessionKey).toBe("agent:test:main");
+    expect(app?.mcpToolInput).toEqual({ location: "NYC" });
+    expect(app?.mcpToolResult).toEqual({
+      content: [{ type: "text", text: "Weather dashboard for NYC" }],
+    });
+  });
+
   it("drops tool_card-targeted canvas payloads", () => {
     const [card] = extractToolCards(
       {

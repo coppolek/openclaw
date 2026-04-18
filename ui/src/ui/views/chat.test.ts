@@ -141,6 +141,79 @@ function clearDeleteConfirmSkip() {
 }
 
 describe("chat view", () => {
+  it("upgrades assistant embed shortcodes with MCP App metadata from persisted tool results", () => {
+    const container = document.createElement("div");
+    const canvasUrl = "/__openclaw__/canvas/documents/cv_system/index.html";
+    const mcpApp = {
+      serverName: "system-monitor",
+      toolName: "get-system-info",
+      uiResourceUri: "ui://system-monitor/mcp-app.html",
+      sessionKey: "agent:test:main",
+      toolInput: {},
+      toolResult: {
+        content: [{ type: "text", text: "system info" }],
+        structuredContent: { hostname: "openclaw-test" },
+      },
+    };
+
+    render(
+      renderChat(
+        createProps({
+          mcpAppsEnabled: true,
+          messages: [
+            {
+              role: "toolResult",
+              toolCallId: "tool-1",
+              toolName: "system-monitor__get-system-info",
+              timestamp: 1000,
+              content: [
+                { type: "text", text: "system info" },
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    kind: "canvas",
+                    view: { id: "cv_system", url: canvasUrl, title: "get-system-info UI" },
+                    presentation: {
+                      target: "assistant_message",
+                      title: "get-system-info UI",
+                      preferred_height: 600,
+                    },
+                    mcpApp,
+                  }),
+                },
+              ],
+            },
+            {
+              role: "assistant",
+              timestamp: 2000,
+              content: `Here's the live system info.\n\n[embed url="${canvasUrl}" title="get-system-info UI" height="600" /]`,
+            },
+          ],
+        }),
+      ),
+      container,
+    );
+
+    const apps = Array.from(container.querySelectorAll("mcp-app-view")) as Array<
+      HTMLElement & {
+        mcpServerName?: string;
+        mcpToolName?: string;
+        mcpUiResourceUri?: string;
+        mcpSessionKey?: string;
+        mcpToolInput?: unknown;
+        mcpToolResult?: unknown;
+      }
+    >;
+    expect(apps).toHaveLength(1);
+    expect(apps[0]?.mcpServerName).toBe("system-monitor");
+    expect(apps[0]?.mcpToolName).toBe("get-system-info");
+    expect(apps[0]?.mcpUiResourceUri).toBe("ui://system-monitor/mcp-app.html");
+    expect(apps[0]?.mcpSessionKey).toBe("agent:test:main");
+    expect(apps[0]?.mcpToolInput).toEqual({});
+    expect(apps[0]?.mcpToolResult).toEqual(mcpApp.toolResult);
+    expect(container.textContent).not.toContain("[embed");
+  });
+
   it("uses the assistant avatar URL or bundled logo fallbacks", () => {
     const container = document.createElement("div");
     render(
