@@ -47,6 +47,17 @@ function logVerbose(core: GoogleChatCoreRuntime, runtime: GoogleChatRuntimeEnv, 
   }
 }
 
+export function resolveGoogleChatPeerId(params: {
+  spaceId: string;
+  threadName: string | null | undefined;
+  sessionThread: boolean | undefined;
+}): string {
+  if (params.sessionThread && params.threadName) {
+    return params.threadName;
+  }
+  return params.spaceId;
+}
+
 function normalizeAudienceType(value?: string | null): GoogleChatAudienceType | undefined {
   const normalized = normalizeOptionalLowercaseString(value);
   if (normalized === "app-url" || normalized === "app_url" || normalized === "app") {
@@ -170,11 +181,11 @@ async function processMessageWithPipeline(params: {
   }
   const { commandAuthorized, effectiveWasMentioned, groupSystemPrompt } = access;
 
-  // When sessionThread is enabled, bind the OpenClaw session to the Chat
-  // thread so each Google Chat thread gets its own conversation history.
-  // Otherwise keep the space-level peer id for backwards-compatible behavior.
-  const inboundThreadForPeer = account.config.sessionThread ? message.thread?.name : undefined;
-  const peerId = inboundThreadForPeer ?? spaceId;
+  const peerId = resolveGoogleChatPeerId({
+    spaceId,
+    threadName: message.thread?.name,
+    sessionThread: account.config.sessionThread,
+  });
   const { route, buildEnvelope } = resolveInboundRouteEnvelopeBuilderWithRuntime({
     cfg: config,
     channel: "googlechat",
