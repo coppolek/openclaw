@@ -125,7 +125,12 @@ export function emitGatewayRestart(): boolean {
   emittedRestartToken = cycleToken;
   authorizeGatewaySigusr1Restart();
   try {
-    if (process.listenerCount("SIGUSR1") > 0) {
+    if (process.platform === "win32") {
+      // On Windows, SIGUSR1 is not supported by Node.js process.kill().
+      // Calling triggerOpenClawRestart() directly instead, which uses schtasks on win32.
+      // The result is intentionally ignored here — triggerOpenClawRestart() logs its own errors.
+      triggerOpenClawRestart();
+    } else if (process.listenerCount("SIGUSR1") > 0) {
       process.emit("SIGUSR1");
     } else {
       process.kill(process.pid, "SIGUSR1");
@@ -429,7 +434,9 @@ export function scheduleGatewaySigusr1Restart(opts?: {
     typeof opts?.reason === "string" && opts.reason.trim()
       ? opts.reason.trim().slice(0, 200)
       : undefined;
-  const mode = process.listenerCount("SIGUSR1") > 0 ? "emit" : "signal";
+  const isWindows = process.platform === "win32";
+  const mode =
+    isWindows || process.listenerCount("SIGUSR1") > 0 ? "emit" : "signal";
   const nowMs = Date.now();
   const cooldownMsApplied = Math.max(0, lastRestartEmittedAt + RESTART_COOLDOWN_MS - nowMs);
   const requestedDueAt = nowMs + delayMs + cooldownMsApplied;
