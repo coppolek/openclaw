@@ -188,6 +188,8 @@ export function sanitizeMediaMime(
  * Sanitizes an outbound document filename for safe use in downstream payloads.
  * Strips ASCII control characters, replaces path separators and quotes,
  * caps length at 128 chars, and falls back to "file" when empty.
+ * Linear time complexity: the loop bounds itself by min(input length, 128)
+ * to avoid O(n^2) build cost on attacker-controlled large filenames.
  */
 export function sanitizeFileName(input: string | null | undefined): string {
   const trimmed = (input ?? "").trim();
@@ -195,21 +197,20 @@ export function sanitizeFileName(input: string | null | undefined): string {
     return "file";
   }
 
-  let stripped = "";
-  for (let i = 0; i < trimmed.length; i += 1) {
-    const char = trimmed[i];
-    if (!char) {
+  const out: string[] = [];
+  for (let i = 0; i < trimmed.length && out.length < 128; i += 1) {
+    const ch = trimmed[i];
+    if (!ch) {
       continue;
     }
-    const code = char.charCodeAt(0);
-    if (code > 0x1f && code !== 0x7f) {
-      stripped += char;
+    const code = ch.charCodeAt(0);
+    if (code <= 0x1f || code === 0x7f) {
+      continue;
     }
+    out.push(ch === "/" || ch === "\\" || ch === '"' ? "_" : ch);
   }
-
-  const safe = stripped.replace(/[\\/"]/g, "_");
-  const capped = safe.slice(0, 128);
-  return capped || "file";
+  const safe = out.join("");
+  return safe || "file";
 }
 
 export function detectMime(opts: {

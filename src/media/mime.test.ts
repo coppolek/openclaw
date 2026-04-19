@@ -239,6 +239,13 @@ describe("sanitizeFileName", () => {
   ] as const)("sanitizes $input correctly", ({ input, expected }) => {
     expect(sanitizeFileName(input)).toBe(expected);
   });
+
+  it("caps very long inputs at 128 characters without quadratic-time blowup", () => {
+    const longInput = "a".repeat(100000);
+    const result = sanitizeFileName(longInput);
+    expect(result).toBe("a".repeat(128));
+    expect(result.length).toBe(128);
+  });
 });
 
 describe("normalizeMimeType", () => {
