@@ -252,7 +252,7 @@ describe("bedrock discovery", () => {
     expect(usProfile).toMatchObject({
       name: "US Anthropic Claude Sonnet 4.6",
       input: ["text", "image"],
-      contextWindow: 32000,
+      contextWindow: 1000000,
       maxTokens: 4096,
     });
     expect(euProfile).toMatchObject({ input: ["text", "image"] });
@@ -356,7 +356,7 @@ describe("bedrock discovery", () => {
     expect(profile).toMatchObject({
       id: "us.my-prod-profile",
       input: ["text", "image"],
-      contextWindow: 32000,
+      contextWindow: 1000000,
       maxTokens: 4096,
     });
   });
