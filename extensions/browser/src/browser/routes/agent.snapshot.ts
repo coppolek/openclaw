@@ -270,7 +270,7 @@ export function registerBrowserAgentSnapshotRoutes(
       const fullPage = toBoolean(body.fullPage) ?? false;
       const ref = toStringOrEmpty(body.ref) || undefined;
       const element = toStringOrEmpty(body.element) || undefined;
-      let type = body.type === "jpeg" ? "jpeg" : "png";
+      let type: "jpeg" | "png" = body.type === "jpeg" ? "jpeg" : "png";
 
       if (fullPage && (ref || element)) {
         return jsonError(res, 400, "fullPage is not supported for element screenshots");
