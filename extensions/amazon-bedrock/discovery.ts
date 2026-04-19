@@ -100,7 +100,7 @@ function resolveKnownContextWindow(modelId: string): number | undefined {
     return KNOWN_CONTEXT_WINDOWS[modelId];
   }
   // Strip regional inference profile prefix
-  const stripped = modelId.replace(/^(?:us|eu|ap|global)\./, "");
+  const stripped = modelId.replace(/^(?:us|eu|ap|apac|au|jp|global)\./, "");
   if (stripped !== modelId && KNOWN_CONTEXT_WINDOWS[stripped] !== undefined) {
     return KNOWN_CONTEXT_WINDOWS[stripped];
   }
@@ -276,7 +276,7 @@ function resolveBaseModelId(profile: InferenceProfileSummary): string | undefine
   }
   if (profile.type === "SYSTEM_DEFINED") {
     const id = profile.inferenceProfileId ?? "";
-    const prefixMatch = /^(?:us|eu|ap|jp|global)\.(.+)$/i.exec(id);
+    const prefixMatch = /^(?:us|eu|ap|apac|au|jp|global)\.(.+)$/i.exec(id);
     if (prefixMatch) {
       return prefixMatch[1];
     }
