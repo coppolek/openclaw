@@ -113,7 +113,12 @@ import {
 import type { RunEmbeddedPiAgentParams } from "./run/params.js";
 import { buildEmbeddedRunPayloads } from "./run/payloads.js";
 import { handleRetryLimitExhaustion } from "./run/retry-limit.js";
-import { resolveEffectiveRuntimeModel, resolveHookModelSelection } from "./run/setup.js";
+import {
+  resolveCurrentRunAuthProfile,
+  resolveEffectiveRuntimeModel,
+  resolveHookModelSelection,
+  resolvePreferredRunAuthProfile,
+} from "./run/setup.js";
 import { mergeAttemptToolMediaPayloads } from "./run/tool-media-payloads.js";
 import {
   resolveLiveToolResultMaxChars,
@@ -338,8 +343,12 @@ export async function runEmbeddedPiAgent(
       const authStore = ensureAuthProfileStore(agentDir, {
         allowKeychainPrompt: false,
       });
-      const preferredProfileId = params.authProfileId?.trim();
-      let lockedProfileId = params.authProfileIdSource === "user" ? preferredProfileId : undefined;
+      const { preferredProfileId, preferredProfileIdSource } = resolvePreferredRunAuthProfile({
+        requestedAuthProfileId: params.authProfileId,
+        requestedAuthProfileIdSource: params.authProfileIdSource,
+        hookAuthProfileOverride: hookSelection.authProfileOverride,
+      });
+      let lockedProfileId = preferredProfileIdSource === "user" ? preferredProfileId : undefined;
       if (lockedProfileId) {
         const lockedProfile = authStore.profiles[lockedProfileId];
         if (
@@ -674,6 +683,10 @@ export async function runEmbeddedPiAgent(
             resolvedStreamApiKey = (apiKeyInfo as ApiKeyInfo).apiKey;
           }
 
+          const preAttemptAuthProfile = resolveCurrentRunAuthProfile({
+            activeAuthProfileId: lastProfileId,
+            lockedProfileId,
+          });
           const attempt = await runEmbeddedAttemptWithBackend({
             sessionId: params.sessionId,
             sessionKey: resolvedSessionKey,
@@ -725,8 +738,8 @@ export async function runEmbeddedPiAgent(
               params.config,
             ),
             resolvedApiKey: resolvedStreamApiKey,
-            authProfileId: lastProfileId,
-            authProfileIdSource: lockedProfileId ? "user" : "auto",
+            authProfileId: preAttemptAuthProfile.authProfileId,
+            authProfileIdSource: preAttemptAuthProfile.authProfileIdSource,
             initialReplayState: accumulatedReplayState,
             authStorage,
             modelRegistry,
@@ -847,6 +860,10 @@ export async function runEmbeddedPiAgent(
             );
             continue;
           }
+          const postAttemptAuthProfile = resolveCurrentRunAuthProfile({
+            activeAuthProfileId: lastProfileId,
+            lockedProfileId,
+          });
           const requestedSelection = shouldSwitchToLiveModel({
             cfg: params.config,
             sessionKey: resolvedSessionKey,
@@ -855,8 +872,8 @@ export async function runEmbeddedPiAgent(
             defaultModel: DEFAULT_MODEL,
             currentProvider: provider,
             currentModel: modelId,
-            currentAuthProfileId: preferredProfileId,
-            currentAuthProfileIdSource: params.authProfileIdSource,
+            currentAuthProfileId: postAttemptAuthProfile.authProfileId,
+            currentAuthProfileIdSource: postAttemptAuthProfile.authProfileIdSource,
           });
           if (requestedSelection && canRestartForLiveSwitch) {
             await clearLiveModelSwitchPending({
