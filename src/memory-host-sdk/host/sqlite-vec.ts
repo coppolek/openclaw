@@ -28,7 +28,20 @@ export async function loadSqliteVecExtension(params: {
     if (resolvedPath) {
       params.db.loadExtension(extensionPath);
     } else {
-      sqliteVec.load(params.db);
+      try {
+        sqliteVec.load(params.db);
+      } catch (firstErr) {
+        // On Windows, node:sqlite's loadExtension() may require the path
+        // without the .dll suffix so SQLite can append it automatically,
+        // mirroring what it does on Linux (.so) and macOS (.dylib).
+        // If the bundled load() call fails and the resolved path ends with
+        // .dll, retry by passing the path directly without the suffix.
+        if (process.platform === "win32" && extensionPath.toLowerCase().endsWith(".dll")) {
+          params.db.loadExtension(extensionPath.slice(0, -4));
+        } else {
+          throw firstErr;
+        }
+      }
     }
 
     return { ok: true, extensionPath };
