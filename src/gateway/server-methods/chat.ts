@@ -396,15 +396,15 @@ function stripRuntimeContentFromMessage(
   }
   const updated = { ...entry };
   if (extracted.field === "content-array") {
-    updated.content = (entry.content as unknown[]).map((item, idx) => {
-      if (idx === extracted.blockIndex && item && typeof item === "object") {
-        const block = item as Record<string, unknown>;
-        if (block.type === "text" && typeof block.text === "string") {
-          return { ...block, text: stripped };
-        }
+    const content = [...(entry.content as unknown[])];
+    const item = content[extracted.blockIndex ?? -1];
+    if (item && typeof item === "object") {
+      const block = item as Record<string, unknown>;
+      if (block.type === "text" && typeof block.text === "string") {
+        content[extracted.blockIndex ?? -1] = { ...block, text: stripped };
       }
-      return item;
-    });
+    }
+    updated.content = content;
   } else if (extracted.field === "content-string") {
     updated.content = stripped;
   } else {
