@@ -91,7 +91,7 @@ export { extractOriginalFilename } from "../media/store.js";
 export { emptyPluginConfigSchema } from "../plugins/config-schema.js";
 export type { PluginRuntime } from "../plugins/runtime/types.js";
 export type { OpenClawPluginApi } from "../plugins/types.js";
-export { DEFAULT_ACCOUNT_ID } from "../routing/session-key.js";
+export { DEFAULT_ACCOUNT_ID, resolveThreadSessionKeys } from "../routing/session-key.js";
 export type { RuntimeEnv } from "../runtime.js";
 export {
   readStoreAllowFromForDmPolicy,
