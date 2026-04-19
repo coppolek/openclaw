@@ -4,13 +4,27 @@ import { CURRENT_SESSION_VERSION, SessionManager } from "@mariozechner/pi-coding
 import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
 import { resolveAgentConfig, resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { resolveThinkingDefault } from "../../agents/model-selection.js";
+import {
+  ACK_EXECUTION_FAST_PATH_INSTRUCTION,
+  EMPTY_RESPONSE_RETRY_INSTRUCTION,
+  PLANNING_ONLY_RETRY_INSTRUCTION,
+  REASONING_ONLY_RETRY_INSTRUCTION,
+} from "../../agents/pi-embedded-runner/run/incomplete-turn.js";
 import { rewriteTranscriptEntriesInSessionFile } from "../../agents/pi-embedded-runner/transcript-rewrite.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { dispatchInboundMessage } from "../../auto-reply/dispatch.js";
+import { isHeartbeatUserMessage } from "../../auto-reply/heartbeat-filter.js";
 import {
   HEARTBEAT_PROMPT,
   resolveHeartbeatPrompt as resolveHeartbeatPromptText,
+  stripHeartbeatToken,
 } from "../../auto-reply/heartbeat.js";
+import type { ReplyPayload } from "../../auto-reply/reply-payload.js";
+import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.js";
+import { stripInboundMetadata } from "../../auto-reply/reply/strip-inbound-meta.js";
+import type { MsgContext } from "../../auto-reply/templating.js";
+import { extractCanvasFromText } from "../../chat/canvas-render.js";
+import { resolveSessionFilePath } from "../../config/sessions.js";
 import {
   buildCronEventPrompt,
   buildExecEventPrompt,
@@ -18,19 +32,6 @@ import {
   EXEC_COMPLETION_PROMPT_PREFIX,
   REMINDER_PROMPT_PREFIX,
 } from "../../infra/heartbeat-events-filter.js";
-import { isHeartbeatUserMessage } from "../../auto-reply/heartbeat-filter.js";
-import type { ReplyPayload } from "../../auto-reply/reply-payload.js";
-import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.js";
-import { stripInboundMetadata } from "../../auto-reply/reply/strip-inbound-meta.js";
-import type { MsgContext } from "../../auto-reply/templating.js";
-import {
-  ACK_EXECUTION_FAST_PATH_INSTRUCTION,
-  EMPTY_RESPONSE_RETRY_INSTRUCTION,
-  PLANNING_ONLY_RETRY_INSTRUCTION,
-  REASONING_ONLY_RETRY_INSTRUCTION,
-} from "../../agents/pi-embedded-runner/run/incomplete-turn.js";
-import { extractCanvasFromText } from "../../chat/canvas-render.js";
-import { resolveSessionFilePath } from "../../config/sessions.js";
 import { jsonUtf8Bytes } from "../../infra/json-utf8-bytes.js";
 import { getAgentScopedMediaLocalRoots } from "../../media/local-roots.js";
 import { isAudioFileName } from "../../media/mime.js";
@@ -195,15 +196,17 @@ const INTERNAL_CRON_NO_CONTENT_PROMPT = buildCronEventPrompt([], { deliverToUser
 const USER_CRON_NO_CONTENT_PROMPT = buildCronEventPrompt([], { deliverToUser: true });
 const INTERNAL_EXEC_COMPLETION_PROMPT = buildExecEventPrompt({ deliverToUser: false });
 const USER_EXEC_COMPLETION_PROMPT = buildExecEventPrompt({ deliverToUser: true });
-const INTERNAL_REMINDER_PROMPT_TEMPLATE = buildCronEventPrompt(
-  [RUNTIME_PROMPT_TEMPLATE_SENTINEL],
-  { deliverToUser: false },
-);
+const INTERNAL_REMINDER_PROMPT_TEMPLATE = buildCronEventPrompt([RUNTIME_PROMPT_TEMPLATE_SENTINEL], {
+  deliverToUser: false,
+});
 const USER_REMINDER_PROMPT_TEMPLATE = buildCronEventPrompt([RUNTIME_PROMPT_TEMPLATE_SENTINEL], {
   deliverToUser: true,
 });
 
-function resolveChatHistoryHeartbeatPrompt(config: Record<string, unknown>, agentId?: string): string {
+function resolveChatHistoryHeartbeatPrompt(
+  config: Record<string, unknown>,
+  agentId?: string,
+): string {
   const cfg = config as {
     agents?: { defaults?: { heartbeat?: { prompt?: string } } };
   };
@@ -220,15 +223,15 @@ function matchesTemplateWithDynamicBody(text: string, template: string, marker: 
   const prefix = template.slice(0, markerIndex);
   const suffix = template.slice(markerIndex + marker.length);
   return (
-    text.startsWith(prefix) &&
-    text.endsWith(suffix) &&
-    text.length > prefix.length + suffix.length
+    text.startsWith(prefix) && text.endsWith(suffix) && text.length > prefix.length + suffix.length
   );
 }
 
-function extractUserMessageText(
-  entry: Record<string, unknown>,
-): { text: string; field: "content-array" | "content-string" | "text"; blockIndex?: number } | null {
+function extractUserMessageText(entry: Record<string, unknown>): {
+  text: string;
+  field: "content-array" | "content-string" | "text";
+  blockIndex?: number;
+} | null {
   if (Array.isArray(entry.content)) {
     for (let i = 0; i < entry.content.length; i++) {
       const item = entry.content[i];
@@ -389,7 +392,9 @@ function stripRuntimeContentFromMessage(
   if (!stripped) {
     if (extracted.field === "content-array" && hasNonTextContentBlocks(entry)) {
       const updated = { ...entry };
-      updated.content = (entry.content as unknown[]).filter((item, idx) => idx !== extracted.blockIndex);
+      updated.content = (entry.content as unknown[]).filter(
+        (item, idx) => idx !== extracted.blockIndex,
+      );
       return { message: updated, changed: true, empty: false };
     }
     return { message, changed: true, empty: true };
@@ -1230,7 +1235,11 @@ function isHeartbeatOnlyAssistantHistoryMessage(message: unknown): boolean {
   if (text === undefined) {
     return false;
   }
-  return text.trim() === "HEARTBEAT_OK";
+  const stripped = stripHeartbeatToken(text, { mode: "message" });
+  if (!stripped.didStrip) {
+    return false;
+  }
+  return stripped.text === "" || /^[\p{P}\p{S}\s]+$/u.test(stripped.text);
 }
 
 function hasRuntimeEnvelopeText(text: string): boolean {
@@ -1283,7 +1292,11 @@ function shouldDropUserHistoryMessage(
   }
   const runtimeText = stripRuntimeContentFromText(text);
   const hasRuntimeEnvelope = hasRuntimeEnvelopeText(rawText);
-  if (runtimeText !== text && hasRuntimeEnvelope && isRuntimePromptText(runtimeText, heartbeatPrompt)) {
+  if (
+    runtimeText !== text &&
+    hasRuntimeEnvelope &&
+    isRuntimePromptText(runtimeText, heartbeatPrompt)
+  ) {
     return true;
   }
   if (!hasRuntimeEnvelope) {

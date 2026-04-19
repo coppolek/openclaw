@@ -4,16 +4,17 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { PLANNING_ONLY_RETRY_INSTRUCTION } from "../../agents/pi-embedded-runner/run/incomplete-turn.js";
+import { HEARTBEAT_PROMPT } from "../../auto-reply/heartbeat.js";
 import { emitAgentEvent } from "../../infra/agent-events.js";
 import { formatZonedTimestamp } from "../../infra/format-time/format-datetime.js";
-import { HEARTBEAT_PROMPT } from "../../auto-reply/heartbeat.js";
 import { EXEC_COMPLETION_PROMPT_PREFIX } from "../../infra/heartbeat-events-filter.js";
-import { PLANNING_ONLY_RETRY_INSTRUCTION } from "../../agents/pi-embedded-runner/run/incomplete-turn.js";
 import {
   buildSystemRunApprovalBinding,
   buildSystemRunApprovalEnvBinding,
 } from "../../infra/system-run-approval-binding.js";
 import { resetLogger, setLoggerOverride } from "../../logging.js";
+import { stripEnvelopeFromMessages } from "../chat-sanitize.js";
 import { ExecApprovalManager } from "../exec-approval-manager.js";
 import { validateExecApprovalRequestParams } from "../protocol/index.js";
 import { waitForAgentJob } from "./agent-job.js";
@@ -27,7 +28,6 @@ import {
   sanitizeChatSendMessageInput,
   stripRuntimeInjectedContent,
 } from "./chat.js";
-import { stripEnvelopeFromMessages } from "../chat-sanitize.js";
 import { createExecApprovalHandlers } from "./exec-approval.js";
 import { logsHandlers } from "./logs.js";
 
@@ -431,6 +431,34 @@ describe("sanitizeChatHistoryMessages", () => {
     ]);
   });
 
+  it("drops heartbeat-only assistant acks wrapped in punctuation or markup", () => {
+    const result = sanitizeChatHistoryMessages([
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "HEARTBEAT_OK." }],
+        timestamp: 1,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "**HEARTBEAT_OK**" }],
+        timestamp: 2,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "real reply" }],
+        timestamp: 3,
+      },
+    ]);
+
+    expect(result).toEqual([
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "real reply" }],
+        timestamp: 3,
+      },
+    ]);
+  });
+
   it("keeps plain user text that mentions retry or exec prompt language", () => {
     const result = sanitizeChatHistoryMessages([
       {
@@ -627,8 +655,7 @@ describe("stripRuntimeInjectedContent", () => {
         content: [
           {
             type: "text",
-            text:
-              "System: [2026-04-17 11:55:13 AKDT] Gateway restart ok\n\n" + HEARTBEAT_PROMPT,
+            text: "System: [2026-04-17 11:55:13 AKDT] Gateway restart ok\n\n" + HEARTBEAT_PROMPT,
           },
           { type: "text", text: "Actual user message" },
         ],
@@ -706,11 +733,11 @@ describe("chat.history sanitization ordering", () => {
             : typeof entry.content === "string"
               ? entry.content
               : Array.isArray(entry.content)
-                ? (entry.content
+                ? entry.content
                     .filter((b) => b && typeof b === "object")
                     .map((b) => (b as { type?: unknown; text?: unknown }).text)
                     .filter((t): t is string => typeof t === "string")
-                    .join("\n"))
+                    .join("\n")
                 : "";
         return typeof text === "string" ? text : "";
       })
