@@ -13,6 +13,11 @@ import {
 import { emitDiagnosticEvent } from "../infra/diagnostic-events.js";
 import { withEnv } from "../test-utils/env.js";
 import { clearPluginCommands, getPluginCommandSpecs } from "./command-registry-state.js";
+import {
+  clearCompactionProviders,
+  getRegisteredCompactionProvider,
+  registerCompactionProvider,
+} from "./compaction-provider.js";
 import { getGlobalHookRunner, resetGlobalHookRunner } from "./hook-runner-global.js";
 import { createHookRunner } from "./hooks.js";
 import {
@@ -38,21 +43,13 @@ import {
   useNoBundledPlugins,
   writePlugin,
 } from "./loader.test-fixtures.js";
-import {
-  listMemoryEmbeddingProviders,
-  registerMemoryEmbeddingProvider,
-} from "./memory-embedding-providers.js";
+import { listMemoryEmbeddingProviders } from "./memory-embedding-providers.js";
 import {
   buildMemoryPromptSection,
   clearMemoryPluginState,
   getMemoryRuntime,
   listActiveMemoryPublicArtifacts,
   listMemoryCorpusSupplements,
-  registerMemoryCorpusSupplement,
-  registerMemoryFlushPlanResolver,
-  registerMemoryPromptSupplement,
-  registerMemoryPromptSection,
-  registerMemoryRuntime,
   resolveMemoryFlushPlan,
 } from "./memory-state.js";
 import { createEmptyPluginRegistry } from "./registry.js";
@@ -787,6 +784,7 @@ function expectEscapingEntryRejected(params: {
 }
 
 afterEach(() => {
+  clearCompactionProviders();
   resetPluginLoaderTestStateForTest();
 });
 
@@ -1878,62 +1876,26 @@ module.exports = { id: "throws-after-import", register() {} };`,
     expect(scoped.providers.map((entry) => entry.provider.id)).toEqual(["deepseek"]);
   });
 
-  it("does not replace active memory plugin registries during non-activating loads", () => {
+  it("does not leak compaction providers from non-activating loads", () => {
     useNoBundledPlugins();
-    registerMemoryEmbeddingProvider({
-      id: "active",
-      create: async () => ({ provider: null }),
-    });
-    registerMemoryCorpusSupplement("memory-wiki", {
-      search: async () => [],
-      get: async () => null,
-    });
-    registerMemoryPromptSection(() => ["active memory section"]);
-    registerMemoryPromptSupplement("memory-wiki", () => ["active wiki supplement"]);
-    registerMemoryFlushPlanResolver(() => ({
-      softThresholdTokens: 1,
-      forceFlushTranscriptBytes: 2,
-      reserveTokensFloor: 3,
-      prompt: "active",
-      systemPrompt: "active",
-      relativePath: "memory/active.md",
-    }));
-    const activeRuntime = {
-      async getMemorySearchManager() {
-        return { manager: null, error: "active" };
+    registerCompactionProvider(
+      {
+        id: "active-compaction",
+        label: "Active Compaction",
+        summarize: async () => "active",
       },
-      resolveMemoryBackendConfig() {
-        return { backend: "builtin" as const };
-      },
-    };
-    registerMemoryRuntime(activeRuntime);
+      { ownerPluginId: "active-plugin" },
+    );
     const plugin = writePlugin({
-      id: "snapshot-memory",
-      filename: "snapshot-memory.cjs",
+      id: "snapshot-compaction",
+      filename: "snapshot-compaction.cjs",
       body: `module.exports = {
-        id: "snapshot-memory",
-        kind: "memory",
+        id: "snapshot-compaction",
         register(api) {
-          api.registerMemoryEmbeddingProvider({
-            id: "snapshot",
-            create: async () => ({ provider: null }),
-          });
-          api.registerMemoryPromptSection(() => ["snapshot memory section"]);
-          api.registerMemoryFlushPlan(() => ({
-            softThresholdTokens: 10,
-            forceFlushTranscriptBytes: 20,
-            reserveTokensFloor: 30,
-            prompt: "snapshot",
-            systemPrompt: "snapshot",
-            relativePath: "memory/snapshot.md",
-          }));
-          api.registerMemoryRuntime({
-            async getMemorySearchManager() {
-              return { manager: null, error: "snapshot" };
-            },
-            resolveMemoryBackendConfig() {
-              return { backend: "qmd", qmd: {} };
-            },
+          api.registerCompactionProvider({
+            id: "snapshot-compaction",
+            label: "Snapshot Compaction",
+            summarize: async () => "snapshot",
           });
         },
       };`,
@@ -1946,22 +1908,19 @@ module.exports = { id: "throws-after-import", register() {} };`,
       config: {
         plugins: {
           load: { paths: [plugin.file] },
-          allow: ["snapshot-memory"],
-          slots: { memory: "snapshot-memory" },
+          allow: ["snapshot-compaction"],
         },
       },
-      onlyPluginIds: ["snapshot-memory"],
+      onlyPluginIds: ["snapshot-compaction"],
     });
 
-    expect(scoped.plugins.find((entry) => entry.id === "snapshot-memory")?.status).toBe("loaded");
-    expect(buildMemoryPromptSection({ availableTools: new Set() })).toEqual([
-      "active memory section",
-      "active wiki supplement",
-    ]);
-    expect(listMemoryCorpusSupplements()).toHaveLength(1);
-    expect(resolveMemoryFlushPlan({})?.relativePath).toBe("memory/active.md");
-    expect(getMemoryRuntime()).toBe(activeRuntime);
-    expect(listMemoryEmbeddingProviders().map((adapter) => adapter.id)).toEqual(["active"]);
+    expect(scoped.plugins.find((entry) => entry.id === "snapshot-compaction")?.status).toBe(
+      "loaded",
+    );
+    expect(getRegisteredCompactionProvider("active-compaction")?.ownerPluginId).toBe(
+      "active-plugin",
+    );
+    expect(getRegisteredCompactionProvider("snapshot-compaction")).toBeUndefined();
   });
 
   it("clears newly-registered memory plugin registries when plugin register fails", () => {

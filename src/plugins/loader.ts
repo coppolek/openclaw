@@ -2221,19 +2221,6 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
 
       try {
         runPluginRegisterSync(register, api);
-        // Snapshot loads should not replace process-global runtime prompt state.
-        if (!shouldActivate) {
-          restoreRegisteredAgentHarnesses(previousAgentHarnesses);
-          restoreRegisteredCompactionProviders(previousCompactionProviders);
-          restoreRegisteredMemoryEmbeddingProviders(previousMemoryEmbeddingProviders);
-          restoreMemoryPluginState({
-            corpusSupplements: previousMemoryCorpusSupplements,
-            promptBuilder: previousMemoryPromptBuilder,
-            promptSupplements: previousMemoryPromptSupplements,
-            flushPlanResolver: previousMemoryFlushPlanResolver,
-            runtime: previousMemoryRuntime,
-          });
-        }
         registry.plugins.push(record);
         seenIds.set(pluginId, candidate.origin);
       } catch (err) {

@@ -1239,6 +1239,9 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
               registerCompactionProvider: (
                 provider: Parameters<OpenClawPluginApi["registerCompactionProvider"]>[0],
               ) => {
+                if (registryParams.activateGlobalSideEffects === false) {
+                  return;
+                }
                 const existing = getRegisteredCompactionProvider(provider.id);
                 if (existing) {
                   const ownerDetail = existing.ownerPluginId
