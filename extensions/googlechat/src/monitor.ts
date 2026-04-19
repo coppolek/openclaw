@@ -47,26 +47,6 @@ function logVerbose(core: GoogleChatCoreRuntime, runtime: GoogleChatRuntimeEnv, 
   }
 }
 
-// Google Chat threadKey must be <=4000 chars. Collapse non-alphanumerics and
-// truncate aggressively so the sanitized key is deterministic. Prefer the
-// inbound thread name so replies cluster per Chat thread. Fall back to the
-// OpenClaw session key when the inbound has no thread (shouldn't happen in
-// threaded spaces).
-function deriveGoogleChatSessionThreadKey(
-  inboundThreadName: string | null | undefined,
-  sessionKey: string | null | undefined,
-): string | undefined {
-  const source = inboundThreadName || sessionKey;
-  if (!source) {
-    return undefined;
-  }
-  const sanitized = source
-    .replace(/[^A-Za-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 180);
-  return sanitized ? `oc-${sanitized}` : undefined;
-}
-
 function normalizeAudienceType(value?: string | null): GoogleChatAudienceType | undefined {
   const normalized = normalizeOptionalLowercaseString(value);
   if (normalized === "app-url" || normalized === "app_url" || normalized === "app") {
@@ -281,18 +261,7 @@ async function processMessageWithPipeline(params: {
   }
   let typingMessageName: string | undefined;
 
-  // Session-scoped threading: when enabled, prefer the inbound thread.name so
-  // replies land in the user's current Google Chat thread. If there's no
-  // inbound thread (rare in threaded spaces), fall back to a session-derived
-  // threadKey so messages still cluster together.
-  const inboundThreadName = message.thread?.name;
-  const sessionThreadKey =
-    account.config.sessionThread && !inboundThreadName
-      ? deriveGoogleChatSessionThreadKey(undefined, route.sessionKey)
-      : undefined;
-  const threadForSend = account.config.sessionThread
-    ? (inboundThreadName ?? undefined)
-    : inboundThreadName;
+  const threadForSend = message.thread?.name;
 
   // Start typing indicator.
   if (typingIndicator === "message") {
@@ -307,7 +276,6 @@ async function processMessageWithPipeline(params: {
         space: spaceId,
         text: `_${botName} is typing..._`,
         thread: threadForSend,
-        threadKey: sessionThreadKey,
       });
       typingMessageName = result?.messageName;
     } catch (err) {
@@ -337,7 +305,6 @@ async function processMessageWithPipeline(params: {
           config,
           statusSink,
           typingMessageName,
-          sessionThreadKey,
           forcedThreadName: threadForSend,
         });
         // Only use typing message for first delivery
@@ -386,7 +353,6 @@ async function deliverGoogleChatReply(params: {
   config: OpenClawConfig;
   statusSink?: (patch: { lastInboundAt?: number; lastOutboundAt?: number }) => void;
   typingMessageName?: string;
-  sessionThreadKey?: string;
   forcedThreadName?: string;
 }): Promise<void> {
   const {
@@ -398,7 +364,6 @@ async function deliverGoogleChatReply(params: {
     config,
     statusSink,
     typingMessageName,
-    sessionThreadKey,
     forcedThreadName,
   } = params;
   const reply = resolveSendableOutboundReplyParts(payload);
@@ -456,7 +421,6 @@ async function deliverGoogleChatReply(params: {
             space: spaceId,
             text: chunk,
             thread: forcedThreadName ?? payload.replyToId,
-            threadKey: sessionThreadKey,
           });
         }
         firstTextChunk = false;
@@ -486,7 +450,6 @@ async function deliverGoogleChatReply(params: {
           space: spaceId,
           text: caption,
           thread: forcedThreadName ?? payload.replyToId,
-          threadKey: sessionThreadKey,
           attachments: [
             { attachmentUploadToken: upload.attachmentUploadToken, contentName: loaded.fileName },
           ],
