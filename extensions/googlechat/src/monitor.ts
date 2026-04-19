@@ -198,8 +198,10 @@ async function processMessageWithPipeline(params: {
   });
   // When sessionThread is enabled, partition the session per Chat thread via a
   // sessionKey suffix. Routing still keys on spaceId above, so existing
-  // agent bindings to the space are preserved.
-  route.sessionKey = resolveGoogleChatSessionKey({
+  // agent bindings to the space are preserved. Keep this derived, not mutated
+  // onto route — route can be a shared cached instance, and mutating it would
+  // bleed the first thread's suffix into later messages in the same space.
+  const sessionKey = resolveGoogleChatSessionKey({
     baseSessionKey: route.sessionKey,
     threadName: message.thread?.name,
     sessionThread: account.config.sessionThread,
@@ -233,7 +235,7 @@ async function processMessageWithPipeline(params: {
     CommandBody: rawBody,
     From: `googlechat:${senderId}`,
     To: `googlechat:${spaceId}`,
-    SessionKey: route.sessionKey,
+    SessionKey: sessionKey,
     AccountId: route.accountId,
     ChatType: isGroup ? "channel" : "direct",
     ConversationLabel: fromLabel,
@@ -260,7 +262,7 @@ async function processMessageWithPipeline(params: {
   void core.channel.session
     .recordSessionMetaFromInbound({
       storePath,
-      sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
+      sessionKey: ctxPayload.SessionKey ?? sessionKey,
       ctx: ctxPayload,
     })
     .catch((err) => {
