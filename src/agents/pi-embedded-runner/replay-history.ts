@@ -28,12 +28,12 @@ import {
   sanitizeToolUseResultPairing,
   stripToolResultDetails,
 } from "../session-transcript-repair.js";
+import { sanitizeToolCallIdsForCloudCodeAssist } from "../tool-call-id.js";
 import type { TranscriptPolicy } from "../transcript-policy.js";
 import {
   resolveTranscriptPolicy,
   shouldAllowProviderOwnedThinkingReplay,
 } from "../transcript-policy.js";
-import { sanitizeToolCallIdsForCloudCodeAssist } from "../tool-call-id.js";
 import {
   makeZeroUsageSnapshot,
   normalizeUsage,
@@ -51,6 +51,37 @@ type ModelSnapshotEntry = {
   modelApi?: string | null;
   modelId?: string;
 };
+
+type ProviderReplayHookParams = {
+  config?: OpenClawConfig;
+  workspaceDir?: string;
+  env?: NodeJS.ProcessEnv;
+  provider: string;
+  modelId?: string;
+  modelApi?: string | null;
+  model?: ProviderRuntimeModel;
+  sessionId?: string;
+};
+
+function createProviderReplayPluginParams(params: ProviderReplayHookParams) {
+  const context = {
+    config: params.config,
+    workspaceDir: params.workspaceDir,
+    env: params.env,
+    provider: params.provider,
+    modelId: params.modelId,
+    modelApi: params.modelApi,
+    model: params.model,
+    sessionId: params.sessionId,
+  };
+  return {
+    provider: params.provider,
+    config: params.config,
+    workspaceDir: params.workspaceDir,
+    env: params.env,
+    context,
+  };
+}
 
 function buildInterSessionPrefix(message: AgentMessage): string {
   const provenance = normalizeInputProvenance((message as { provenance?: unknown }).provenance);
@@ -408,12 +439,17 @@ export async function sanitizeSessionHistory(params: {
     modelApi: params.modelApi,
     policy,
   });
+  const isOpenAIResponsesApi =
+    params.modelApi === "openai-responses" ||
+    params.modelApi === "openai-codex-responses" ||
+    params.modelApi === "azure-openai-responses";
   const sanitizedImages = await sanitizeSessionMessagesImages(
     withInterSessionMarkers,
     "session:history",
     {
       sanitizeMode: policy.sanitizeMode,
-      sanitizeToolCallIds: policy.sanitizeToolCallIds && !allowProviderOwnedThinkingReplay,
+      sanitizeToolCallIds:
+        policy.sanitizeToolCallIds && !allowProviderOwnedThinkingReplay && !isOpenAIResponsesApi,
       toolCallIdMode: policy.toolCallIdMode,
       preserveNativeAnthropicToolUseIds: policy.preserveNativeAnthropicToolUseIds,
       preserveSignatures: policy.preserveSignatures,
@@ -428,28 +464,38 @@ export async function sanitizeSessionHistory(params: {
     allowedToolNames: params.allowedToolNames,
     allowProviderOwnedThinkingReplay,
   });
+  // OpenAI's fc_* pairing downgrade needs the raw call_id|fc_id separator intact,
+  // but displaced tool results must first be repaired back next to their
+  // assistant turn so the downgrade can rewrite both sides consistently.
+  const openAIRepairedToolCalls =
+    isOpenAIResponsesApi && policy.repairToolUseResultPairing
+      ? sanitizeToolUseResultPairing(sanitizedToolCalls, {
+          erroredAssistantResultPolicy: "drop",
+        })
+      : sanitizedToolCalls;
+  const openAISafeToolCalls = isOpenAIResponsesApi
+    ? downgradeOpenAIFunctionCallReasoningPairs(
+        downgradeOpenAIReasoningBlocks(openAIRepairedToolCalls),
+      )
+    : sanitizedToolCalls;
   const sanitizedToolIds =
     policy.sanitizeToolCallIds && policy.toolCallIdMode
-      ? sanitizeToolCallIdsForCloudCodeAssist(sanitizedToolCalls, policy.toolCallIdMode, {
+      ? sanitizeToolCallIdsForCloudCodeAssist(openAISafeToolCalls, policy.toolCallIdMode, {
           preserveNativeAnthropicToolUseIds: policy.preserveNativeAnthropicToolUseIds,
           preserveReplaySafeThinkingToolCallIds: allowProviderOwnedThinkingReplay,
           allowedToolNames: params.allowedToolNames,
         })
-      : sanitizedToolCalls;
-  const repairedTools = policy.repairToolUseResultPairing
-    ? sanitizeToolUseResultPairing(sanitizedToolIds, {
-        erroredAssistantResultPolicy: "drop",
-      })
-    : sanitizedToolIds;
+      : openAISafeToolCalls;
+  const repairedTools =
+    !isOpenAIResponsesApi && policy.repairToolUseResultPairing
+      ? sanitizeToolUseResultPairing(sanitizedToolIds, {
+          erroredAssistantResultPolicy: "drop",
+        })
+      : sanitizedToolIds;
   const sanitizedToolResults = stripToolResultDetails(repairedTools);
   const sanitizedCompactionUsage = ensureAssistantUsageSnapshots(
     stripStaleAssistantUsageBeforeLatestCompaction(sanitizedToolResults),
   );
-
-  const isOpenAIResponsesApi =
-    params.modelApi === "openai-responses" ||
-    params.modelApi === "openai-codex-responses" ||
-    params.modelApi === "azure-openai-responses";
   const hasSnapshot = Boolean(params.provider || params.modelApi || params.modelId);
   const priorSnapshot = hasSnapshot ? readLastModelSnapshot(params.sessionManager) : null;
   const modelChanged = priorSnapshot
@@ -460,35 +506,23 @@ export async function sanitizeSessionHistory(params: {
         modelId: params.modelId,
       })
     : false;
-  const sanitizedOpenAI = isOpenAIResponsesApi
-    ? downgradeOpenAIFunctionCallReasoningPairs(
-        downgradeOpenAIReasoningBlocks(sanitizedCompactionUsage),
-      )
-    : sanitizedCompactionUsage;
   const provider = params.provider?.trim();
-  const providerSanitized =
-    provider && provider.length > 0
-      ? await sanitizeProviderReplayHistoryWithPlugin({
-          provider,
-          config: params.config,
-          workspaceDir: params.workspaceDir,
-          env: params.env,
-          context: {
-            config: params.config,
-            workspaceDir: params.workspaceDir,
-            env: params.env,
-            provider,
-            modelId: params.modelId,
-            modelApi: params.modelApi,
-            model: params.model,
-            sessionId: params.sessionId,
-            messages: sanitizedOpenAI,
-            allowedToolNames: params.allowedToolNames,
-            sessionState: createProviderReplaySessionState(params.sessionManager),
-          },
-        })
-      : undefined;
-  const sanitizedWithProvider = providerSanitized ?? sanitizedOpenAI;
+  let providerSanitized: AgentMessage[] | undefined;
+  if (provider && provider.length > 0) {
+    const pluginParams = createProviderReplayPluginParams({ ...params, provider });
+    const providerResult = await sanitizeProviderReplayHistoryWithPlugin({
+      ...pluginParams,
+      context: {
+        ...pluginParams.context,
+        sessionId: params.sessionId ?? "",
+        messages: sanitizedCompactionUsage,
+        allowedToolNames: params.allowedToolNames,
+        sessionState: createProviderReplaySessionState(params.sessionManager),
+      },
+    });
+    providerSanitized = providerResult ?? undefined;
+  }
+  const sanitizedWithProvider = providerSanitized ?? sanitizedCompactionUsage;
 
   if (hasSnapshot && (!priorSnapshot || modelChanged)) {
     appendModelSnapshot(params.sessionManager, {
@@ -541,20 +575,11 @@ export async function validateReplayTurns(params: {
     });
   const provider = params.provider?.trim();
   if (provider) {
+    const pluginParams = createProviderReplayPluginParams({ ...params, provider });
     const providerValidated = await validateProviderReplayTurnsWithPlugin({
-      provider,
-      config: params.config,
-      workspaceDir: params.workspaceDir,
-      env: params.env,
+      ...pluginParams,
       context: {
-        config: params.config,
-        workspaceDir: params.workspaceDir,
-        env: params.env,
-        provider,
-        modelId: params.modelId,
-        modelApi: params.modelApi,
-        model: params.model,
-        sessionId: params.sessionId,
+        ...pluginParams.context,
         messages: params.messages,
       },
     });

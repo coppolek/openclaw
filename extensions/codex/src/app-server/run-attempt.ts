@@ -30,17 +30,18 @@ import {
   type JsonObject,
   type JsonValue,
 } from "./protocol.js";
-import type { CodexAppServerThreadBinding } from "./session-binding.js";
+import { readCodexAppServerBinding, type CodexAppServerThreadBinding } from "./session-binding.js";
 import { clearSharedCodexAppServerClient, getSharedCodexAppServerClient } from "./shared-client.js";
 import { buildTurnStartParams, startOrResumeThread } from "./thread-lifecycle.js";
 import { mirrorCodexAppServerTranscript } from "./transcript-mirror.js";
 
 type CodexAppServerClientFactory = (
   startOptions?: CodexAppServerStartOptions,
+  authProfileId?: string,
 ) => Promise<CodexAppServerClient>;
 
-let clientFactory: CodexAppServerClientFactory = (startOptions) =>
-  getSharedCodexAppServerClient({ startOptions });
+let clientFactory: CodexAppServerClientFactory = (startOptions, authProfileId) =>
+  getSharedCodexAppServerClient({ startOptions, authProfileId });
 
 export async function runCodexAppServerAttempt(
   params: EmbeddedRunAttemptParams,
@@ -78,6 +79,8 @@ export async function runCodexAppServerAttempt(
     agentId: params.agentId,
   });
   let yieldDetected = false;
+  const startupBinding = await readCodexAppServerBinding(params.sessionFile);
+  const startupAuthProfileId = params.authProfileId ?? startupBinding?.authProfileId;
   const tools = await buildDynamicTools({
     params,
     resolvedWorkspace,
@@ -101,7 +104,7 @@ export async function runCodexAppServerAttempt(
       timeoutMs: params.timeoutMs,
       signal: runAbortController.signal,
       operation: async () => {
-        const startupClient = await clientFactory(appServer.start);
+        const startupClient = await clientFactory(appServer.start, startupAuthProfileId);
         const startupThread = await startOrResumeThread({
           client: startupClient,
           params,
@@ -227,14 +230,10 @@ export async function runCodexAppServerAttempt(
   );
 
   const abortListener = () => {
-    void client
-      .request("turn/interrupt", {
-        threadId: thread.threadId,
-        turnId: activeTurnId,
-      })
-      .catch((error: unknown) => {
-        embeddedAgentLog.debug("codex app-server turn interrupt failed during abort", { error });
-      });
+    interruptCodexTurnBestEffort(client, {
+      threadId: thread.threadId,
+      turnId: activeTurnId,
+    });
     resolveCompletion?.();
   };
   runAbortController.signal.addEventListener("abort", abortListener, { once: true });
@@ -266,6 +265,20 @@ export async function runCodexAppServerAttempt(
     params.abortSignal?.removeEventListener("abort", abortFromUpstream);
     clearActiveEmbeddedRun(params.sessionId, handle, params.sessionKey);
   }
+}
+
+function interruptCodexTurnBestEffort(
+  client: CodexAppServerClient,
+  params: {
+    threadId: string;
+    turnId: string;
+  },
+): void {
+  void Promise.resolve()
+    .then(() => client.request("turn/interrupt", params))
+    .catch((error: unknown) => {
+      embeddedAgentLog.debug("codex app-server turn interrupt failed during abort", { error });
+    });
 }
 
 type DynamicToolBuildParams = {
@@ -477,6 +490,7 @@ export const __testing = {
     clientFactory = factory;
   },
   resetCodexAppServerClientFactoryForTests(): void {
-    clientFactory = (startOptions) => getSharedCodexAppServerClient({ startOptions });
+    clientFactory = (startOptions, authProfileId) =>
+      getSharedCodexAppServerClient({ startOptions, authProfileId });
   },
 } as const;

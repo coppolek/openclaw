@@ -699,13 +699,15 @@ export function listAgentsForGateway(cfg: OpenClawConfig): {
   const agents = agentIds.map((id) => {
     const meta = configuredById.get(id);
     const model = resolveGatewayAgentModel(cfg, id);
-    return {
-      id,
-      name: meta?.name,
-      identity: meta?.identity,
-      workspace: resolveAgentWorkspaceDir(cfg, id),
-      ...(model ? { model } : {}),
-    };
+    return Object.assign(
+      {
+        id,
+        name: meta?.name,
+        identity: meta?.identity,
+        workspace: resolveAgentWorkspaceDir(cfg, id),
+      },
+      model ? { model } : {},
+    );
   });
   return { defaultId, mainKey, scope, agents };
 }
@@ -1276,6 +1278,7 @@ export function buildGatewaySessionRow(params: {
     thinkingLevel: entry?.thinkingLevel,
     fastMode: entry?.fastMode,
     verboseLevel: entry?.verboseLevel,
+    traceLevel: entry?.traceLevel,
     reasoningLevel: entry?.reasoningLevel,
     elevatedLevel: entry?.elevatedLevel,
     sendPolicy: entry?.sendPolicy,

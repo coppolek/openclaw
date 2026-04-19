@@ -13,6 +13,7 @@ import { getDirectAgentForCdp, withNoProxyForCdpUrl } from "./cdp-proxy-bypass.j
 import { CDP_HTTP_REQUEST_TIMEOUT_MS, CDP_WS_HANDSHAKE_TIMEOUT_MS } from "./cdp-timeouts.js";
 import { BrowserCdpEndpointBlockedError } from "./errors.js";
 import { resolveBrowserRateLimitMessage } from "./rate-limit-message.js";
+import { withAllowedHostname } from "./ssrf-policy-helpers.js";
 
 export { isLoopbackHost };
 
@@ -69,8 +70,11 @@ export async function assertCdpEndpointAllowed(
     throw new Error(`Invalid CDP URL protocol: ${parsed.protocol.replace(":", "")}`);
   }
   try {
+    const policy = isLoopbackHost(parsed.hostname)
+      ? withAllowedHostname(ssrfPolicy, parsed.hostname)
+      : ssrfPolicy;
     await resolvePinnedHostnameWithPolicy(parsed.hostname, {
-      policy: ssrfPolicy,
+      policy,
     });
   } catch (error) {
     throw new BrowserCdpEndpointBlockedError({ cause: error });
@@ -263,11 +267,15 @@ export async function fetchCdpChecked(
   try {
     const headers = getHeadersWithAuth(url, (init?.headers as Record<string, string>) || {});
     const res = await withNoProxyForCdpUrl(url, async () => {
+      const parsedUrl = new URL(url);
+      const policy = isLoopbackHost(parsedUrl.hostname)
+        ? withAllowedHostname(ssrfPolicy, parsedUrl.hostname)
+        : (ssrfPolicy ?? { allowPrivateNetwork: true });
       const guarded = await fetchWithSsrFGuard({
         url,
         init: { ...init, headers },
         signal: ctrl.signal,
-        policy: ssrfPolicy ?? { allowPrivateNetwork: true },
+        policy,
         auditContext: "browser-cdp",
       });
       guardedRelease = guarded.release;

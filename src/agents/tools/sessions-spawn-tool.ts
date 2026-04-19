@@ -173,6 +173,7 @@ export function createSessionsSpawnTool(
       const mode = params.mode === "run" || params.mode === "session" ? params.mode : undefined;
       const cleanup =
         params.cleanup === "keep" || params.cleanup === "delete" ? params.cleanup : "keep";
+      const expectsCompletionMessage = params.expectsCompletionMessage !== false;
       const sandbox = params.sandbox === "require" ? "require" : "inherit";
       const streamTo = params.streamTo === "parent" ? "parent" : undefined;
       const lightContext = params.lightContext === true;
@@ -242,6 +243,8 @@ export function createSessionsSpawnTool(
             agentTo: opts?.agentTo,
             agentThreadId: opts?.agentThreadId,
             agentGroupId: opts?.agentGroupId ?? undefined,
+            agentGroupSpace: opts?.agentGroupSpace,
+            agentMemberRoleIds: opts?.agentMemberRoleIds,
             sandboxed: opts?.sandboxed,
           },
         );
@@ -289,7 +292,7 @@ export function createSessionsSpawnTool(
               cleanup: trackedCleanup,
               label: label || undefined,
               runTimeoutSeconds,
-              expectsCompletionMessage: true,
+              expectsCompletionMessage,
               spawnMode: trackedSpawnMode,
             });
           } catch (err) {
@@ -320,7 +323,7 @@ export function createSessionsSpawnTool(
           cleanup,
           sandbox,
           lightContext,
-          expectsCompletionMessage: true,
+          expectsCompletionMessage,
           attachments,
           attachMountPath:
             params.attachAs && typeof params.attachAs === "object"
@@ -336,6 +339,7 @@ export function createSessionsSpawnTool(
           agentGroupId: opts?.agentGroupId,
           agentGroupChannel: opts?.agentGroupChannel,
           agentGroupSpace: opts?.agentGroupSpace,
+          agentMemberRoleIds: opts?.agentMemberRoleIds,
           requesterAgentIdOverride: opts?.requesterAgentIdOverride,
           workspaceDir: opts?.workspaceDir,
         },
