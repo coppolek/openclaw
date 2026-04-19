@@ -1,6 +1,7 @@
 import { normalizeResolvedSecretInputString } from "openclaw/plugin-sdk/secret-input";
 import {
   asFiniteNumber,
+  normalizeLanguageCode,
   trimToUndefined,
   type SpeechDirectiveTokenParseContext,
   type SpeechProviderConfig,
@@ -9,11 +10,9 @@ import {
 } from "openclaw/plugin-sdk/speech";
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 import {
-  isValidXaiTtsModel,
   isValidXaiTtsVoice,
   normalizeXaiTtsBaseUrl,
   XAI_BASE_URL,
-  XAI_TTS_MODELS,
   XAI_TTS_VOICES,
   xaiTTS,
 } from "./tts.js";
@@ -25,15 +24,15 @@ type XaiSpeechResponseFormat = (typeof XAI_SPEECH_RESPONSE_FORMATS)[number];
 type XaiTtsProviderConfig = {
   apiKey?: string;
   baseUrl: string;
-  model: string;
-  voice: string;
+  voiceId: string;
+  language?: string;
   speed?: number;
   responseFormat?: XaiSpeechResponseFormat;
 };
 
 type XaiTtsProviderOverrides = {
-  model?: string;
-  voice?: string;
+  voiceId?: string;
+  language?: string;
   speed?: number;
 };
 
@@ -81,8 +80,10 @@ function normalizeXaiProviderConfig(rawConfig: Record<string, unknown>): XaiTtsP
         trimToUndefined(process.env.XAI_BASE_URL) ??
         XAI_BASE_URL,
     ),
-    model: trimToUndefined(rawConfig?.model) ?? "grok-4-voice",
-    voice: trimToUndefined(rawConfig?.voice) ?? "alloy",
+    voiceId: trimToUndefined(rawConfig?.voiceId ?? rawConfig?.voice) ?? "eve",
+    language: normalizeLanguageCode(
+      trimToUndefined(rawConfig?.language ?? rawConfig?.languageCode),
+    ),
     speed: asFiniteNumber(rawConfig?.speed),
     responseFormat: normalizeXaiSpeechResponseFormat(rawConfig?.responseFormat),
   };
@@ -93,8 +94,10 @@ function readXaiProviderConfig(config: SpeechProviderConfig): XaiTtsProviderConf
   return {
     apiKey: trimToUndefined(config.apiKey) ?? normalized.apiKey,
     baseUrl: trimToUndefined(config.baseUrl) ?? normalized.baseUrl,
-    model: trimToUndefined(config.model) ?? normalized.model,
-    voice: trimToUndefined(config.voice) ?? normalized.voice,
+    voiceId: trimToUndefined(config.voiceId ?? config.voice) ?? normalized.voiceId,
+    language:
+      normalizeLanguageCode(trimToUndefined(config.language ?? config.languageCode)) ??
+      normalized.language,
     speed: asFiniteNumber(config.speed) ?? normalized.speed,
     responseFormat:
       normalizeXaiSpeechResponseFormat(config.responseFormat) ?? normalized.responseFormat,
@@ -106,8 +109,8 @@ function readXaiOverrides(overrides: SpeechProviderOverrides | undefined): XaiTt
     return {};
   }
   return {
-    model: trimToUndefined(overrides.model),
-    voice: trimToUndefined(overrides.voice),
+    voiceId: trimToUndefined(overrides.voiceId ?? overrides.voice),
+    language: normalizeLanguageCode(trimToUndefined(overrides.language)),
     speed: asFiniteNumber(overrides.speed),
   };
 }
@@ -121,6 +124,8 @@ function parseDirectiveToken(ctx: SpeechDirectiveTokenParseContext): {
   const baseUrl = trimToUndefined(providerConfig?.baseUrl);
   switch (ctx.key) {
     case "voice":
+    case "voice_id":
+    case "voiceid":
     case "xai_voice":
     case "xaivoice":
       if (!ctx.policy.allowVoice) {
@@ -129,17 +134,7 @@ function parseDirectiveToken(ctx: SpeechDirectiveTokenParseContext): {
       if (!isValidXaiTtsVoice(ctx.value, baseUrl)) {
         return { handled: true, warnings: [`invalid xAI voice "${ctx.value}"`] };
       }
-      return { handled: true, overrides: { voice: ctx.value } };
-    case "model":
-    case "xai_model":
-    case "xaimodel":
-      if (!ctx.policy.allowModelId) {
-        return { handled: true };
-      }
-      if (!isValidXaiTtsModel(ctx.value, baseUrl)) {
-        return { handled: false };
-      }
-      return { handled: true, overrides: { model: ctx.value } };
+      return { handled: true, overrides: { voiceId: ctx.value } };
     default:
       return { handled: false };
   }
@@ -150,7 +145,7 @@ export function buildXaiSpeechProvider(): SpeechProviderPlugin {
     id: "xai",
     label: "xAI",
     autoSelectOrder: 25,
-    models: XAI_TTS_MODELS,
+    models: [],
     voices: XAI_TTS_VOICES,
     resolveConfig: ({ rawConfig }) => normalizeXaiProviderConfig(rawConfig),
     parseDirectiveToken,
@@ -170,12 +165,18 @@ export function buildXaiSpeechProvider(): SpeechProviderPlugin {
         ...(trimToUndefined(talkProviderConfig.baseUrl) == null
           ? {}
           : { baseUrl: normalizeXaiTtsBaseUrl(trimToUndefined(talkProviderConfig.baseUrl)) }),
-        ...(trimToUndefined(talkProviderConfig.modelId) == null
-          ? {}
-          : { model: trimToUndefined(talkProviderConfig.modelId) }),
         ...(trimToUndefined(talkProviderConfig.voiceId) == null
           ? {}
-          : { voice: trimToUndefined(talkProviderConfig.voiceId) }),
+          : { voiceId: trimToUndefined(talkProviderConfig.voiceId) }),
+        ...(normalizeLanguageCode(
+          trimToUndefined(talkProviderConfig.language ?? talkProviderConfig.languageCode),
+        ) == null
+          ? {}
+          : {
+              language: normalizeLanguageCode(
+                trimToUndefined(talkProviderConfig.language ?? talkProviderConfig.languageCode),
+              ),
+            }),
         ...(asFiniteNumber(talkProviderConfig.speed) == null
           ? {}
           : { speed: asFiniteNumber(talkProviderConfig.speed) }),
@@ -183,12 +184,16 @@ export function buildXaiSpeechProvider(): SpeechProviderPlugin {
       };
     },
     resolveTalkOverrides: ({ params }) => ({
-      ...(trimToUndefined(params.voiceId) == null
+      ...(trimToUndefined(params.voiceId ?? params.voice) == null
         ? {}
-        : { voice: trimToUndefined(params.voiceId) }),
-      ...(trimToUndefined(params.modelId) == null
+        : { voiceId: trimToUndefined(params.voiceId ?? params.voice) }),
+      ...(normalizeLanguageCode(trimToUndefined(params.language ?? params.languageCode)) == null
         ? {}
-        : { model: trimToUndefined(params.modelId) }),
+        : {
+            language: normalizeLanguageCode(
+              trimToUndefined(params.language ?? params.languageCode),
+            ),
+          }),
       ...(asFiniteNumber(params.speed) == null ? {} : { speed: asFiniteNumber(params.speed) }),
     }),
     listVoices: async () => XAI_TTS_VOICES.map((voice) => ({ id: voice, name: voice })),
@@ -210,8 +215,8 @@ export function buildXaiSpeechProvider(): SpeechProviderPlugin {
         text: req.text,
         apiKey,
         baseUrl: config.baseUrl,
-        model: overrides.model ?? config.model,
-        voice: overrides.voice ?? config.voice,
+        voiceId: overrides.voiceId ?? config.voiceId,
+        language: overrides.language ?? config.language,
         speed: overrides.speed ?? config.speed,
         responseFormat,
         timeoutMs: req.timeoutMs,
@@ -235,8 +240,8 @@ export function buildXaiSpeechProvider(): SpeechProviderPlugin {
         text: req.text,
         apiKey,
         baseUrl: config.baseUrl,
-        model: config.model,
-        voice: config.voice,
+        voiceId: config.voiceId,
+        language: config.language,
         speed: config.speed,
         responseFormat: outputFormat,
         timeoutMs: req.timeoutMs,

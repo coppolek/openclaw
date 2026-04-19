@@ -1,5 +1,6 @@
 import {
   asObject,
+  normalizeLanguageCode,
   readResponseTextLimited,
   trimToUndefined,
   truncateErrorDetail,
@@ -7,24 +8,7 @@ import {
 
 export const XAI_BASE_URL = "https://api.x.ai/v1";
 
-export const XAI_TTS_MODELS = ["grok-4-voice"] as const;
-
-export const XAI_TTS_VOICES = [
-  "alloy",
-  "ash",
-  "ballad",
-  "cedar",
-  "coral",
-  "echo",
-  "fable",
-  "juniper",
-  "marin",
-  "onyx",
-  "nova",
-  "sage",
-  "shimmer",
-  "verse",
-] as const;
+export const XAI_TTS_VOICES = ["eve", "ara", "rex", "sal", "leo"] as const;
 
 type XaiTtsVoice = (typeof XAI_TTS_VOICES)[number];
 
@@ -36,22 +20,12 @@ export function normalizeXaiTtsBaseUrl(baseUrl?: string): string {
   return trimmed.replace(/\/+$/, "");
 }
 
-function isCustomXaiEndpoint(baseUrl?: string): boolean {
-  if (baseUrl != null) {
-    return normalizeXaiTtsBaseUrl(baseUrl) !== XAI_BASE_URL;
-  }
-  return normalizeXaiTtsBaseUrl(process.env.XAI_BASE_URL) !== XAI_BASE_URL;
-}
-
-export function isValidXaiTtsModel(model: string, baseUrl?: string): boolean {
-  if (isCustomXaiEndpoint(baseUrl)) {
-    return true;
-  }
-  return XAI_TTS_MODELS.includes(model as (typeof XAI_TTS_MODELS)[number]);
-}
-
 export function isValidXaiTtsVoice(voice: string, baseUrl?: string): voice is XaiTtsVoice {
-  if (isCustomXaiEndpoint(baseUrl)) {
+  const isCustom =
+    baseUrl != null
+      ? normalizeXaiTtsBaseUrl(baseUrl) !== XAI_BASE_URL
+      : normalizeXaiTtsBaseUrl(process.env.XAI_BASE_URL) !== XAI_BASE_URL;
+  if (isCustom) {
     return true;
   }
   return XAI_TTS_VOICES.includes(voice as XaiTtsVoice);
@@ -100,35 +74,42 @@ export async function xaiTTS(params: {
   text: string;
   apiKey: string;
   baseUrl: string;
-  model: string;
-  voice: string;
+  voiceId: string;
+  language?: string;
   speed?: number;
   responseFormat?: "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm";
   timeoutMs: number;
 }): Promise<Buffer> {
-  const { text, apiKey, baseUrl, model, voice, speed, responseFormat = "mp3", timeoutMs } = params;
+  const {
+    text,
+    apiKey,
+    baseUrl,
+    voiceId,
+    language: rawLanguage,
+    speed,
+    responseFormat = "mp3",
+    timeoutMs,
+  } = params;
+  const language = normalizeLanguageCode(rawLanguage) ?? "en";
 
-  if (!isValidXaiTtsModel(model, baseUrl)) {
-    throw new Error(`Invalid model: ${model}`);
-  }
-  if (!isValidXaiTtsVoice(voice, baseUrl)) {
-    throw new Error(`Invalid voice: ${voice}`);
+  if (!isValidXaiTtsVoice(voiceId, baseUrl)) {
+    throw new Error(`Invalid voice: ${voiceId}`);
   }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(`${normalizeXaiTtsBaseUrl(baseUrl)}/audio/speech`, {
+    const response = await fetch(`${normalizeXaiTtsBaseUrl(baseUrl)}/tts`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model,
-        input: text,
-        voice,
+        text,
+        voice_id: voiceId,
+        language,
         ...(responseFormat !== "mp3" && { response_format: responseFormat }),
         ...(speed != null && { speed }),
       }),

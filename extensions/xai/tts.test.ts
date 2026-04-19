@@ -1,12 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  isValidXaiTtsModel,
-  isValidXaiTtsVoice,
-  XAI_BASE_URL,
-  XAI_TTS_MODELS,
-  XAI_TTS_VOICES,
-  xaiTTS,
-} from "./tts.js";
+import { isValidXaiTtsVoice, XAI_BASE_URL, XAI_TTS_VOICES, xaiTTS } from "./tts.js";
 
 describe("xai tts", () => {
   const originalFetch = globalThis.fetch;
@@ -33,25 +26,6 @@ describe("xai tts", () => {
 
     it("treats custom endpoints as permissive", () => {
       expect(isValidXaiTtsVoice("grok-voice-custom", "https://custom.api.x.ai/v1")).toBe(true);
-    });
-  });
-
-  describe("isValidXaiTtsModel", () => {
-    it("matches the supported model set", () => {
-      expect(XAI_TTS_MODELS).toContain("grok-4-voice");
-      expect(XAI_TTS_MODELS).toHaveLength(1);
-      const cases = [
-        { model: "grok-4-voice", expected: true },
-        { model: "invalid", expected: false },
-        { model: "", expected: false },
-      ] as const;
-      for (const testCase of cases) {
-        expect(isValidXaiTtsModel(testCase.model), testCase.model).toBe(testCase.expected);
-      }
-    });
-
-    it("treats custom endpoints as permissive", () => {
-      expect(isValidXaiTtsModel("custom-voice-model", "https://custom.api.x.ai/v1")).toBe(true);
     });
   });
 
@@ -83,8 +57,8 @@ describe("xai tts", () => {
           text: "hello",
           apiKey: "bad-key",
           baseUrl: XAI_BASE_URL,
-          model: "grok-4-voice",
-          voice: "alloy",
+          voiceId: "eve",
+          language: "en",
           responseFormat: "mp3",
           timeoutMs: 5_000,
         }),
@@ -104,8 +78,8 @@ describe("xai tts", () => {
           text: "hello",
           apiKey: "test-key",
           baseUrl: XAI_BASE_URL,
-          model: "grok-4-voice",
-          voice: "alloy",
+          voiceId: "eve",
+          language: "en",
           responseFormat: "mp3",
           timeoutMs: 5_000,
         }),
