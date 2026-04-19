@@ -112,9 +112,11 @@ export type GoogleChatAccountConfig = {
    */
   typingIndicator?: "none" | "message" | "reaction";
   /**
-   * When true, route all outbound messages for a given OpenClaw session into a
-   * single Google Chat thread by passing a deterministic threadKey derived from
-   * the session key. Default: false (use inbound message thread).
+   * When true, bind each OpenClaw session to a single Google Chat thread: the
+   * inbound `thread.name` is used as the session peer id, so each Chat thread
+   * has its own conversation history and no context bleeds across threads in
+   * the same space. Falls back to the space id when the inbound message has no
+   * thread. Default: false (space-scoped session, prior behavior).
    */
   sessionThread?: boolean;
   /** Outbound response prefix override for this channel/account. */
