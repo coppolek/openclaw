@@ -87,7 +87,7 @@ describe("bedrock discovery", () => {
       name: "Claude 3.7 Sonnet",
       reasoning: false,
       input: ["text", "image"],
-      contextWindow: 32000,
+      contextWindow: 200000,
       maxTokens: 4096,
     });
   });
