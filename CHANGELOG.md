@@ -21,6 +21,7 @@ Docs: https://docs.openclaw.ai
 - Cron/gateway: reject ambiguous announce delivery config at add/update time so invalid multi-channel or target-id provider settings fail early instead of persisting broken cron jobs. (#69015) Thanks @obviyus.
 - Cron/main-session delivery: preserve `heartbeat.target="last"` through deferred wake queuing, gateway wake forwarding, and same-target wake coalescing so queued cron replies still return to the last active chat. (#69021) Thanks @obviyus.
 - Cron/gateway: ignore disabled channels when announce delivery ambiguity is checked, and validate main-session delivery patches against the live cron service default agent so hot-reloaded agent config does not falsely reject valid updates. (#69040) Thanks @obviyus.
+- Plugins/allowlist warnings: stop saying `plugins.allow is empty` when the allowlist is actually populated but none of its entries match a discovered plugin id, and emit a specific mismatch warning pointing at the unknown entries so users can tell the difference between a missing allowlist and a misconfigured one (for example `allow: ["feishu"]` when the real plugin id is `openclaw-lark`). (#68352)
 
 ## 2026.4.19-beta.2
 
