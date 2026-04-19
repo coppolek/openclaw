@@ -2,6 +2,7 @@ import fs from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { loadSessionStore } from "../config/sessions.js";
+import { normalizeEmotionMode } from "../emotion-mode.js";
 import { onSessionTranscriptUpdate } from "../sessions/transcript-events.js";
 import {
   normalizeLowercaseStringOrEmpty,
@@ -142,6 +143,7 @@ export async function handleSessionHistoryHttpRequest(
     typeof cfg.gateway?.webchat?.chatHistoryMaxChars === "number"
       ? cfg.gateway.webchat.chatHistoryMaxChars
       : DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS;
+  const emotionMode = normalizeEmotionMode(entry?.emotionMode) ?? "off";
   // Read the transcript once and derive both sanitized and raw views from the
   // same snapshot, eliminating the theoretical race window where a concurrent
   // write between two separate reads could cause seq/content divergence.
@@ -153,6 +155,7 @@ export async function handleSessionHistoryHttpRequest(
     maxChars: effectiveMaxChars,
     limit,
     cursor,
+    emotionMode,
   });
   const history = historySnapshot.history;
 
@@ -188,6 +191,7 @@ export async function handleSessionHistoryHttpRequest(
     maxChars: effectiveMaxChars,
     limit,
     cursor,
+    emotionMode,
   });
   sentHistory = sseState.snapshot();
   setSseHeaders(res);

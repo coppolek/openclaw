@@ -37,6 +37,7 @@ export type ReplyPayload = {
 
 export type ReplyPayloadMetadata = {
   assistantMessageIndex?: number;
+  ttsSourceText?: string;
 };
 
 const replyPayloadMetadata = new WeakMap<object, ReplyPayloadMetadata>();

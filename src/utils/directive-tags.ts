@@ -1,4 +1,6 @@
+import type { EmotionMode } from "../emotion-mode.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
+import { sanitizeEmotionTagsForMode } from "../shared/text/emotion-tags.js";
 
 export type InlineDirectiveParseResult = {
   text: string;
@@ -92,6 +94,20 @@ export function stripInlineDirectiveTagsForDisplay(text: string): StripInlineDir
   };
 }
 
+export function sanitizeDirectiveAndEmotionTagsForDisplay(
+  text: string,
+  options?: { emotionMode?: EmotionMode; allowTrailingEmotionTag?: boolean },
+): StripInlineDirectiveTagsResult {
+  const inline = stripInlineDirectiveTagsForDisplay(text);
+  const emotion = sanitizeEmotionTagsForMode(inline.text, options?.emotionMode, {
+    allowTrailingPartialTag: options?.allowTrailingEmotionTag,
+  });
+  return {
+    text: emotion.text,
+    changed: inline.changed || emotion.changed,
+  };
+}
+
 export function stripInlineDirectiveTagsForDelivery(text: string): StripInlineDirectiveTagsResult {
   if (!text) {
     return { text, changed: false };
@@ -114,6 +130,7 @@ function isMessageTextPart(part: MessagePart): part is MessageTextPart {
  */
 export function stripInlineDirectiveTagsFromMessageForDisplay(
   message: DisplayMessageWithContent | undefined,
+  options?: { emotionMode?: EmotionMode; allowTrailingEmotionTag?: boolean },
 ): DisplayMessageWithContent | undefined {
   if (!message) {
     return message;
@@ -129,7 +146,10 @@ export function stripInlineDirectiveTagsFromMessageForDisplay(
     if (!isMessageTextPart(record)) {
       return part;
     }
-    return { ...record, text: stripInlineDirectiveTagsForDisplay(record.text).text };
+    return {
+      ...record,
+      text: sanitizeDirectiveAndEmotionTagsForDisplay(record.text, options).text,
+    };
   });
   return { ...message, content: cleaned };
 }

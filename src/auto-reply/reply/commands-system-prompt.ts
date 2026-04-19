@@ -12,6 +12,7 @@ import { getSkillsSnapshotVersion } from "../../agents/skills/refresh-state.js";
 import { buildSystemPromptParams } from "../../agents/system-prompt-params.js";
 import { buildAgentSystemPrompt } from "../../agents/system-prompt.js";
 import type { WorkspaceBootstrapFile } from "../../agents/workspace.js";
+import { normalizeEmotionMode } from "../../emotion-mode.js";
 import { getRemoteSkillEligibility } from "../../infra/skills-remote.js";
 import { buildTtsSystemPromptHint } from "../../tts/tts.js";
 import type { HandleCommandsParams } from "./commands-types.js";
@@ -135,11 +136,19 @@ export async function resolveCommandsSystemPromptBundle(
       }
     : { enabled: false };
   const ttsHint = params.cfg ? buildTtsSystemPromptHint(params.cfg) : undefined;
+  const emotionMode =
+    normalizeEmotionMode(targetSessionEntry?.emotionMode) ??
+    normalizeEmotionMode(
+      params.cfg?.agents?.list?.find((entry) => entry.id === sessionAgentId)?.emotionDefault,
+    ) ??
+    normalizeEmotionMode(params.cfg?.agents?.defaults?.emotionDefault) ??
+    "off";
 
   const systemPrompt = buildAgentSystemPrompt({
     workspaceDir,
     defaultThinkLevel: params.resolvedThinkLevel,
     reasoningLevel: params.resolvedReasoningLevel,
+    emotionMode,
     extraSystemPrompt: undefined,
     ownerNumbers: undefined,
     reasoningTagHint: false,

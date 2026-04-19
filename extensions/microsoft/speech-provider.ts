@@ -180,6 +180,9 @@ export function buildMicrosoftSpeechProvider(): SpeechProviderPlugin {
     label: "Microsoft",
     aliases: ["edge"],
     autoSelectOrder: 30,
+    capabilities: {
+      sourceTextHandling: "strip_expressive_tags",
+    },
     resolveConfig: ({ rawConfig }) => normalizeMicrosoftProviderConfig(rawConfig),
     resolveTalkConfig: ({ baseTtsConfig, talkProviderConfig }) => {
       const base = normalizeMicrosoftProviderConfig(baseTtsConfig);

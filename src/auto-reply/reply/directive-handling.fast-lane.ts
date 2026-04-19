@@ -52,6 +52,7 @@ export async function applyInlineDirectivesFastLane(
     currentThinkLevel,
     currentFastMode,
     currentVerboseLevel,
+    currentEmotionMode,
     currentReasoningLevel,
     currentElevatedLevel,
   } = await resolveCurrentDirectiveLevels({
@@ -86,6 +87,7 @@ export async function applyInlineDirectivesFastLane(
     currentThinkLevel,
     currentFastMode,
     currentVerboseLevel,
+    currentEmotionMode,
     currentReasoningLevel,
     currentElevatedLevel,
     surface: ctx.Surface,

@@ -166,6 +166,7 @@ export type SessionEntry = {
   traceLevel?: string;
   reasoningLevel?: string;
   elevatedLevel?: string;
+  emotionMode?: "off" | "on" | "full";
   ttsAuto?: TtsAutoMode;
   execHost?: string;
   execSecurity?: string;

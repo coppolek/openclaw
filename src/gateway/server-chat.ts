@@ -6,10 +6,11 @@ import {
   stripLeadingSilentToken,
 } from "../auto-reply/tokens.js";
 import { loadConfig } from "../config/config.js";
+import { normalizeEmotionMode } from "../emotion-mode.js";
 import { type AgentEventPayload, getAgentRunContext } from "../infra/agent-events.js";
 import { detectErrorKind, type ErrorKind } from "../infra/errors.js";
 import { resolveHeartbeatVisibility } from "../infra/heartbeat-visibility.js";
-import { stripInlineDirectiveTagsForDisplay } from "../utils/directive-tags.js";
+import { sanitizeDirectiveAndEmotionTagsForDisplay } from "../utils/directive-tags.js";
 import {
   isSuppressedControlReplyLeadFragment,
   isSuppressedControlReplyText,
@@ -85,6 +86,10 @@ function normalizeHeartbeatChatFinalText(params: {
     return { suppress: true, text: "" };
   }
   return { suppress: false, text: stripped.text };
+}
+
+function resolveSessionEmotionMode(sessionKey: string) {
+  return normalizeEmotionMode(loadSessionEntry(sessionKey).entry?.emotionMode) ?? "off";
 }
 
 function appendUniqueSuffix(base: string, suffix: string): string {
@@ -547,6 +552,7 @@ export function createAgentEventHandler({
       fastMode: row?.fastMode,
       verboseLevel: row?.verboseLevel,
       traceLevel: row?.traceLevel,
+      emotionMode: row?.emotionMode,
       reasoningLevel: row?.reasoningLevel,
       elevatedLevel: row?.elevatedLevel,
       sendPolicy: row?.sendPolicy,
@@ -688,30 +694,32 @@ export function createAgentEventHandler({
     text: string,
     delta?: unknown,
   ) => {
-    const cleanedText = stripInlineDirectiveTagsForDisplay(text).text;
-    const cleanedDelta =
-      typeof delta === "string" ? stripInlineDirectiveTagsForDisplay(delta).text : "";
+    const emotionMode = resolveSessionEmotionMode(sessionKey);
     const previousRawText = chatRunState.rawBuffers.get(clientRunId) ?? "";
     const mergedRawText = resolveMergedAssistantText({
       previousText: previousRawText,
-      nextText: cleanedText,
-      nextDelta: cleanedDelta,
+      nextText: text,
+      nextDelta: typeof delta === "string" ? delta : "",
     });
     if (!mergedRawText) {
       return;
     }
     chatRunState.rawBuffers.set(clientRunId, mergedRawText);
-    if (isSuppressedControlReplyText(mergedRawText)) {
+    const mergedVisibleText = sanitizeDirectiveAndEmotionTagsForDisplay(mergedRawText, {
+      emotionMode,
+      allowTrailingEmotionTag: true,
+    }).text;
+    if (isSuppressedControlReplyText(mergedVisibleText)) {
       chatRunState.buffers.set(clientRunId, "");
       return;
     }
-    if (isSuppressedControlReplyLeadFragment(mergedRawText)) {
-      chatRunState.buffers.set(clientRunId, mergedRawText);
+    if (isSuppressedControlReplyLeadFragment(mergedVisibleText)) {
+      chatRunState.buffers.set(clientRunId, mergedVisibleText);
       return;
     }
-    const mergedText = startsWithSilentToken(mergedRawText, SILENT_REPLY_TOKEN)
-      ? stripLeadingSilentToken(mergedRawText, SILENT_REPLY_TOKEN)
-      : mergedRawText;
+    const mergedText = startsWithSilentToken(mergedVisibleText, SILENT_REPLY_TOKEN)
+      ? stripLeadingSilentToken(mergedVisibleText, SILENT_REPLY_TOKEN)
+      : mergedVisibleText;
     chatRunState.buffers.set(clientRunId, mergedText);
     if (isSuppressedControlReplyText(mergedText)) {
       return;
@@ -745,9 +753,7 @@ export function createAgentEventHandler({
   };
 
   const resolveBufferedChatTextState = (clientRunId: string, sourceRunId: string) => {
-    const bufferedText = stripInlineDirectiveTagsForDisplay(
-      chatRunState.buffers.get(clientRunId) ?? "",
-    ).text.trim();
+    const bufferedText = (chatRunState.buffers.get(clientRunId) ?? "").trim();
     const normalizedHeartbeatText = normalizeHeartbeatChatFinalText({
       runId: clientRunId,
       sourceRunId,

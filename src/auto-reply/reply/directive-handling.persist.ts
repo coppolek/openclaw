@@ -9,6 +9,7 @@ import type { ModelAliasIndex } from "../../agents/model-selection.js";
 import { updateSessionStore } from "../../config/sessions/store.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { normalizeEmotionMode } from "../../emotion-mode.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
 import { applyTraceOverride, applyVerboseOverride } from "../../sessions/level-overrides.js";
 import { applyModelOverrideToSessionEntry } from "../../sessions/model-overrides.js";
@@ -101,6 +102,7 @@ export async function persistInlineDirectives(params: {
       (agentCfg?.elevatedDefault as ElevatedLevel | undefined) ??
       (elevatedAllowed ? ("on" as ElevatedLevel) : ("off" as ElevatedLevel));
     const prevReasoningLevel = (sessionEntry.reasoningLevel as ReasoningLevel | undefined) ?? "off";
+    const prevEmotionMode = normalizeEmotionMode(sessionEntry.emotionMode) ?? "off";
     let elevatedChanged =
       directives.hasElevatedDirective &&
       directives.elevatedLevel !== undefined &&
@@ -108,6 +110,7 @@ export async function persistInlineDirectives(params: {
       elevatedAllowed;
     let reasoningChanged =
       directives.hasReasoningDirective && directives.reasoningLevel !== undefined;
+    let emotionChanged = directives.hasEmotionsDirective && directives.emotionMode !== undefined;
     let updated = false;
 
     if (directives.hasThinkDirective && directives.thinkLevel) {
@@ -120,6 +123,12 @@ export async function persistInlineDirectives(params: {
       allowInternalVerbosePersistence
     ) {
       applyVerboseOverride(sessionEntry, directives.verboseLevel);
+      updated = true;
+    }
+    if (directives.hasEmotionsDirective && directives.emotionMode) {
+      sessionEntry.emotionMode = directives.emotionMode;
+      emotionChanged =
+        directives.emotionMode !== prevEmotionMode && directives.emotionMode !== undefined;
       updated = true;
     }
     if (
@@ -266,6 +275,12 @@ export async function persistInlineDirectives(params: {
         elevatedChanged,
         reasoningChanged,
       });
+      if (emotionChanged) {
+        enqueueSystemEvent(`Emotions mode ${sessionEntry.emotionMode ?? "off"}.`, {
+          sessionKey,
+          contextKey: `emotions:${sessionEntry.emotionMode ?? "off"}`,
+        });
+      }
     }
   }
 

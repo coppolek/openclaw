@@ -4,6 +4,7 @@ import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import { resolveChannelApprovalCapability } from "../channels/plugins/approvals.js";
 import { getChannelPlugin } from "../channels/plugins/index.js";
 import type { MemoryCitationsMode } from "../config/types.memory.js";
+import type { EmotionMode } from "../emotion-mode.js";
 import { buildMemoryPromptSection } from "../plugins/memory-state.js";
 import {
   normalizeLowercaseStringOrEmpty,
@@ -44,6 +45,7 @@ type OwnerIdDisplay = "raw" | "hash";
 const CONTEXT_FILE_ORDER = new Map<string, number>([
   ["agents.md", 10],
   ["soul.md", 20],
+  ["voice.md", 25],
   ["identity.md", 30],
   ["user.md", 40],
   ["tools.md", 50],
@@ -122,6 +124,32 @@ function buildProjectContextSection(params: {
     lines.push(`## ${file.path}`, "", sanitizeContextFileContentForPrompt(file.content), "");
   }
   return lines;
+}
+
+function buildEmotionTranslationSection(params: {
+  isMinimal: boolean;
+  emotionMode?: EmotionMode;
+  contextFiles: EmbeddedContextFile[];
+}) {
+  if (params.isMinimal || (params.emotionMode !== "on" && params.emotionMode !== "full")) {
+    return [];
+  }
+  const hasVoiceLibrary = params.contextFiles.some(
+    (file) => getContextFileBasename(file.path) === "voice.md",
+  );
+  if (!hasVoiceLibrary) {
+    return [];
+  }
+  return [
+    "## Emotion Translation Contract",
+    "Before delivering any user-facing final answer, rewrite it through the loaded `voice.md` translation library so it is speakable and emotionally expressive in the persona from `SOUL.md`.",
+    "- Output only the translated final answer. Do not mention this translation pass unless the user explicitly asks.",
+    "- Preserve all facts, code, commands, file paths, URLs, markdown structure, and safety constraints exactly.",
+    "- When `voice.md` defines bracketed delivery tags, include the raw tags directly in the final answer.",
+    "- Keep tags sparse, local, and natural. Prefer 0-2 tags per sentence and none where clarity would suffer.",
+    "- Ensure the prose still reads naturally if those tags are hidden or stripped for display.",
+    "",
+  ];
 }
 
 function buildHeartbeatSection(params: { isMinimal: boolean; heartbeatPrompt?: string }) {
@@ -426,6 +454,7 @@ export function buildAgentSystemPrompt(params: {
   workspaceDir: string;
   defaultThinkLevel?: ThinkLevel;
   reasoningLevel?: ReasoningLevel;
+  emotionMode?: EmotionMode;
   extraSystemPrompt?: string;
   ownerNumbers?: string[];
   ownerDisplay?: OwnerIdDisplay;
@@ -956,6 +985,13 @@ export function buildAgentSystemPrompt(params: {
       promptMode === "minimal" ? "## Subagent Context" : "## Group Chat Context";
     lines.push(contextHeader, extraSystemPrompt, "");
   }
+  lines.push(
+    ...buildEmotionTranslationSection({
+      isMinimal,
+      emotionMode: params.emotionMode,
+      contextFiles: orderedContextFiles,
+    }),
+  );
   if (providerDynamicSuffix) {
     lines.push(providerDynamicSuffix, "");
   }

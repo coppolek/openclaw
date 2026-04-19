@@ -1,3 +1,4 @@
+import { getReplyPayloadMetadata } from "openclaw/plugin-sdk/reply-payload";
 import { describe, expect, it } from "vitest";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
 import { createTestRegistry } from "../../test-utils/channel-plugins.js";
@@ -288,5 +289,21 @@ describe("buildReplyPayloads media filter integration", () => {
 
     expect(replyPayloads).toHaveLength(1);
     expect(replyPayloads[0]?.text).toBe("hello world!");
+  });
+
+  it("stores raw emotion-tagged text for downstream TTS while hiding it from normal payload text", async () => {
+    const { replyPayloads } = await buildReplyPayloads({
+      ...baseParams,
+      emotionMode: "on",
+      payloads: [{ text: "[warmly] hello there" }],
+    });
+
+    expect(replyPayloads).toHaveLength(1);
+    const [payload] = replyPayloads;
+    expect(payload?.text).toBe("hello there");
+    if (!payload) {
+      throw new Error("expected payload");
+    }
+    expect(getReplyPayloadMetadata(payload)?.ttsSourceText).toBe("[warmly] hello there");
   });
 });

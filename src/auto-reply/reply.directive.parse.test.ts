@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  extractEmotionsDirective,
   extractElevatedDirective,
   extractExecDirective,
   extractQueueDirective,
@@ -61,6 +62,12 @@ describe("directive parsing", () => {
     const res = extractReasoningDirective("/reasoning stream please");
     expect(res.hasDirective).toBe(true);
     expect(res.reasoningLevel).toBe("stream");
+  });
+
+  it("matches emotions directive", () => {
+    const res = extractEmotionsDirective("/emotions full please");
+    expect(res.hasDirective).toBe(true);
+    expect(res.emotionMode).toBe("full");
   });
 
   it("matches fast directive", () => {

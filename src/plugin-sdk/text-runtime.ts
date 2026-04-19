@@ -18,6 +18,7 @@ export * from "../shared/string-sample.js";
 export * from "../shared/text/assistant-visible-text.js";
 export * from "../shared/text/auto-linked-file-ref.js";
 export * from "../shared/text/code-regions.js";
+export * from "../shared/text/emotion-tags.js";
 export * from "../shared/text/reasoning-tags.js";
 export * from "../shared/text/strip-markdown.js";
 export * from "../terminal/safe-text.js";

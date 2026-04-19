@@ -98,12 +98,14 @@ export function buildSessionHistorySnapshot(params: {
   maxChars?: number;
   limit?: number;
   cursor?: string;
+  emotionMode?: "off" | "on" | "full";
 }): SessionHistorySnapshot {
   const history = paginateSessionMessages(
     toSessionHistoryMessages(
       sanitizeChatHistoryMessages(
         params.rawMessages,
         params.maxChars ?? DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
+        params.emotionMode,
       ),
     ),
     params.limit,
@@ -121,6 +123,7 @@ export class SessionHistorySseState {
   private readonly maxChars: number;
   private readonly limit: number | undefined;
   private readonly cursor: string | undefined;
+  private readonly emotionMode: "off" | "on" | "full";
   private sentHistory: PaginatedSessionHistory;
   private rawTranscriptSeq: number;
 
@@ -130,12 +133,14 @@ export class SessionHistorySseState {
     maxChars?: number;
     limit?: number;
     cursor?: string;
+    emotionMode?: "off" | "on" | "full";
   }): SessionHistorySseState {
     return new SessionHistorySseState({
       target: params.target,
       maxChars: params.maxChars,
       limit: params.limit,
       cursor: params.cursor,
+      emotionMode: params.emotionMode,
       initialRawMessages: params.rawMessages,
     });
   }
@@ -145,18 +150,21 @@ export class SessionHistorySseState {
     maxChars?: number;
     limit?: number;
     cursor?: string;
+    emotionMode?: "off" | "on" | "full";
     initialRawMessages?: unknown[];
   }) {
     this.target = params.target;
     this.maxChars = params.maxChars ?? DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS;
     this.limit = params.limit;
     this.cursor = params.cursor;
+    this.emotionMode = params.emotionMode ?? "off";
     const rawMessages = params.initialRawMessages ?? this.readRawMessages();
     const snapshot = buildSessionHistorySnapshot({
       rawMessages,
       maxChars: this.maxChars,
       limit: this.limit,
       cursor: this.cursor,
+      emotionMode: this.emotionMode,
     });
     this.sentHistory = snapshot.history;
     this.rawTranscriptSeq = snapshot.rawTranscriptSeq;
@@ -178,7 +186,7 @@ export class SessionHistorySseState {
       ...(typeof update.messageId === "string" ? { id: update.messageId } : {}),
       seq: this.rawTranscriptSeq,
     });
-    const sanitized = sanitizeChatHistoryMessages([nextMessage], this.maxChars);
+    const sanitized = sanitizeChatHistoryMessages([nextMessage], this.maxChars, this.emotionMode);
     if (sanitized.length === 0) {
       return null;
     }
@@ -203,6 +211,7 @@ export class SessionHistorySseState {
       maxChars: this.maxChars,
       limit: this.limit,
       cursor: this.cursor,
+      emotionMode: this.emotionMode,
     });
     this.rawTranscriptSeq = snapshot.rawTranscriptSeq;
     this.sentHistory = snapshot.history;

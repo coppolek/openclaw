@@ -54,6 +54,7 @@ function buildGatewaySessionSnapshot(params: {
     fastMode: sessionRow.fastMode,
     verboseLevel: sessionRow.verboseLevel,
     reasoningLevel: sessionRow.reasoningLevel,
+    emotionMode: sessionRow.emotionMode,
     elevatedLevel: sessionRow.elevatedLevel,
     sendPolicy: sessionRow.sendPolicy,
     systemSent: sessionRow.systemSent,

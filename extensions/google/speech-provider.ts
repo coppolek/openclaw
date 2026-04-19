@@ -293,6 +293,9 @@ export function buildGoogleSpeechProvider(): SpeechProviderPlugin {
     id: "google",
     label: "Google",
     autoSelectOrder: 50,
+    capabilities: {
+      sourceTextHandling: "strip_expressive_tags",
+    },
     models: [DEFAULT_GOOGLE_TTS_MODEL],
     voices: GOOGLE_TTS_VOICES,
     resolveConfig: ({ rawConfig }) => normalizeGoogleTtsProviderConfig(rawConfig),

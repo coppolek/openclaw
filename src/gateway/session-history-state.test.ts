@@ -75,4 +75,28 @@ describe("SessionHistorySseState", () => {
     expect(snapshot.history.messages[0]?.__openclaw?.seq).toBe(2);
     expect(snapshot.rawTranscriptSeq).toBe(2);
   });
+
+  test("strips emotion tags from history in normal mode and preserves them in full mode", () => {
+    const rawMessages = [
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "[softly] hello there" }],
+        __openclaw: { seq: 1 },
+      },
+    ];
+
+    const hidden = buildSessionHistorySnapshot({
+      rawMessages,
+      emotionMode: "on",
+    });
+    const visible = buildSessionHistorySnapshot({
+      rawMessages,
+      emotionMode: "full",
+    });
+
+    expect(hidden.history.messages[0]?.content).toEqual([{ type: "text", text: "hello there" }]);
+    expect(visible.history.messages[0]?.content).toEqual([
+      { type: "text", text: "[softly] hello there" },
+    ]);
+  });
 });

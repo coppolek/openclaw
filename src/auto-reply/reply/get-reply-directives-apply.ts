@@ -195,6 +195,7 @@ export async function applyInlineDirectiveOverrides(params: {
     directives.hasThinkDirective ||
     directives.hasFastDirective ||
     directives.hasVerboseDirective ||
+    directives.hasEmotionsDirective ||
     directives.hasTraceDirective ||
     directives.hasReasoningDirective ||
     directives.hasElevatedDirective ||
@@ -297,6 +298,7 @@ export async function applyInlineDirectiveOverrides(params: {
       currentThinkLevel: resolvedDefaultThinkLevel,
       currentFastMode,
       currentVerboseLevel,
+      currentEmotionMode,
       currentReasoningLevel,
       currentElevatedLevel,
     } = await (
@@ -315,6 +317,7 @@ export async function applyInlineDirectiveOverrides(params: {
       currentThinkLevel,
       currentFastMode,
       currentVerboseLevel,
+      currentEmotionMode,
       currentReasoningLevel,
       currentElevatedLevel,
       messageProvider: ctx.Provider,

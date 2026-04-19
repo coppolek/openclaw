@@ -1,7 +1,12 @@
-import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
+import {
+  resolveSendableOutboundReplyParts,
+  setReplyPayloadMetadata,
+} from "openclaw/plugin-sdk/reply-payload";
 import type { MessagingToolSend } from "../../agents/pi-embedded-messaging.types.js";
 import type { ReplyToMode } from "../../config/types.js";
+import type { EmotionMode } from "../../emotion-mode.js";
 import { logVerbose } from "../../globals.js";
+import { sanitizeEmotionTagsForMode } from "../../shared/text/emotion-tags.js";
 import { stripHeartbeatToken } from "../heartbeat.js";
 import type { OriginatingChannelType } from "../templating.js";
 import { SILENT_REPLY_TOKEN } from "../tokens.js";
@@ -19,6 +24,12 @@ import { applyReplyThreading, isRenderablePayload } from "./reply-payloads-base.
 let replyPayloadsDedupeRuntimePromise: Promise<
   typeof import("./reply-payloads-dedupe.runtime.js")
 > | null = null;
+
+const EMOTION_RAW_TTS_TEXT_KEY = "__openclawEmotionRawTtsText";
+
+type EmotionTaggedPayload = ReplyPayload & {
+  [EMOTION_RAW_TTS_TEXT_KEY]?: string;
+};
 
 function loadReplyPayloadsDedupeRuntime() {
   replyPayloadsDedupeRuntimePromise ??= import("./reply-payloads-dedupe.runtime.js");
@@ -89,6 +100,7 @@ async function normalizeSentMediaUrlsForDedupe(params: {
 
 export async function buildReplyPayloads(params: {
   payloads: ReplyPayload[];
+  emotionMode?: EmotionMode;
   isHeartbeat: boolean;
   didLogHeartbeatStrip: boolean;
   silentExpected?: boolean;
@@ -110,17 +122,30 @@ export async function buildReplyPayloads(params: {
   normalizeMediaPaths?: (payload: ReplyPayload) => Promise<ReplyPayload>;
 }): Promise<{ replyPayloads: ReplyPayload[]; didLogHeartbeatStrip: boolean }> {
   let didLogHeartbeatStrip = params.didLogHeartbeatStrip;
-  const sanitizedPayloads = params.isHeartbeat
+  const sanitizedPayloads: EmotionTaggedPayload[] = params.isHeartbeat
     ? params.payloads
     : params.payloads.flatMap((payload) => {
         let text = payload.text;
+        const rawEmotionTtsText = typeof payload.text === "string" ? payload.text : undefined;
 
         if (payload.isError && text && isBunFetchSocketError(text)) {
           text = formatBunFetchSocketError(text);
         }
 
         if (!text || !text.includes("HEARTBEAT_OK")) {
-          return [{ ...payload, text }];
+          if (typeof text === "string") {
+            const emotionSanitized = sanitizeEmotionTagsForMode(text, params.emotionMode);
+            text = emotionSanitized.text;
+          }
+          return [
+            {
+              ...payload,
+              text,
+              ...(typeof rawEmotionTtsText === "string" && rawEmotionTtsText !== text
+                ? { [EMOTION_RAW_TTS_TEXT_KEY]: rawEmotionTtsText }
+                : {}),
+            },
+          ];
         }
         const stripped = stripHeartbeatToken(text, { mode: "message" });
         if (stripped.didStrip && !didLogHeartbeatStrip) {
@@ -131,7 +156,16 @@ export async function buildReplyPayloads(params: {
         if (stripped.shouldSkip && !hasMedia) {
           return [];
         }
-        return [{ ...payload, text: stripped.text }];
+        const emotionSanitized = sanitizeEmotionTagsForMode(stripped.text, params.emotionMode);
+        return [
+          {
+            ...payload,
+            text: emotionSanitized.text,
+            ...(typeof rawEmotionTtsText === "string" && rawEmotionTtsText !== emotionSanitized.text
+              ? { [EMOTION_RAW_TTS_TEXT_KEY]: rawEmotionTtsText }
+              : {}),
+          },
+        ];
       });
 
   const replyTaggedPayloads = (
@@ -148,11 +182,20 @@ export async function buildReplyPayloads(params: {
           currentMessageId: params.currentMessageId,
           silentToken: SILENT_REPLY_TOKEN,
           parseMode: "always",
-        }).payload;
-        return await normalizeReplyPayloadMedia({
+        }).payload as EmotionTaggedPayload;
+        const rawEmotionTtsText =
+          typeof parsed[EMOTION_RAW_TTS_TEXT_KEY] === "string"
+            ? parsed[EMOTION_RAW_TTS_TEXT_KEY]
+            : undefined;
+        const normalizedPayload = (await normalizeReplyPayloadMedia({
           payload: parsed,
           normalizeMediaPaths: params.normalizeMediaPaths,
-        });
+        })) as EmotionTaggedPayload;
+        if (typeof rawEmotionTtsText === "string" && rawEmotionTtsText.trim().length > 0) {
+          setReplyPayloadMetadata(normalizedPayload, { ttsSourceText: rawEmotionTtsText });
+        }
+        delete normalizedPayload[EMOTION_RAW_TTS_TEXT_KEY];
+        return normalizedPayload;
       }),
     )
   ).filter(isRenderablePayload);
