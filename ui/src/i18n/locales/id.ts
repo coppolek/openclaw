@@ -300,15 +300,6 @@ export const id: TranslationMap = {
       on: "Dreaming Aktif",
       off: "Dreaming Nonaktif",
     },
-    restartConfirmation: {
-      title: "Restart Gateway untuk Menerapkan Perubahan",
-      subtitle: "Mengubah mode Dreaming akan memulai ulang gateway.",
-      warning:
-        "Tindakan ini akan memulai ulang Gateway dan dapat sementara mengganggu obrolan, otomasi, dan saluran yang terhubung.",
-      confirm: "Konfirmasi Restart",
-      restarting: "Memulai ulang…",
-      failed: "Tidak dapat menerapkan perubahan. Periksa koneksi Anda dan coba lagi.",
-    },
     status: {
       active: "Dreaming Aktif",
       idle: "Dreaming Idle",

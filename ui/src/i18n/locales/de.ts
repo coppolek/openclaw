@@ -306,16 +306,6 @@ export const de: TranslationMap = {
       on: "Träumen aktiviert",
       off: "Träumen deaktiviert",
     },
-    restartConfirmation: {
-      title: "Gateway neu starten, um Änderung anzuwenden",
-      subtitle: "Das Ändern des Dreaming-Modus startet das Gateway neu.",
-      warning:
-        "Diese Aktion startet das Gateway neu und kann Chats, Automatisierungen und verbundene Kanäle vorübergehend unterbrechen.",
-      confirm: "Neustart bestätigen",
-      restarting: "Wird neu gestartet…",
-      failed:
-        "Änderung konnte nicht angewendet werden. Überprüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
-    },
     status: {
       active: "Träumen aktiv",
       idle: "Träumen im Leerlauf",

@@ -304,15 +304,6 @@ export const ja_JP: TranslationMap = {
       on: "Dreaming オン",
       off: "Dreaming オフ",
     },
-    restartConfirmation: {
-      title: "変更を適用するためにGatewayを再起動",
-      subtitle: "Dreamingモードを変更するとGatewayが再起動します。",
-      warning:
-        "この操作はGatewayを再起動し、一時的にチャット、自動化、接続されたチャンネルが中断される可能性があります。",
-      confirm: "再起動を確認",
-      restarting: "再起動中…",
-      failed: "変更を適用できませんでした。接続を確認して再度お試しください。",
-    },
     status: {
       active: "Dreaming 有効",
       idle: "Dreaming 待機中",

@@ -300,15 +300,6 @@ export const pt_BR: TranslationMap = {
       on: "Dreaming ativado",
       off: "Dreaming desativado",
     },
-    restartConfirmation: {
-      title: "Reiniciar Gateway para Aplicar Alteração",
-      subtitle: "Alterar o modo Dreaming reinicia o gateway.",
-      warning:
-        "Esta ação irá reiniciar o Gateway e poderá interromper temporariamente conversas, automações e canais conectados.",
-      confirm: "Confirmar Reinício",
-      restarting: "Reiniciando…",
-      failed: "Não foi possível aplicar a alteração. Verifique sua conexão e tente novamente.",
-    },
     status: {
       active: "Dreaming ativo",
       idle: "Dreaming inativo",

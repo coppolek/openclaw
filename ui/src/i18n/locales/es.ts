@@ -300,15 +300,6 @@ export const es: TranslationMap = {
       on: "Sueño activado",
       off: "Sueño desactivado",
     },
-    restartConfirmation: {
-      title: "Reiniciar Gateway para aplicar el cambio",
-      subtitle: "Cambiar el modo Dreaming reinicia el gateway.",
-      warning:
-        "Esta acción reiniciará el Gateway y puede interrumpir temporalmente chats, automatizaciones y canales conectados.",
-      confirm: "Confirmar reinicio",
-      restarting: "Reiniciando…",
-      failed: "No se pudo aplicar el cambio. Verifica tu conexión e inténtalo de nuevo.",
-    },
     status: {
       active: "Sueño activo",
       idle: "Sueño inactivo",

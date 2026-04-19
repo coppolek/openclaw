@@ -305,15 +305,6 @@ export const tr: TranslationMap = {
       on: "Dreaming Açık",
       off: "Dreaming Kapalı",
     },
-    restartConfirmation: {
-      title: "Değişikliği Uygulamak için Gateway'i Yeniden Başlat",
-      subtitle: "Dreaming modunu değiştirmek gateway'i yeniden başlatır.",
-      warning:
-        "Bu işlem Gateway'i yeniden başlatacak ve sohbetleri, otomasyonları ve bağlı kanalları geçici olarak kesintiye uğratabilir.",
-      confirm: "Yeniden Başlatmayı Onayla",
-      restarting: "Yeniden başlatılıyor…",
-      failed: "Değişiklik uygulanamadı. Bağlantınızı kontrol edin ve tekrar deneyin.",
-    },
     status: {
       active: "Dreaming Etkin",
       idle: "Dreaming Boşta",

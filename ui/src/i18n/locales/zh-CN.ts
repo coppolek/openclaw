@@ -296,14 +296,6 @@ export const zh_CN: TranslationMap = {
       on: "Dreaming 已开启",
       off: "Dreaming 已关闭",
     },
-    restartConfirmation: {
-      title: "重启 Gateway 以应用更改",
-      subtitle: "更改 Dreaming 模式将重启网关。",
-      warning: "此操作将重启 Gateway，可能会暂时中断聊天、自动化和已连接频道。",
-      confirm: "确认重启",
-      restarting: "正在重启…",
-      failed: "无法应用更改。请检查连接并重试。",
-    },
     status: {
       active: "Dreaming 运行中",
       idle: "Dreaming 空闲",

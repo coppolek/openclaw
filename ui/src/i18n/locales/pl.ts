@@ -302,15 +302,6 @@ export const pl: TranslationMap = {
       on: "Dreaming włączone",
       off: "Dreaming wyłączone",
     },
-    restartConfirmation: {
-      title: "Uruchom ponownie bramę, aby zastosować zmianę",
-      subtitle: "Zmiana trybu Dreaming powoduje ponowne uruchomienie bramy.",
-      warning:
-        "Ta akcja spowoduje ponowne uruchomienie bramy i może tymczasowo przerwać czaty, automatyzacje i połączone kanały.",
-      confirm: "Potwierdź ponowne uruchomienie",
-      restarting: "Uruchamianie ponowne…",
-      failed: "Nie można zastosować zmiany. Sprawdź połączenie i spróbuj ponownie.",
-    },
     status: {
       active: "Dreaming aktywne",
       idle: "Dreaming bezczynne",
