@@ -78,6 +78,15 @@ function buildExecForegroundResult(params: {
       cwd: params.cwd,
     });
   }
+  if (params.outcome.status === "killed") {
+    return textResult(`${warningText}${params.outcome.reason}`, {
+      status: "completed",
+      exitCode: params.outcome.exitCode ?? null,
+      durationMs: params.outcome.durationMs,
+      aggregated: params.outcome.aggregated,
+      cwd: params.cwd,
+    });
+  }
   return textResult(`${warningText}${params.outcome.aggregated || "(no output)"}`, {
     status: "completed",
     exitCode: params.outcome.exitCode,

@@ -401,7 +401,12 @@ export async function processGatewayAllowlist(
       const output = normalizeNotifyOutput(
         tail(outcome.aggregated || "", DEFAULT_NOTIFY_TAIL_CHARS),
       );
-      const exitLabel = outcome.timedOut ? "timeout" : `code ${outcome.exitCode ?? "?"}`;
+      const exitLabel =
+        outcome.status === "killed"
+          ? "killed"
+          : outcome.timedOut
+            ? "timeout"
+            : `code ${outcome.exitCode ?? "?"}`;
       const summary = output
         ? `Exec finished (gateway id=${approvalId}, session=${run.session.id}, ${exitLabel})\n${output}`
         : `Exec finished (gateway id=${approvalId}, session=${run.session.id}, ${exitLabel})`;

@@ -443,6 +443,31 @@ describe("buildExecExitOutcome", () => {
     });
   });
 
+  it("classifies manual cancels as killed instead of failed", () => {
+    expect(
+      buildExecExitOutcome({
+        exit: {
+          reason: "manual-cancel",
+          exitCode: null,
+          exitSignal: "SIGKILL",
+          durationMs: 123,
+          stdout: "",
+          stderr: "",
+          timedOut: false,
+          noOutputTimedOut: false,
+        },
+        aggregated: "partial output",
+        durationMs: 123,
+        timeoutSec: 30,
+      }),
+    ).toMatchObject({
+      status: "killed",
+      exitSignal: "SIGKILL",
+      timedOut: false,
+      reason: expect.stringContaining("Command canceled by request"),
+    });
+  });
+
   it("keeps timed out shell-backgrounded commands on the failed path", () => {
     const outcome = buildExecExitOutcome({
       exit: {
