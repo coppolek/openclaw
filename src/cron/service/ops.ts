@@ -23,6 +23,14 @@ import {
 import { locked } from "./locked.js";
 import type { CronServiceState } from "./state.js";
 import { ensureLoaded, persist, warnIfDisabled } from "./store.js";
+
+// Custom error for duplicate job IDs
+export class DuplicateJobIdError extends Error {
+  constructor(jobId: string) {
+    super(`Job with id "${jobId}" already exists`);
+    this.name = "DuplicateJobIdError";
+  }
+}
 import {
   applyJobResult,
   armTimer,
@@ -264,6 +272,15 @@ export async function add(state: CronServiceState, input: CronJobCreate) {
   return await locked(state, async () => {
     warnIfDisabled(state, "add");
     await ensureLoaded(state);
+
+    // Check for ID collision if custom ID is provided and non-empty
+    if (input.id && input.id.trim()) {
+      const existingJob = state.store?.jobs.find((job) => job.id === input.id);
+      if (existingJob) {
+        throw new DuplicateJobIdError(input.id);
+      }
+    }
+
     const job = createJob(state, input);
     state.store?.jobs.push(job);
 

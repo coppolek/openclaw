@@ -8,6 +8,7 @@ import { isInvalidCronSessionTargetIdError } from "../../cron/session-target.js"
 import type { CronJobCreate, CronJobPatch } from "../../cron/types.js";
 import { validateScheduleTimestamp } from "../../cron/validate-timestamp.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import { DuplicateJobIdError } from "../../cron/service/ops.js";
 import {
   ErrorCodes,
   errorShape,
@@ -133,9 +134,21 @@ export const cronHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const job = await context.cron.add(jobCreate);
-    context.logGateway.info("cron: job created", { jobId: job.id, schedule: jobCreate.schedule });
-    respond(true, job, undefined);
+    try {
+      const job = await context.cron.add(jobCreate);
+      context.logGateway.info("cron: job created", { jobId: job.id, schedule: jobCreate.schedule });
+      respond(true, job, undefined);
+    } catch (err) {
+      if (err instanceof DuplicateJobIdError) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, err.message),
+        );
+      } else {
+        throw err;
+      }
+    }
   },
   "cron.update": async ({ params, respond, context }) => {
     let normalizedPatch: ReturnType<typeof normalizeCronJobPatch>;

@@ -550,7 +550,8 @@ export function nextWakeAtMs(state: CronServiceState) {
 
 export function createJob(state: CronServiceState, input: CronJobCreate): CronJob {
   const now = state.deps.nowMs();
-  const id = crypto.randomUUID();
+  // Use custom ID if provided and non-empty, otherwise generate UUID
+  const id = input.id && input.id.trim() ? input.id : crypto.randomUUID();
   const schedule =
     input.schedule.kind === "every"
       ? {
