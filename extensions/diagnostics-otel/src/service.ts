@@ -232,6 +232,26 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
         unit: "1",
         description: "Run attempts",
       });
+      const toolLoopCounter = meter.createCounter("openclaw.tool.loop", {
+        unit: "1",
+        description: "Tool loop guard events",
+      });
+      const turnCounter = meter.createCounter("openclaw.turn", {
+        unit: "1",
+        description: "Agent turns by outcome",
+      });
+      const turnDurationHistogram = meter.createHistogram("openclaw.turn.duration_ms", {
+        unit: "ms",
+        description: "Agent turn duration",
+      });
+      const turnToolCallCounter = meter.createCounter("openclaw.turn.tool_calls", {
+        unit: "1",
+        description: "Tool calls per turn",
+      });
+      const turnIterationCounter = meter.createCounter("openclaw.turn.iterations", {
+        unit: "1",
+        description: "Iterations per turn",
+      });
 
       if (logsEnabled) {
         const logExporter = new OTLPLogExporter({
@@ -603,10 +623,80 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
         runAttemptCounter.add(1, { "openclaw.attempt": evt.attempt });
       };
 
+      const recordToolLoop = (evt: Extract<DiagnosticEventPayload, { type: "tool.loop" }>) => {
+        const attrs: Record<string, string | number> = {
+          "openclaw.tool": evt.toolName,
+          "openclaw.level": evt.level,
+          "openclaw.action": evt.action,
+          "openclaw.detector": evt.detector,
+          "openclaw.count": evt.count,
+        };
+        if (evt.pairedToolName) {
+          attrs["openclaw.pairedTool"] = evt.pairedToolName;
+        }
+        toolLoopCounter.add(1, attrs);
+        if (!tracesEnabled) {
+          return;
+        }
+        const spanAttrs: Record<string, string | number> = { ...attrs };
+        addSessionIdentityAttrs(spanAttrs, evt);
+        spanAttrs["openclaw.message"] = redactSensitiveText(evt.message);
+        const span = tracer.startSpan("openclaw.tool.loop", { attributes: spanAttrs });
+        if (evt.level === "critical") {
+          span.setStatus({ code: SpanStatusCode.ERROR, message: redactSensitiveText(evt.message) });
+        }
+        span.end();
+      };
+
       const recordHeartbeat = (
         evt: Extract<DiagnosticEventPayload, { type: "diagnostic.heartbeat" }>,
       ) => {
         queueDepthHistogram.record(evt.queued, { "openclaw.channel": "heartbeat" });
+      };
+
+      const recordTurnStarted = (
+        evt: Extract<DiagnosticEventPayload, { type: "turn.started" }>,
+      ) => {
+        turnCounter.add(1, {
+          "openclaw.provider": evt.provider ?? "unknown",
+          "openclaw.model": evt.model ?? "unknown",
+          "openclaw.phase": "started",
+        });
+      };
+
+      const recordTurnCompleted = (
+        evt: Extract<DiagnosticEventPayload, { type: "turn.completed" }>,
+      ) => {
+        const attrs = {
+          "openclaw.provider": evt.provider ?? "unknown",
+          "openclaw.model": evt.model ?? "unknown",
+          "openclaw.outcome": evt.outcome,
+        };
+        turnCounter.add(1, { ...attrs, "openclaw.phase": "completed" });
+        turnDurationHistogram.record(evt.durationMs, attrs);
+        turnToolCallCounter.add(evt.toolCallCount, attrs);
+        turnIterationCounter.add(evt.iterations, attrs);
+
+        if (!tracesEnabled) {
+          return;
+        }
+        const spanAttrs: Record<string, string | number> = {
+          ...attrs,
+          "openclaw.turnId": evt.turnId,
+          "openclaw.runId": evt.runId,
+          "openclaw.sessionKey": evt.sessionKey ?? "",
+          "openclaw.iterations": evt.iterations,
+          "openclaw.toolCalls": evt.toolCallCount,
+          "openclaw.toolErrors": evt.toolErrors,
+        };
+        if (evt.usage?.total) {
+          spanAttrs["openclaw.tokens.total"] = evt.usage.total;
+        }
+        const span = spanWithDuration("openclaw.turn", spanAttrs, evt.durationMs);
+        if (evt.outcome === "error") {
+          span.setStatus({ code: SpanStatusCode.ERROR, message: evt.error });
+        }
+        span.end();
       };
 
       unsubscribe = onDiagnosticEvent((evt: DiagnosticEventPayload) => {
@@ -645,8 +735,17 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
             case "run.attempt":
               recordRunAttempt(evt);
               return;
+            case "tool.loop":
+              recordToolLoop(evt);
+              return;
             case "diagnostic.heartbeat":
               recordHeartbeat(evt);
+              return;
+            case "turn.started":
+              recordTurnStarted(evt);
+              return;
+            case "turn.completed":
+              recordTurnCompleted(evt);
               return;
           }
         } catch (err) {
