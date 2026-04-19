@@ -696,7 +696,9 @@ describe("chat.history sanitization ordering", () => {
   function concatAllTextFields(messages: unknown[]): string {
     return messages
       .map((m) => {
-        if (!m || typeof m !== "object") return "";
+        if (!m || typeof m !== "object") {
+          return "";
+        }
         const entry = m as Record<string, unknown>;
         const text =
           typeof entry.text === "string"
