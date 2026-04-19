@@ -84,6 +84,7 @@ export type ModelProviderConfig = {
   authHeader?: boolean;
   request?: ConfiguredModelProviderRequest;
   models: ModelDefinitionConfig[];
+  providerOptions?: Record<string, unknown>;
 };
 
 export type BedrockDiscoveryConfig = {
