@@ -40,40 +40,33 @@ function mergeDeep<T>(base: T, overrides: DeepPartial<T>): T {
   return result as T;
 }
 
+function createTaskFlowSessionMock() {
+  return {
+    sessionKey: "agent:main:main",
+    createManaged: vi.fn(),
+    get: vi.fn(),
+    list: vi.fn(() => []),
+    findLatest: vi.fn(),
+    resolve: vi.fn(),
+    getTaskSummary: vi.fn(),
+    setWaiting: vi.fn(),
+    resume: vi.fn(),
+    finish: vi.fn(),
+    fail: vi.fn(),
+    requestCancel: vi.fn(),
+    cancel: vi.fn(),
+    runTask: vi.fn(),
+  };
+}
+
 export function createPluginRuntimeMock(overrides: DeepPartial<PluginRuntime> = {}): PluginRuntime {
   const taskFlow = {
-    bindSession: vi.fn(() => ({
-      sessionKey: "agent:main:main",
-      createManaged: vi.fn(),
-      get: vi.fn(),
-      list: vi.fn(() => []),
-      findLatest: vi.fn(),
-      resolve: vi.fn(),
-      getTaskSummary: vi.fn(),
-      setWaiting: vi.fn(),
-      resume: vi.fn(),
-      finish: vi.fn(),
-      fail: vi.fn(),
-      requestCancel: vi.fn(),
-      cancel: vi.fn(),
-      runTask: vi.fn(),
-    })) as unknown as PluginRuntime["taskFlow"]["bindSession"],
-    fromToolContext: vi.fn(() => ({
-      sessionKey: "agent:main:main",
-      createManaged: vi.fn(),
-      get: vi.fn(),
-      list: vi.fn(() => []),
-      findLatest: vi.fn(),
-      resolve: vi.fn(),
-      getTaskSummary: vi.fn(),
-      setWaiting: vi.fn(),
-      resume: vi.fn(),
-      finish: vi.fn(),
-      fail: vi.fn(),
-      requestCancel: vi.fn(),
-      cancel: vi.fn(),
-      runTask: vi.fn(),
-    })) as unknown as PluginRuntime["taskFlow"]["fromToolContext"],
+    bindSession: vi.fn(
+      createTaskFlowSessionMock,
+    ) as unknown as PluginRuntime["taskFlow"]["bindSession"],
+    fromToolContext: vi.fn(
+      createTaskFlowSessionMock,
+    ) as unknown as PluginRuntime["taskFlow"]["fromToolContext"],
   };
   const base: PluginRuntime = {
     version: "1.0.0-test",
@@ -102,6 +95,10 @@ export function createPluginRuntimeMock(overrides: DeepPartial<PluginRuntime> = 
         payloads: [],
         meta: {},
       }) as unknown as PluginRuntime["agent"]["runEmbeddedPiAgent"],
+      runEmbeddedAgent: vi.fn().mockResolvedValue({
+        payloads: [],
+        meta: {},
+      }) as unknown as PluginRuntime["agent"]["runEmbeddedAgent"],
       resolveAgentTimeoutMs: vi.fn(
         () => 30_000,
       ) as unknown as PluginRuntime["agent"]["resolveAgentTimeoutMs"],

@@ -27,6 +27,7 @@ let lastClientOptions: {
   token?: string;
   password?: string;
   tlsFingerprint?: string;
+  clientDisplayName?: string;
   scopes?: string[];
   deviceIdentity?: unknown;
   onHelloOk?: (hello: { features?: { methods?: string[] } }) => void | Promise<void>;
@@ -58,6 +59,7 @@ vi.mock("./client.js", () => ({
       url?: string;
       token?: string;
       password?: string;
+      clientDisplayName?: string;
       scopes?: string[];
       onHelloOk?: (hello: { features?: { methods?: string[] } }) => void | Promise<void>;
       onClose?: (code: number, reason: string) => void;
@@ -95,6 +97,7 @@ class StubGatewayClient {
     url?: string;
     token?: string;
     password?: string;
+    clientDisplayName?: string;
     scopes?: string[];
     onHelloOk?: (hello: { features?: { methods?: string[] } }) => void | Promise<void>;
     onClose?: (code: number, reason: string) => void;
@@ -452,6 +455,22 @@ describe("callGateway url resolution", () => {
     expect(lastClientOptions?.scopes).toEqual([]);
   });
 
+  it("labels default backend calls with the requested method", async () => {
+    setLocalLoopbackGatewayConfig();
+
+    await callGateway({ method: "sessions.delete" });
+
+    expect(lastClientOptions?.clientDisplayName).toBe("gateway:sessions.delete");
+  });
+
+  it("does not synthesize display names for CLI calls", async () => {
+    setLocalLoopbackGatewayConfig();
+
+    await callGatewayCli({ method: "health" });
+
+    expect(lastClientOptions?.clientDisplayName).toBeUndefined();
+  });
+
   it("yields one event-loop turn before starting CLI pairing requests", async () => {
     setLocalLoopbackGatewayConfig();
 
@@ -474,7 +493,7 @@ describe("callGateway url resolution", () => {
           },
           start() {
             sawYieldBeforeStart = preConnectYieldRan;
-            void opts.onHelloOk?.({
+            opts.onHelloOk?.({
               features: {
                 methods: helloMethods ?? [],
                 events: [],

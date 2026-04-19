@@ -6,9 +6,10 @@ import {
   setConfigValueAtPath,
   unsetConfigValueAtPath,
 } from "./config-paths.js";
-import { readConfigFileSnapshot, validateConfigObject, validateConfigObjectRaw } from "./config.js";
+import { readConfigFileSnapshot } from "./config.js";
 import { findLegacyConfigIssues } from "./legacy.js";
 import { buildWebSearchProviderConfig, withTempHome, writeOpenClawConfig } from "./test-helpers.js";
+import { validateConfigObject, validateConfigObjectRaw } from "./validation.js";
 import { OpenClawSchema } from "./zod-schema.js";
 import {
   DiscordConfigSchema,
@@ -45,6 +46,16 @@ describe("$schema key in config (#14998)", () => {
       gateway: { port: 18789 },
     });
     expect(result.ok).toBe(true);
+  });
+
+  it("preserves $schema through validateConfigObject round-trip", () => {
+    const res = validateConfigObject({
+      $schema: "https://openclaw.ai/config.json",
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.config.$schema).toBe("https://openclaw.ai/config.json");
+    }
   });
 });
 
@@ -89,6 +100,58 @@ describe("ui.seamColor", () => {
   it("rejects invalid hex length", () => {
     const res = validateConfigObject({ ui: { seamColor: "#FF4500FF" } });
     expect(res.ok).toBe(false);
+  });
+});
+
+describe("gateway.controlUi.embedSandbox", () => {
+  it("accepts strict, scripts, and trusted modes", () => {
+    for (const mode of ["strict", "scripts", "trusted"] as const) {
+      const result = OpenClawSchema.safeParse({
+        gateway: {
+          controlUi: {
+            embedSandbox: mode,
+          },
+        },
+      });
+      expect(result.success).toBe(true);
+    }
+  });
+
+  it("rejects unsupported values", () => {
+    const result = OpenClawSchema.safeParse({
+      gateway: {
+        controlUi: {
+          embedSandbox: "yolo",
+        },
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("gateway.controlUi.allowExternalEmbedUrls", () => {
+  it("accepts boolean values", () => {
+    for (const value of [true, false]) {
+      const result = OpenClawSchema.safeParse({
+        gateway: {
+          controlUi: {
+            allowExternalEmbedUrls: value,
+          },
+        },
+      });
+      expect(result.success).toBe(true);
+    }
+  });
+
+  it("rejects non-boolean values", () => {
+    const result = OpenClawSchema.safeParse({
+      gateway: {
+        controlUi: {
+          allowExternalEmbedUrls: "yes",
+        },
+      },
+    });
+    expect(result.success).toBe(false);
   });
 });
 

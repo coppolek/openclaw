@@ -57,7 +57,7 @@ function loadStatusNodeModeModule() {
   return statusNodeModeModulePromise;
 }
 
-function resolvePairingRecoveryContext(params: {
+export function resolvePairingRecoveryContext(params: {
   error?: string | null;
   closeReason?: string | null;
 }): { requestId: string | null } | null {
