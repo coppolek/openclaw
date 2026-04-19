@@ -153,6 +153,168 @@ describe("searchMemoryWiki", () => {
     });
   });
 
+  it("matches long multi-term queries through token overlap when the digest path is active", async () => {
+    const { rootDir, config } = await createQueryVault({
+      initialize: true,
+    });
+    await fs.writeFile(
+      path.join(rootDir, "entities", "medalii.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "entity",
+          id: "entity.medalii.regate",
+          title: "Medalii istorice",
+          claims: [
+            {
+              id: "claim.medalii.regate",
+              text: "Aceste medalii au circulat în mai multe regate europene.",
+              status: "supported",
+              confidence: 0.94,
+              evidence: [{ sourceId: "source.regate", lines: "4-8" }],
+            },
+          ],
+        },
+        body: "# Medalii istorice\n\nRezumat fără fraza exactă.\n",
+      }),
+      "utf8",
+    );
+    await compileMemoryWikiVault(config);
+
+    const results = await searchMemoryWiki({ config, query: "medalii regate" });
+    const medaliiResult = results.find((result) => result.path === "entities/medalii.md");
+
+    expect(medaliiResult).toMatchObject({
+      corpus: "wiki",
+      path: "entities/medalii.md",
+      snippet: "Aceste medalii au circulat în mai multe regate europene.",
+    });
+  });
+
+  it("keeps exact phrase matches ahead of token-only overlap", async () => {
+    const { rootDir, config } = await createQueryVault({
+      initialize: true,
+    });
+    await fs.writeFile(
+      path.join(rootDir, "entities", "exact-match.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "entity",
+          id: "entity.medalii.regate.exact",
+          title: "Medalii regate",
+        },
+        body: "# Medalii regate\n\nPotrivire exactă în titlu.\n",
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(rootDir, "entities", "token-match.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "entity",
+          id: "entity.medalii.regate.partial",
+          title: "Medalii istorice",
+          claims: [
+            {
+              id: "claim.medalii.regate.partial",
+              text: "Aceste medalii apar în mai multe regate distincte.",
+              status: "supported",
+              confidence: 0.87,
+              evidence: [{ sourceId: "source.regate", lines: "1-3" }],
+            },
+          ],
+        },
+        body: "# Medalii istorice\n\nPotrivire doar prin tokeni.\n",
+      }),
+      "utf8",
+    );
+    await compileMemoryWikiVault(config);
+
+    const results = await searchMemoryWiki({ config, query: "medalii regate" });
+    const rankedCustomPaths = results
+      .map((result) => result.path)
+      .filter((resultPath) =>
+        ["entities/exact-match.md", "entities/token-match.md"].includes(resultPath),
+      );
+
+    expect(rankedCustomPaths).toEqual(["entities/exact-match.md", "entities/token-match.md"]);
+  });
+
+  it("does not admit substring-only common-word matches as token overlap", async () => {
+    const { rootDir, config } = await createQueryVault({
+      initialize: true,
+    });
+    await fs.writeFile(
+      path.join(rootDir, "entities", "status.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "entity",
+          id: "entity.status.real",
+          title: "Current status",
+        },
+        body: "# Current status\n\nThe system status is healthy today.\n",
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(rootDir, "entities", "substring-noise.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "entity",
+          id: "entity.substring.noise",
+          title: "This other phone",
+        },
+        body: "# This other phone\n\nInside those notes we avoid the target concept.\n",
+      }),
+      "utf8",
+    );
+
+    const results = await searchMemoryWiki({ config, query: "what is the status" });
+    const customPaths = results
+      .map((result) => result.path)
+      .filter((resultPath) =>
+        ["entities/status.md", "entities/substring-noise.md"].includes(resultPath),
+      );
+
+    expect(customPaths).toEqual(["entities/status.md"]);
+  });
+
+  it("does not match every page when a non-empty query yields no usable tokens", async () => {
+    const { rootDir, config } = await createQueryVault({
+      initialize: true,
+    });
+    await fs.writeFile(
+      path.join(rootDir, "entities", "cpp.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "entity",
+          id: "entity.cpp",
+          title: "C plus plus",
+        },
+        body: "# C plus plus\n\nLanguage note without the symbol form.\n",
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(rootDir, "entities", "noise.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "entity",
+          id: "entity.noise",
+          title: "Unrelated page",
+        },
+        body: "# Unrelated page\n\nNothing here should match the symbol query.\n",
+      }),
+      "utf8",
+    );
+
+    const results = await searchMemoryWiki({ config, query: "c++" });
+    const customPaths = results
+      .map((result) => result.path)
+      .filter((resultPath) => ["entities/cpp.md", "entities/noise.md"].includes(resultPath));
+
+    expect(customPaths).toEqual([]);
+  });
+
   it("ranks fresh supported claims ahead of stale contested claims", async () => {
     const { rootDir, config } = await createQueryVault({
       initialize: true,
