@@ -11,6 +11,13 @@ function ensureMemoryRuntime(cfg?: OpenClawConfig) {
   if (current || !cfg) {
     return current;
   }
+  // Reuse an already-active plugin registry before attempting a config-only load.
+  // Live gateway processes may have loaded plugins with runtime-only compatibility inputs.
+  resolveRuntimePluginRegistry();
+  const active = getMemoryRuntime();
+  if (active) {
+    return active;
+  }
   resolveRuntimePluginRegistry(
     buildPluginRuntimeLoadOptions(resolvePluginRuntimeLoadContext({ config: cfg })),
   );

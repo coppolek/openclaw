@@ -60,6 +60,11 @@ export async function buildStatusCommandReportData(
     }>;
     memory: MemoryStatusSnapshot | null;
     memoryPlugin: MemoryPluginStatus;
+    gatewayMemoryStatus?: {
+      provider?: string;
+      runtime?: { ok?: boolean } | null;
+      embedding?: { ok?: boolean } | null;
+    } | null;
     pluginCompatibility: PluginCompatibilityNotice[];
     pairingRecovery: { requestId: string | null } | null;
     tableWidth: number;
@@ -96,6 +101,7 @@ export async function buildStatusCommandReportData(
     agentStatus: params.agentStatus,
     memory: params.memory,
     memoryPlugin: params.memoryPlugin,
+    gatewayMemoryStatus: params.gatewayMemoryStatus,
     pluginCompatibility: params.pluginCompatibility,
     ok: params.ok,
     warn: params.warn,

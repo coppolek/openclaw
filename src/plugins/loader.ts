@@ -499,6 +499,32 @@ function getCachedPluginRegistry(cacheKey: string): CachedPluginState | undefine
   return cached;
 }
 
+function restoreCachedPluginState(cached: CachedPluginState): void {
+  restoreRegisteredAgentHarnesses(cached.agentHarnesses);
+  restoreRegisteredCompactionProviders(cached.compactionProviders);
+  restoreRegisteredMemoryEmbeddingProviders(cached.memoryEmbeddingProviders);
+  restoreMemoryPluginState({
+    capability: cached.memoryCapability,
+    corpusSupplements: cached.memoryCorpusSupplements,
+    promptBuilder: cached.memoryPromptBuilder,
+    promptSupplements: cached.memoryPromptSupplements,
+    flushPlanResolver: cached.memoryFlushPlanResolver,
+    runtime: cached.memoryRuntime,
+  });
+}
+
+function restoreActivePluginStateFromCache(): void {
+  const activeCacheKey = getActivePluginRegistryKey();
+  if (!activeCacheKey) {
+    return;
+  }
+  const cached = getCachedPluginRegistry(activeCacheKey);
+  if (!cached) {
+    return;
+  }
+  restoreCachedPluginState(cached);
+}
+
 function setCachedPluginRegistry(cacheKey: string, state: CachedPluginState): void {
   if (registryCache.has(cacheKey)) {
     registryCache.delete(cacheKey);
@@ -726,12 +752,13 @@ function getCompatibleActivePluginRegistry(
 export function resolveRuntimePluginRegistry(
   options?: PluginLoadOptions,
 ): PluginRegistry | undefined {
-  if (!options || !hasExplicitCompatibilityInputs(options)) {
-    return getCompatibleActivePluginRegistry();
+  const activeRegistry = getCompatibleActivePluginRegistry(options ?? {});
+  if (activeRegistry) {
+    restoreActivePluginStateFromCache();
+    return activeRegistry;
   }
-  const compatible = getCompatibleActivePluginRegistry(options);
-  if (compatible) {
-    return compatible;
+  if (!options || !hasExplicitCompatibilityInputs(options)) {
+    return undefined;
   }
   // Helper/runtime callers should not recurse into the same snapshot load while
   // plugin registration is still in flight. Let direct loadOpenClawPlugins(...)
@@ -1439,17 +1466,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
   if (cacheEnabled) {
     const cached = getCachedPluginRegistry(cacheKey);
     if (cached) {
-      restoreRegisteredAgentHarnesses(cached.agentHarnesses);
-      restoreRegisteredCompactionProviders(cached.compactionProviders);
-      restoreRegisteredMemoryEmbeddingProviders(cached.memoryEmbeddingProviders);
-      restoreMemoryPluginState({
-        capability: cached.memoryCapability,
-        corpusSupplements: cached.memoryCorpusSupplements,
-        promptBuilder: cached.memoryPromptBuilder,
-        promptSupplements: cached.memoryPromptSupplements,
-        flushPlanResolver: cached.memoryFlushPlanResolver,
-        runtime: cached.memoryRuntime,
-      });
+      restoreCachedPluginState(cached);
       if (shouldActivate) {
         activatePluginRegistry(
           cached.registry,
