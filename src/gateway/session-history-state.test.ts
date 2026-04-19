@@ -124,8 +124,7 @@ describe("SessionHistorySseState", () => {
           content: [
             {
               type: "text",
-              text:
-                'Sender (untrusted metadata):\n```json\n{"label":"openclaw-control-ui"}\n```\n\n[Sun 2026-04-19 10:08 AKDT] Does this look correct?',
+              text: 'Sender (untrusted metadata):\n```json\n{"label":"openclaw-control-ui"}\n```\n\n[Sun 2026-04-19 10:08 AKDT] Does this look correct?',
             },
           ],
           __openclaw: { seq: 1 },
@@ -173,6 +172,31 @@ describe("SessionHistorySseState", () => {
     ]);
   });
 
+  test("filters punctuated heartbeat-only assistant acks from snapshot history", () => {
+    const snapshot = buildSessionHistorySnapshot({
+      rawMessages: [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "HEARTBEAT_OK." }],
+          __openclaw: { seq: 1 },
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "kept" }],
+          __openclaw: { seq: 2 },
+        },
+      ],
+    });
+
+    expect(snapshot.history.messages).toEqual([
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "kept" }],
+        __openclaw: { seq: 2 },
+      },
+    ]);
+  });
+
   test("strips inbound envelopes from inline appended messages", () => {
     const state = SessionHistorySseState.fromRawSnapshot({
       target: { sessionId: "sess-main" },
@@ -185,8 +209,7 @@ describe("SessionHistorySseState", () => {
         content: [
           {
             type: "text",
-            text:
-              'Sender (untrusted metadata):\n```json\n{"label":"openclaw-control-ui"}\n```\n\n[Sun 2026-04-19 10:08 AKDT] Does this look correct?',
+            text: 'Sender (untrusted metadata):\n```json\n{"label":"openclaw-control-ui"}\n```\n\n[Sun 2026-04-19 10:08 AKDT] Does this look correct?',
           },
         ],
       },
@@ -208,6 +231,36 @@ describe("SessionHistorySseState", () => {
     ]);
   });
 
+  test("truncates visible inline session-history text after stripping inbound envelopes", () => {
+    const state = SessionHistorySseState.fromRawSnapshot({
+      target: { sessionId: "sess-main" },
+      rawMessages: [],
+      maxChars: 10,
+    });
+
+    const appended = state.appendInlineMessage({
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text:
+              'Sender (untrusted metadata):\n```json\n{"label":"openclaw-control-ui","context":"' +
+              "x".repeat(200) +
+              '"}\n```\n\n[Sun 2026-04-19 10:08 AKDT] Actual body that should survive truncation',
+          },
+        ],
+      },
+    });
+
+    expect(appended?.message).toEqual({
+      role: "user",
+      content: [{ type: "text", text: "Actual bod\n...(truncated)..." }],
+      senderLabel: "openclaw-control-ui",
+      __openclaw: { seq: 1 },
+    });
+  });
+
   test("filters inline appended mixed system-line plus heartbeat entries", () => {
     const state = SessionHistorySseState.fromRawSnapshot({
       target: { sessionId: "sess-main" },
@@ -221,7 +274,8 @@ describe("SessionHistorySseState", () => {
           {
             type: "text",
             text:
-              "System: [2026-04-17 12:20:33 AKDT] Gateway restart restart ok\n\n" + HEARTBEAT_PROMPT,
+              "System: [2026-04-17 12:20:33 AKDT] Gateway restart restart ok\n\n" +
+              HEARTBEAT_PROMPT,
           },
         ],
       },

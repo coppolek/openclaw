@@ -1,3 +1,4 @@
+import { stripEnvelopeFromMessages } from "./chat-sanitize.js";
 import {
   DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
   sanitizeChatHistoryMessages,
@@ -104,10 +105,11 @@ export function buildSessionHistorySnapshot(params: {
   const sanitizedRawMessages = stripRuntimeInjectedContent(params.rawMessages, {
     heartbeatPrompt: params.heartbeatPrompt,
   });
+  const visibleRawMessages = stripEnvelopeFromMessages(sanitizedRawMessages);
   const history = paginateSessionMessages(
     toSessionHistoryMessages(
       sanitizeChatHistoryMessages(
-        sanitizedRawMessages,
+        visibleRawMessages,
         params.maxChars ?? DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
         { heartbeatPrompt: params.heartbeatPrompt },
       ),
@@ -191,9 +193,11 @@ export class SessionHistorySseState {
       seq: this.rawTranscriptSeq,
     });
     const sanitized = sanitizeChatHistoryMessages(
-      stripRuntimeInjectedContent([nextMessage], {
-        heartbeatPrompt: this.heartbeatPrompt,
-      }),
+      stripEnvelopeFromMessages(
+        stripRuntimeInjectedContent([nextMessage], {
+          heartbeatPrompt: this.heartbeatPrompt,
+        }),
+      ),
       this.maxChars,
       { heartbeatPrompt: this.heartbeatPrompt },
     );
