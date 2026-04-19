@@ -332,6 +332,12 @@ export async function maybeWakeNodeWithApns(
     try {
       const registration = await loadApnsRegistration(nodeId);
       if (!registration) {
+        // Avoid leaking the state entry we speculatively set at the top of
+        // maybeWakeNodeWithApns: this nodeId has no APNs registration, so the
+        // throttle bookkeeping we just created will never be touched by the
+        // WS-close cleanup path (clearNodeWakeState is only called for
+        // registered nodes in ws-connection.ts).
+        nodeWakeById.delete(nodeId);
         return withDuration({ available: false, throttled: false, path: "no-registration" });
       }
 
@@ -526,6 +532,23 @@ export function clearNodeWakeState(nodeId: string): void {
   nodeWakeById.delete(nodeId);
   nodeWakeNudgeById.delete(nodeId);
 }
+
+// Narrow read-only seam for tests that assert nodeWakeById is cleaned up on
+// early-return paths. Mirrors the pattern used in agent-wait-dedupe.ts:223
+// and agents.ts:78 — keep production surface untouched and do not expose the
+// underlying Map reference.
+export const __testing = {
+  getNodeWakeByIdSize(): number {
+    return nodeWakeById.size;
+  },
+  hasNodeWakeEntry(nodeId: string): boolean {
+    return nodeWakeById.has(nodeId);
+  },
+  resetWakeState(): void {
+    nodeWakeById.clear();
+    nodeWakeNudgeById.clear();
+  },
+};
 
 export const nodeHandlers: GatewayRequestHandlers = {
   "node.pair.request": async ({ params, respond, context }) => {
