@@ -5,6 +5,7 @@ import { generateSecureUuid } from "openclaw/plugin-sdk/core";
 import {
   isVerifiedAudioSource,
   normalizePollInput,
+  sanitizeFileName,
   sanitizeMediaMime,
   type PollInput,
 } from "openclaw/plugin-sdk/media-runtime";
@@ -148,7 +149,7 @@ export async function sendMessageWhatsApp(
       } else if (!forceVoiceDelivery) {
         mediaType = sanitizedMediaType ?? "application/octet-stream";
         text = caption ?? "";
-        documentFileName = media.fileName;
+        documentFileName = sanitizeFileName(media.fileName);
       }
     }
     outboundLog.info(`Sending message -> ${redactedJid}${primaryMediaUrl ? " (media)" : ""}`);

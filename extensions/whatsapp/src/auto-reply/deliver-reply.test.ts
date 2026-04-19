@@ -412,6 +412,36 @@ describe("deliverWebReply", () => {
     );
   });
 
+  it("sanitizes document fileName when it contains control characters", async () => {
+    const msg = makeMsg();
+    (
+      loadWebMedia as unknown as { mockResolvedValueOnce: (v: unknown) => void }
+    ).mockResolvedValueOnce({
+      buffer: Buffer.from("doc"),
+      contentType: "application/pdf",
+      kind: "document",
+      fileName: "evil.pdf\r\nX-Inj: bad",
+    });
+
+    await deliverWebReply({
+      replyResult: { text: "doc cap", mediaUrl: "http://example.com/report.pdf" },
+      msg,
+      maxMediaBytes: 1024 * 1024,
+      textLimit: 200,
+      replyLogger,
+      skipLog: true,
+    });
+
+    expect(msg.sendMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        document: expect.any(Buffer),
+        fileName: "evil.pdfX-Inj: bad",
+        mimetype: "application/pdf",
+        caption: "doc cap",
+      }),
+    );
+  });
+
   it("keeps non-audio documents as documents even when audioAsVoice is true", async () => {
     const msg = makeMsg();
     (

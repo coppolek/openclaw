@@ -280,6 +280,25 @@ describe("web outbound", () => {
     expect(sendMessage).toHaveBeenLastCalledWith("+1555", "img cap", buf, "image/jpeg");
   });
 
+  it("sanitizes documentFileName when it contains control characters", async () => {
+    const buf = Buffer.from("doc");
+    loadWebMediaMock.mockResolvedValueOnce({
+      buffer: buf,
+      contentType: "application/pdf",
+      kind: "document",
+      fileName: "evil.pdf\r\nX-Inj: bad",
+    });
+
+    await sendMessageWhatsApp("+1555", "doc cap", {
+      verbose: false,
+      mediaUrl: "/tmp/report.pdf",
+    });
+
+    expect(sendMessage).toHaveBeenLastCalledWith("+1555", "doc cap", buf, "application/pdf", {
+      fileName: "evil.pdfX-Inj: bad",
+    });
+  });
+
   it("does not force voice-note for non-audio files when audioAsVoice is true", async () => {
     const buf = Buffer.from("pdf");
     loadWebMediaMock.mockResolvedValueOnce({

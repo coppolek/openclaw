@@ -1,5 +1,9 @@
 import type { MarkdownTableMode } from "openclaw/plugin-sdk/config-runtime";
-import { isVerifiedAudioSource, sanitizeMediaMime } from "openclaw/plugin-sdk/media-runtime";
+import {
+  isVerifiedAudioSource,
+  sanitizeFileName,
+  sanitizeMediaMime,
+} from "openclaw/plugin-sdk/media-runtime";
 import { chunkMarkdownTextWithMode, type ChunkMode } from "openclaw/plugin-sdk/reply-chunking";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-chunking";
 import {
@@ -174,7 +178,7 @@ export async function deliverWebReply(params: {
           "media:video",
         );
       } else {
-        const fileName = media.fileName ?? mediaUrl.split("/").pop() ?? "file";
+        const fileName = sanitizeFileName(media.fileName ?? mediaUrl.split("/").pop());
         const mimetype = sanitizeMediaMime(media.contentType) ?? "application/octet-stream";
         await sendWithRetry(
           () =>
