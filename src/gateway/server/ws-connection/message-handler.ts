@@ -1064,7 +1064,7 @@ export function attachGatewayWsMessageHandler(params: {
               }
             }
 
-            if (scopes.length > 0) {
+            if (scopes.length > 0 && !skipLocalBackendSelfPairing) {
               if (pairedScopes.length === 0) {
                 logUpgradeAudit("scope-upgrade", pairedRoles, pairedScopes);
                 const ok = await requirePairing("scope-upgrade", paired);
