@@ -1327,8 +1327,27 @@ export function startHeartbeatRunner(opts: {
       return;
     }
     const delay = Math.max(0, nextDue - now);
+    if (delay === 0) {
+      // Already overdue — fire immediately (e.g. App Nap recovery, process suspension).
+      // Wrap in setTimeout(0) so state.timer is set, preserving the re-entrant guard
+      // against concurrent scheduleNext() calls (e.g. from updateConfig during a run).
+      log.info("heartbeat: overdue interval detected, firing immediately", {
+        overdueBy: now - nextDue,
+      });
+      state.timer = setTimeout(() => {
+        state.timer = null;
+        requestHeartbeatNow({ reason: "interval", coalesceMs: 0 });
+      }, 0);
+      state.timer.unref?.();
+      return;
+    }
     state.timer = setTimeout(() => {
       state.timer = null;
+      const wakeNow = Date.now();
+      const drift = wakeNow - nextDue;
+      if (drift > 5_000) {
+        log.info("heartbeat: timer fired late (possible process suspension)", { drift });
+      }
       requestHeartbeatNow({ reason: "interval", coalesceMs: 0 });
     }, delay);
     state.timer.unref?.();
@@ -1424,6 +1443,20 @@ export function startHeartbeatRunner(opts: {
         if (!targetAgent) {
           return { status: "skipped", reason: "disabled" };
         }
+        // Enforce minimum interval for non-interval targeted triggers too.
+        if (
+          !isInterval &&
+          typeof targetAgent.lastRunMs === "number" &&
+          now - targetAgent.lastRunMs < targetAgent.intervalMs
+        ) {
+          log.info("heartbeat: skipping targeted non-interval wake (too soon)", {
+            reason,
+            agentId: targetAgent.agentId,
+            sinceLast: now - targetAgent.lastRunMs,
+            interval: targetAgent.intervalMs,
+          });
+          return { status: "skipped", reason: "too-soon" };
+        }
         try {
           const res = await runOnce({
             cfg: state.cfg,
@@ -1449,6 +1482,21 @@ export function startHeartbeatRunner(opts: {
 
       for (const agent of state.agents.values()) {
         if (isInterval && now < agent.nextDueMs) {
+          continue;
+        }
+        // Enforce minimum interval for non-interval triggers (exec-event, hook, etc.)
+        // so activity bursts don't cause rapid-fire heartbeat runs.
+        if (
+          !isInterval &&
+          typeof agent.lastRunMs === "number" &&
+          now - agent.lastRunMs < agent.intervalMs
+        ) {
+          log.info("heartbeat: skipping non-interval wake (too soon)", {
+            reason,
+            agentId: agent.agentId,
+            sinceLast: now - agent.lastRunMs,
+            interval: agent.intervalMs,
+          });
           continue;
         }
 

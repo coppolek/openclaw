@@ -305,6 +305,77 @@ describe("startHeartbeatRunner", () => {
     runner.stop();
   });
 
+  it("skips non-interval wake when last run is within the configured interval", async () => {
+    useFakeHeartbeatTime();
+
+    const runSpy = vi.fn().mockResolvedValue({ status: "ran", durationMs: 1 });
+    const runner = startDefaultRunner(runSpy);
+
+    // Fire the first interval heartbeat at t=30m — should run.
+    await vi.advanceTimersByTimeAsync(30 * 60_000 + 1_000);
+    expect(runSpy).toHaveBeenCalledTimes(1);
+
+    // Immediately send a non-interval wake (e.g. exec-event) — should be skipped
+    // because less than 30m has elapsed since the last run.
+    requestHeartbeatNow({ reason: "exec-event", coalesceMs: 0 });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(runSpy).toHaveBeenCalledTimes(1); // still 1 — the exec-event was skipped
+
+    // But the next interval heartbeat at t=60m should still fire normally.
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    expect(runSpy).toHaveBeenCalledTimes(2);
+
+    runner.stop();
+  });
+
+  it("skips targeted non-interval wake when last run is within the configured interval", async () => {
+    useFakeHeartbeatTime();
+
+    const runSpy = vi.fn().mockResolvedValue({ status: "ran", durationMs: 1 });
+    const runner = startHeartbeatRunner({
+      cfg: heartbeatConfig([
+        { id: "main", heartbeat: { every: "30m" } },
+      ]),
+      runOnce: runSpy,
+    });
+
+    // Fire the first interval heartbeat at t=30m.
+    await vi.advanceTimersByTimeAsync(30 * 60_000 + 1_000);
+    expect(runSpy).toHaveBeenCalledTimes(1);
+
+    // Targeted exec-event wake within the interval — should be skipped.
+    requestHeartbeatNow({
+      reason: "exec-event",
+      sessionKey: "agent:main:main",
+      coalesceMs: 0,
+    });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(runSpy).toHaveBeenCalledTimes(1); // still 1
+
+    runner.stop();
+  });
+
+  it("fires immediately when scheduleNext detects an overdue interval", async () => {
+    useFakeHeartbeatTime();
+
+    const runSpy = vi.fn().mockResolvedValue({ status: "ran", durationMs: 1 });
+    const runner = startDefaultRunner(runSpy);
+
+    // Advance the clock past the 30m interval WITHOUT firing timers,
+    // simulating App Nap / process suspension where the event loop was frozen.
+    vi.advanceTimersByTime(90 * 60_000);
+
+    // Trigger scheduleNext() via updateConfig — it will see nextDueMs is in the past
+    // and hit the delay === 0 overdue branch.
+    runner.updateConfig(heartbeatConfig());
+    await vi.advanceTimersByTimeAsync(1);
+
+    // The overdue detection should have fired a heartbeat immediately.
+    expect(runSpy).toHaveBeenCalled();
+
+    runner.stop();
+  });
+
   it("does not fan out to unrelated agents for session-scoped exec wakes", async () => {
     useFakeHeartbeatTime();
     const runSpy = vi.fn().mockResolvedValue({ status: "ran", durationMs: 1 });
