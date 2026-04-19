@@ -324,6 +324,36 @@ describe("deliverWebReply", () => {
     );
   });
 
+  it("keeps document path for audio-like file when audioAsVoice is unset", async () => {
+    const msg = makeMsg();
+    (
+      loadWebMedia as unknown as { mockResolvedValueOnce: (v: unknown) => void }
+    ).mockResolvedValueOnce({
+      buffer: Buffer.from("aud"),
+      contentType: "application/octet-stream",
+      kind: "document",
+      fileName: "voice.ogg",
+    });
+
+    await deliverWebReply({
+      replyResult: { text: "cap", mediaUrl: "http://example.com/voice.ogg" },
+      msg,
+      maxMediaBytes: 1024 * 1024,
+      textLimit: 200,
+      replyLogger,
+      skipLog: true,
+    });
+
+    expect(msg.sendMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        document: expect.any(Buffer),
+        fileName: "voice.ogg",
+        mimetype: "application/octet-stream",
+        caption: "cap",
+      }),
+    );
+  });
+
   it("sends video media", async () => {
     const msg = makeMsg();
     (

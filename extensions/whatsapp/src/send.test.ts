@@ -236,6 +236,31 @@ describe("web outbound", () => {
     });
   });
 
+  it("keeps document path for audio-like file when audioAsVoice is unset", async () => {
+    const buf = Buffer.from("voice-doc");
+    loadWebMediaMock.mockResolvedValueOnce({
+      buffer: buf,
+      contentType: "application/octet-stream",
+      kind: "document",
+      fileName: "voice.ogg",
+    });
+
+    await sendMessageWhatsApp("+1555", "doc voice", {
+      verbose: false,
+      mediaUrl: "/tmp/voice.ogg",
+    });
+
+    expect(sendMessage).toHaveBeenLastCalledWith(
+      "+1555",
+      "doc voice",
+      buf,
+      "application/octet-stream",
+      {
+        fileName: "voice.ogg",
+      },
+    );
+  });
+
   it("maps video with caption", async () => {
     const buf = Buffer.from("video");
     loadWebMediaMock.mockResolvedValueOnce({
