@@ -3,6 +3,7 @@ import {
   sanitizeChatHistoryMessages,
   stripRuntimeInjectedContent,
 } from "./server-methods/chat.js";
+import { stripEnvelopeFromMessages } from "./chat-sanitize.js";
 import { attachOpenClawTranscriptMeta, readSessionMessages } from "./session-utils.js";
 
 type SessionHistoryTranscriptMeta = {
@@ -103,9 +104,11 @@ export function buildSessionHistorySnapshot(params: {
   const sanitizedRawMessages = stripRuntimeInjectedContent(params.rawMessages);
   const history = paginateSessionMessages(
     toSessionHistoryMessages(
-      sanitizeChatHistoryMessages(
-        sanitizedRawMessages,
-        params.maxChars ?? DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
+      stripEnvelopeFromMessages(
+        sanitizeChatHistoryMessages(
+          sanitizedRawMessages,
+          params.maxChars ?? DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
+        ),
       ),
     ),
     params.limit,
@@ -180,9 +183,8 @@ export class SessionHistorySseState {
       ...(typeof update.messageId === "string" ? { id: update.messageId } : {}),
       seq: this.rawTranscriptSeq,
     });
-    const sanitized = sanitizeChatHistoryMessages(
-      stripRuntimeInjectedContent([nextMessage]),
-      this.maxChars,
+    const sanitized = stripEnvelopeFromMessages(
+      sanitizeChatHistoryMessages(stripRuntimeInjectedContent([nextMessage]), this.maxChars),
     );
     if (sanitized.length === 0) {
       return null;

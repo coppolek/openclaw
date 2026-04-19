@@ -116,6 +116,68 @@ describe("SessionHistorySseState", () => {
     expect(snapshot.rawTranscriptSeq).toBe(3);
   });
 
+  test("strips inbound envelopes from snapshot history messages", () => {
+    const snapshot = buildSessionHistorySnapshot({
+      rawMessages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text:
+                'Sender (untrusted metadata):\n```json\n{"label":"openclaw-control-ui"}\n```\n\n[Sun 2026-04-19 10:08 AKDT] Does this look correct?',
+            },
+          ],
+          __openclaw: { seq: 1 },
+        },
+      ],
+    });
+
+    expect(snapshot.history.messages).toEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "Does this look correct?" }],
+        senderLabel: "openclaw-control-ui",
+        __openclaw: { seq: 1 },
+      },
+    ]);
+  });
+
+  test("strips inbound envelopes from inline appended messages", () => {
+    const state = SessionHistorySseState.fromRawSnapshot({
+      target: { sessionId: "sess-main" },
+      rawMessages: [],
+    });
+
+    const appended = state.appendInlineMessage({
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text:
+              'Sender (untrusted metadata):\n```json\n{"label":"openclaw-control-ui"}\n```\n\n[Sun 2026-04-19 10:08 AKDT] Does this look correct?',
+          },
+        ],
+      },
+    });
+
+    expect(appended?.message).toEqual({
+      role: "user",
+      content: [{ type: "text", text: "Does this look correct?" }],
+      senderLabel: "openclaw-control-ui",
+      __openclaw: { seq: 1 },
+    });
+    expect(state.snapshot().messages).toEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "Does this look correct?" }],
+        senderLabel: "openclaw-control-ui",
+        __openclaw: { seq: 1 },
+      },
+    ]);
+  });
+
   test("filters inline appended mixed system-line plus heartbeat entries", () => {
     const state = SessionHistorySseState.fromRawSnapshot({
       target: { sessionId: "sess-main" },
