@@ -191,6 +191,13 @@ const STARTUP_CONTEXT_LINES = [
   "Do not claim you manually read files unless the user asks.",
 ] as const;
 const SYSTEM_EVENT_LINE_RE = /^System(?: \(untrusted\))?: \[/;
+const CRON_AGENT_TURN_PREFIX = /^\[cron:[^\]\n]+\]/;
+const MEMORY_FLUSH_TARGET_HINT_RE =
+  /Store durable memories only in memory\/(?:\d{4}-\d{2}-\d{2}|YYYY-MM-DD)\.md \(create memory\/ if needed\)\./;
+const MEMORY_FLUSH_APPEND_ONLY_HINT_RE =
+  /If memory\/(?:\d{4}-\d{2}-\d{2}|YYYY-MM-DD)\.md already exists, APPEND new content only and do not overwrite existing entries\./;
+const MEMORY_FLUSH_READ_ONLY_HINT =
+  "Treat workspace bootstrap/reference files such as MEMORY.md, DREAMS.md, SOUL.md, TOOLS.md, and AGENTS.md as read-only during this flush; never overwrite, replace, or edit them.";
 const RUNTIME_PROMPT_TEMPLATE_SENTINEL = "__OPENCLAW_RUNTIME_EVENT__";
 const INTERNAL_CRON_NO_CONTENT_PROMPT = buildCronEventPrompt([], { deliverToUser: false });
 const USER_CRON_NO_CONTENT_PROMPT = buildCronEventPrompt([], { deliverToUser: true });
@@ -1251,12 +1258,33 @@ function hasRuntimeEnvelopeText(text: string): boolean {
   );
 }
 
+function isCronAgentTurnText(text: string): boolean {
+  const trimmed = text.trim();
+  return CRON_AGENT_TURN_PREFIX.test(trimmed) && trimmed.includes("\nCurrent time:");
+}
+
+function isMemoryFlushPromptText(text: string): boolean {
+  const trimmed = text.trim();
+  return (
+    (trimmed.startsWith("Pre-compaction memory flush.") ||
+      trimmed.startsWith("Pre-compaction memory flush turn.")) &&
+    MEMORY_FLUSH_TARGET_HINT_RE.test(trimmed) &&
+    MEMORY_FLUSH_APPEND_ONLY_HINT_RE.test(trimmed) &&
+    trimmed.includes(MEMORY_FLUSH_READ_ONLY_HINT)
+  );
+}
+
+function isStrongInternalUserPromptText(text: string): boolean {
+  return isCronAgentTurnText(text) || isMemoryFlushPromptText(text);
+}
+
 function isRuntimePromptText(text: string, heartbeatPrompt: string = HEARTBEAT_PROMPT): boolean {
   const trimmed = text.trim();
   if (!trimmed) {
     return false;
   }
   return (
+    isStrongInternalUserPromptText(trimmed) ||
     isHeartbeatUserMessage({ role: "user", content: trimmed }, heartbeatPrompt) ||
     trimmed === INTERNAL_EXEC_COMPLETION_PROMPT ||
     trimmed === USER_EXEC_COMPLETION_PROMPT ||
@@ -1291,6 +1319,9 @@ function shouldDropUserHistoryMessage(
     return false;
   }
   const runtimeText = stripRuntimeContentFromText(text);
+  if (isStrongInternalUserPromptText(runtimeText)) {
+    return true;
+  }
   const hasRuntimeEnvelope = hasRuntimeEnvelopeText(rawText);
   if (
     runtimeText !== text &&

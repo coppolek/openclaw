@@ -116,6 +116,40 @@ describe("SessionHistorySseState", () => {
     expect(snapshot.rawTranscriptSeq).toBe(3);
   });
 
+  test("filters current-session cron prompts from snapshot history", () => {
+    const snapshot = buildSessionHistorySnapshot({
+      rawMessages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text:
+                "[cron:job-1 Recheck PR #68262 CI] Re-check GitHub PR #68262 in /tmp/openclaw-upstream. " +
+                "If CI failed, inspect the failing checks/logs and fix any regression that belongs to this branch, then push. " +
+                "If CI passed, send Kevin a brief update. Keep it concise and action-oriented.\n" +
+                "Current time: Sunday, April 19th, 2026 - 1:10 PM (America/Anchorage) / 2026-04-19 21:10 UTC",
+            },
+          ],
+          __openclaw: { seq: 1 },
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "kept" }],
+          __openclaw: { seq: 2 },
+        },
+      ],
+    });
+
+    expect(snapshot.history.messages).toEqual([
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "kept" }],
+        __openclaw: { seq: 2 },
+      },
+    ]);
+  });
+
   test("strips inbound envelopes from snapshot history messages", () => {
     const snapshot = buildSessionHistorySnapshot({
       rawMessages: [
@@ -259,6 +293,34 @@ describe("SessionHistorySseState", () => {
       senderLabel: "openclaw-control-ui",
       __openclaw: { seq: 1 },
     });
+  });
+
+  test("filters pre-compaction memory flush prompts from inline updates", () => {
+    const state = SessionHistorySseState.fromRawSnapshot({
+      target: { sessionId: "sess-main" },
+      rawMessages: [],
+    });
+
+    const appended = state.appendInlineMessage({
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text:
+              "Pre-compaction memory flush. Store durable memories only in memory/2026-04-19.md (create memory/ if needed). " +
+              "Treat workspace bootstrap/reference files such as MEMORY.md, DREAMS.md, SOUL.md, TOOLS.md, and AGENTS.md as read-only during this flush; never overwrite, replace, or edit them. " +
+              "If memory/2026-04-19.md already exists, APPEND new content only and do not overwrite existing entries. " +
+              "Do NOT create timestamped variant files (e.g., 2026-04-19-HHMM.md); always use the canonical 2026-04-19.md filename. " +
+              "If nothing to store, reply with NO_REPLY.\n" +
+              "Current time: Sunday, April 19th, 2026 - 1:20 PM (America/Anchorage) / 2026-04-19 21:20 UTC",
+          },
+        ],
+      },
+    });
+
+    expect(appended).toBeNull();
+    expect(state.snapshot().messages).toEqual([]);
   });
 
   test("filters inline appended mixed system-line plus heartbeat entries", () => {
