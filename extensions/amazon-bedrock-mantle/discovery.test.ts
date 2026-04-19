@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   discoverMantleModels,
   generateBearerTokenFromIam,
+  getCachedIamToken,
   mergeImplicitMantleProvider,
   resetIamTokenCacheForTest,
   resetMantleDiscoveryCacheForTest,
@@ -116,6 +117,33 @@ describe("bedrock mantle discovery", () => {
     });
 
     await expect(generateBearerTokenFromIam({ region: "us-east-1" })).resolves.toBeUndefined();
+  });
+
+  it("getCachedIamToken returns cached token when valid", async () => {
+    const tokenProvider = vi.fn(async () => "bedrock-cached-token"); // pragma: allowlist secret
+    mocks.getTokenProvider.mockReturnValue(tokenProvider);
+
+    // Generate a token to populate the cache
+    await generateBearerTokenFromIam({ region: "us-east-1" });
+
+    // Sync read should return the cached token
+    expect(getCachedIamToken("us-east-1")).toBe("bedrock-cached-token");
+  });
+
+  it("getCachedIamToken returns undefined when cache is empty", () => {
+    expect(getCachedIamToken("us-east-1")).toBeUndefined();
+  });
+
+  it("getCachedIamToken returns undefined when cache is expired", async () => {
+    const tokenProvider = vi.fn(async () => "bedrock-expired-token"); // pragma: allowlist secret
+    mocks.getTokenProvider.mockReturnValue(tokenProvider);
+
+    // Generate with a time far in the past so it's already expired
+    await generateBearerTokenFromIam({ region: "us-east-1", now: () => 1000 });
+
+    // The cache entry exists but expiresAt is 1000 + 3600000 = 3601000
+    // Current Date.now() is way past that, so it should be expired
+    expect(getCachedIamToken("us-east-1")).toBeUndefined();
   });
 
   // ---------------------------------------------------------------------------
