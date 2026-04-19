@@ -9,6 +9,14 @@ describe("stripEmotionTags", () => {
     expect(onlyDirective).toEqual({ text: "[[audio_as_voice]]", changed: false });
     expect(mixed).toEqual({ text: "[[audio_as_voice]] hello", changed: true });
   });
+
+  test("does not strip bracketed technical content", () => {
+    const regex = stripEmotionTags("Use [A-Z] in the regex");
+    const version = stripEmotionTags("Look for [v1.2] in the changelog");
+
+    expect(regex).toEqual({ text: "Use [A-Z] in the regex", changed: false });
+    expect(version).toEqual({ text: "Look for [v1.2] in the changelog", changed: false });
+  });
 });
 
 describe("sanitizeEmotionTagsForMode", () => {

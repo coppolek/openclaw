@@ -203,6 +203,7 @@ export type ChatRunState = {
   registry: ChatRunRegistry;
   rawBuffers: Map<string, string>;
   buffers: Map<string, string>;
+  emotionModes: Map<string, "off" | "on" | "full">;
   deltaSentAt: Map<string, number>;
   /** Length of text at the time of the last broadcast, used to avoid duplicate flushes. */
   deltaLastBroadcastLen: Map<string, number>;
@@ -214,6 +215,7 @@ export function createChatRunState(): ChatRunState {
   const registry = createChatRunRegistry();
   const rawBuffers = new Map<string, string>();
   const buffers = new Map<string, string>();
+  const emotionModes = new Map<string, "off" | "on" | "full">();
   const deltaSentAt = new Map<string, number>();
   const deltaLastBroadcastLen = new Map<string, number>();
   const abortedRuns = new Map<string, number>();
@@ -222,6 +224,7 @@ export function createChatRunState(): ChatRunState {
     registry.clear();
     rawBuffers.clear();
     buffers.clear();
+    emotionModes.clear();
     deltaSentAt.clear();
     deltaLastBroadcastLen.clear();
     abortedRuns.clear();
@@ -231,6 +234,7 @@ export function createChatRunState(): ChatRunState {
     registry,
     rawBuffers,
     buffers,
+    emotionModes,
     deltaSentAt,
     deltaLastBroadcastLen,
     abortedRuns,
@@ -494,6 +498,7 @@ export function createAgentEventHandler({
   const clearBufferedChatState = (clientRunId: string) => {
     chatRunState.rawBuffers.delete(clientRunId);
     chatRunState.buffers.delete(clientRunId);
+    chatRunState.emotionModes.delete(clientRunId);
     chatRunState.deltaSentAt.delete(clientRunId);
     chatRunState.deltaLastBroadcastLen.delete(clientRunId);
   };
@@ -694,7 +699,9 @@ export function createAgentEventHandler({
     text: string,
     delta?: unknown,
   ) => {
-    const emotionMode = resolveSessionEmotionMode(sessionKey);
+    const emotionMode =
+      chatRunState.emotionModes.get(clientRunId) ?? resolveSessionEmotionMode(sessionKey);
+    chatRunState.emotionModes.set(clientRunId, emotionMode);
     const previousRawText = chatRunState.rawBuffers.get(clientRunId) ?? "";
     const mergedRawText = resolveMergedAssistantText({
       previousText: previousRawText,
@@ -707,7 +714,7 @@ export function createAgentEventHandler({
     chatRunState.rawBuffers.set(clientRunId, mergedRawText);
     const mergedVisibleText = sanitizeDirectiveAndEmotionTagsForDisplay(mergedRawText, {
       emotionMode,
-      allowTrailingEmotionTag: true,
+      hideTrailingPartialEmotionTag: true,
     }).text;
     if (isSuppressedControlReplyText(mergedVisibleText)) {
       chatRunState.buffers.set(clientRunId, "");
@@ -828,6 +835,7 @@ export function createAgentEventHandler({
     chatRunState.deltaLastBroadcastLen.delete(clientRunId);
     chatRunState.rawBuffers.delete(clientRunId);
     chatRunState.buffers.delete(clientRunId);
+    chatRunState.emotionModes.delete(clientRunId);
     chatRunState.deltaSentAt.delete(clientRunId);
     if (jobState === "done") {
       const payload = {

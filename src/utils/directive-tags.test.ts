@@ -258,7 +258,7 @@ describe("sanitizeDirectiveAndEmotionTagsForDisplay", () => {
   test("strips trailing partial emotion tags during streaming", () => {
     const result = sanitizeDirectiveAndEmotionTagsForDisplay("hello [soft", {
       emotionMode: "on",
-      allowTrailingEmotionTag: true,
+      hideTrailingPartialEmotionTag: true,
     });
 
     expect(result.text).toBe("hello ");

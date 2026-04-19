@@ -5,6 +5,7 @@ import {
 import type { MessagingToolSend } from "../../agents/pi-embedded-messaging.types.js";
 import type { ReplyToMode } from "../../config/types.js";
 import type { EmotionMode } from "../../emotion-mode.js";
+import { isEmotionModeEnabled } from "../../emotion-mode.js";
 import { logVerbose } from "../../globals.js";
 import { sanitizeEmotionTagsForMode } from "../../shared/text/emotion-tags.js";
 import { stripHeartbeatToken } from "../heartbeat.js";
@@ -122,6 +123,7 @@ export async function buildReplyPayloads(params: {
   normalizeMediaPaths?: (payload: ReplyPayload) => Promise<ReplyPayload>;
 }): Promise<{ replyPayloads: ReplyPayload[]; didLogHeartbeatStrip: boolean }> {
   let didLogHeartbeatStrip = params.didLogHeartbeatStrip;
+  const preserveRawEmotionTtsText = isEmotionModeEnabled(params.emotionMode);
   const sanitizedPayloads: EmotionTaggedPayload[] = params.isHeartbeat
     ? params.payloads
     : params.payloads.flatMap((payload) => {
@@ -134,7 +136,9 @@ export async function buildReplyPayloads(params: {
 
         if (!text || !text.includes("HEARTBEAT_OK")) {
           if (typeof text === "string") {
-            rawEmotionTtsText = text;
+            if (preserveRawEmotionTtsText) {
+              rawEmotionTtsText = text;
+            }
             const emotionSanitized = sanitizeEmotionTagsForMode(text, params.emotionMode);
             text = emotionSanitized.text;
           }
@@ -157,7 +161,9 @@ export async function buildReplyPayloads(params: {
         if (stripped.shouldSkip && !hasMedia) {
           return [];
         }
-        rawEmotionTtsText = stripped.text;
+        if (preserveRawEmotionTtsText) {
+          rawEmotionTtsText = stripped.text;
+        }
         const emotionSanitized = sanitizeEmotionTagsForMode(stripped.text, params.emotionMode);
         return [
           {

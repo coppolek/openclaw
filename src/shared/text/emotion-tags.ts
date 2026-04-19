@@ -1,7 +1,83 @@
 import type { EmotionMode } from "../../emotion-mode.js";
 import { findCodeRegions, isInsideCode } from "./code-regions.js";
 
-const EMOTION_TAG_RE = /\[([A-Za-z][A-Za-z0-9 _/-]{0,47})\](?!\()/g;
+const EMOTION_TAG_RE = /\[([a-z]+(?:[ /-][a-z]+){0,7})\](?!\()/g;
+const TRAILING_EMOTION_TAG_RE = /\[[a-z]+(?:[ /-][a-z]+){0,7}$/u;
+const EMOTION_TAG_WORDS = new Set([
+  "amused",
+  "angry",
+  "anxious",
+  "apologetic",
+  "astonished",
+  "awed",
+  "awkwardly",
+  "breathless",
+  "brightly",
+  "calm",
+  "careful",
+  "cheerfully",
+  "chuckles",
+  "clear",
+  "confident",
+  "curious",
+  "deadpan",
+  "direct",
+  "disappointed",
+  "distant",
+  "dramatic",
+  "dryly",
+  "embarrassed",
+  "empathetic",
+  "encouraging",
+  "energetic",
+  "exhales",
+  "excited",
+  "fast",
+  "fearful",
+  "firmly",
+  "flatly",
+  "frustrated",
+  "gasps",
+  "guilty",
+  "hesitates",
+  "interested",
+  "irritated",
+  "laughs",
+  "lonely",
+  "measured",
+  "mischievously",
+  "nervous",
+  "panicked",
+  "pauses",
+  "playfully",
+  "polished",
+  "proudly",
+  "quietly",
+  "quizzically",
+  "realizing",
+  "relieved",
+  "sad",
+  "sarcastic",
+  "serious",
+  "shaken",
+  "sharp",
+  "sighs",
+  "sincere",
+  "skeptical",
+  "slow",
+  "slowly",
+  "softly",
+  "sorrowful",
+  "steady",
+  "surprised",
+  "tenderly",
+  "tense",
+  "thoughtful",
+  "voice",
+  "breaking",
+  "warmly",
+  "whispers",
+]);
 
 type StripEmotionTagsOptions = {
   allowTrailingPartialTag?: boolean;
@@ -36,16 +112,20 @@ function isLikelyEmotionTag(text: string, index: number, rawTag: string, body: s
   if (!trimmedBody || /^(?:https?|www)\b/i.test(trimmedBody)) {
     return false;
   }
+  const words = trimmedBody.split(/[ /-]+/u).filter(Boolean);
+  if (words.length === 0 || words.some((word) => !EMOTION_TAG_WORDS.has(word))) {
+    return false;
+  }
   const before = index > 0 ? text[index - 1] : undefined;
   const after = text[index + rawTag.length];
   return isEmotionTagBoundary(before, "before") && isEmotionTagBoundary(after, "after");
 }
 
 function stripTrailingPartialEmotionTag(text: string): StripEmotionTagsResult {
-  if (!text.endsWith("[") && !/\[[A-Za-z][A-Za-z0-9 _/-]*$/u.test(text)) {
+  if (!text.endsWith("[") && !TRAILING_EMOTION_TAG_RE.test(text)) {
     return { text, changed: false };
   }
-  const trailingMatch = /\[[A-Za-z][A-Za-z0-9 _/-]*$/u.exec(text);
+  const trailingMatch = TRAILING_EMOTION_TAG_RE.exec(text);
   if (!trailingMatch || trailingMatch.index === undefined) {
     return { text, changed: false };
   }

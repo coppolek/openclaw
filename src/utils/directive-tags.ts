@@ -96,11 +96,11 @@ export function stripInlineDirectiveTagsForDisplay(text: string): StripInlineDir
 
 export function sanitizeDirectiveAndEmotionTagsForDisplay(
   text: string,
-  options?: { emotionMode?: EmotionMode; allowTrailingEmotionTag?: boolean },
+  options?: { emotionMode?: EmotionMode; hideTrailingPartialEmotionTag?: boolean },
 ): StripInlineDirectiveTagsResult {
   const inline = stripInlineDirectiveTagsForDisplay(text);
   const emotion = sanitizeEmotionTagsForMode(inline.text, options?.emotionMode, {
-    allowTrailingPartialTag: options?.allowTrailingEmotionTag,
+    allowTrailingPartialTag: options?.hideTrailingPartialEmotionTag,
   });
   return {
     text: emotion.text,
@@ -130,7 +130,7 @@ function isMessageTextPart(part: MessagePart): part is MessageTextPart {
  */
 export function stripInlineDirectiveTagsFromMessageForDisplay(
   message: DisplayMessageWithContent | undefined,
-  options?: { emotionMode?: EmotionMode; allowTrailingEmotionTag?: boolean },
+  options?: { emotionMode?: EmotionMode; hideTrailingPartialEmotionTag?: boolean },
 ): DisplayMessageWithContent | undefined {
   if (!message) {
     return message;

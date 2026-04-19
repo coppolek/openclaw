@@ -340,4 +340,20 @@ describe("buildReplyPayloads media filter integration", () => {
       "[[audio_as_voice]] [warmly] hello there",
     );
   });
+
+  it("does not preserve raw emotion-tagged TTS metadata when emotion mode is off", async () => {
+    const { replyPayloads } = await buildReplyPayloads({
+      ...baseParams,
+      emotionMode: "off",
+      payloads: [{ text: "[warmly] hello there" }],
+    });
+
+    expect(replyPayloads).toHaveLength(1);
+    const [payload] = replyPayloads;
+    expect(payload?.text).toBe("hello there");
+    if (!payload) {
+      throw new Error("expected payload");
+    }
+    expect(getReplyPayloadMetadata(payload)?.ttsSourceText).toBeUndefined();
+  });
 });
