@@ -921,7 +921,7 @@ async function agentCommandInternal(
         result = fallbackResult.result;
         fallbackProvider = fallbackResult.provider;
         fallbackModel = fallbackResult.model;
-        fallbackAttempts = fallbackResult.attempts;
+        fallbackAttempts = fallbackResult.attempts ?? [];
         if (!lifecycleEnded) {
           const stopReason = result.meta.stopReason;
           if (stopReason && stopReason !== "end_turn") {
