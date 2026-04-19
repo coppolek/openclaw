@@ -115,6 +115,70 @@ export function isAudioFileName(fileName?: string | null): boolean {
   return AUDIO_FILE_EXTENSIONS.has(ext);
 }
 
+/**
+ * Determines whether a media payload qualifies as a verified audio source
+ * for voice-note delivery.
+ */
+export function isVerifiedAudioSource(media: {
+  kind?: string | null;
+  contentType?: string | null;
+}): boolean {
+  return media.kind === "audio" || media.contentType?.startsWith("audio/") === true;
+}
+
+/**
+ * Validates and normalizes a MIME type for outbound media headers.
+ * Returns null when the input is unsafe or malformed.
+ */
+// Reject ASCII control characters (U+0000-U+001F) and DEL (U+007F) to avoid
+// downstream header injection (CWE-93). Implemented via charCodeAt instead of
+// a control-character regex to keep the intent explicit and to avoid the
+// no-control-regex lint rule.
+function hasAsciiControlChar(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function sanitizeMediaMime(
+  input: string | null | undefined,
+  options?: { preserveCodecsParam?: boolean },
+): string | null {
+  if (input == null) {
+    return null;
+  }
+  const value = input.trim();
+  if (!value) {
+    return null;
+  }
+
+  if (hasAsciiControlChar(value)) {
+    return null;
+  }
+
+  const parts = value.split(";");
+  const base = parts[0]?.trim().toLowerCase() ?? "";
+  if (!/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(base)) {
+    return null;
+  }
+
+  if (options?.preserveCodecsParam && parts.length > 1) {
+    const codecsParam = parts
+      .slice(1)
+      .map((part) => part.trim().toLowerCase())
+      .find((part) => /^codecs=[a-z0-9._-]+$/.test(part));
+    if (codecsParam) {
+      return `${base}; ${codecsParam}`;
+    }
+  }
+
+  return base;
+}
+
 export function detectMime(opts: {
   buffer?: Buffer;
   headerMime?: string | null;

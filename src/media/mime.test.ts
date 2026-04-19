@@ -6,8 +6,10 @@ import {
   extensionForMime,
   imageMimeFromFormat,
   isAudioFileName,
+  isVerifiedAudioSource,
   kindFromMime,
   normalizeMimeType,
+  sanitizeMediaMime,
 } from "./mime.js";
 
 async function makeOoxmlZip(opts: { mainMime: string; partPath: string }): Promise<Buffer> {
@@ -162,6 +164,45 @@ describe("isAudioFileName", () => {
     { fileName: "voice.bin", expected: false },
   ] as const)("matches audio extension for $fileName", ({ fileName, expected }) => {
     expectAudioFileNameCase(fileName, expected);
+  });
+});
+
+describe("isVerifiedAudioSource", () => {
+  it.each([
+    { media: { kind: "audio", contentType: null }, expected: true },
+    { media: { kind: "document", contentType: "audio/ogg" }, expected: true },
+    { media: { kind: "document", contentType: "audio/mpeg" }, expected: true },
+    { media: { kind: "document", contentType: null }, expected: false },
+    { media: { kind: "document", contentType: "application/pdf" }, expected: false },
+    { media: { kind: undefined, contentType: undefined }, expected: false },
+  ] as const)("classifies $media as $expected", ({ media, expected }) => {
+    expect(isVerifiedAudioSource(media)).toBe(expected);
+  });
+});
+
+describe("sanitizeMediaMime", () => {
+  it.each([
+    { input: "audio/ogg", expected: "audio/ogg" },
+    { input: "AUDIO/OGG", expected: "audio/ogg" },
+    { input: "audio/ogg; codecs=opus", expected: "audio/ogg" },
+    { input: "audio/ogg\r\nX-Inj: bad", expected: null },
+    { input: "audio/ogg\nfoo", expected: null },
+    { input: "audio/ogg\0nul", expected: null },
+    { input: "", expected: null },
+    { input: "  ", expected: null },
+    { input: undefined, expected: null },
+    { input: null, expected: null },
+    { input: "invalid mime", expected: null },
+    { input: "audio/", expected: null },
+    { input: "/ogg", expected: null },
+  ] as const)("sanitizes $input to $expected", ({ input, expected }) => {
+    expect(sanitizeMediaMime(input)).toBe(expected);
+  });
+
+  it("preserves codecs parameter when requested", () => {
+    expect(sanitizeMediaMime("audio/ogg; codecs=opus", { preserveCodecsParam: true })).toBe(
+      "audio/ogg; codecs=opus",
+    );
   });
 });
 
