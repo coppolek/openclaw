@@ -1,3 +1,4 @@
+import { cloneReplyPayloadMetadata } from "../reply-payload.js";
 import {
   estimateUsageCost,
   formatTokenCount,
@@ -70,6 +71,6 @@ export const appendUsageLine = (payloads: ReplyPayload[], line: string): ReplyPa
     text: `${existingText}${separator}${line}`,
   };
   const updated = payloads.slice();
-  updated[index] = next;
+  updated[index] = cloneReplyPayloadMetadata(existing, next);
   return updated;
 };

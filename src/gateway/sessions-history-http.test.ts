@@ -2,11 +2,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   appendAssistantMessageToSessionTranscript,
   appendExactAssistantMessageToSessionTranscript,
 } from "../config/sessions/transcript.js";
+import { createCachedEmotionModeResolver } from "./sessions-history-http.js";
 import { testState } from "./test-helpers.runtime-state.js";
 import {
   connectReq,
@@ -268,6 +269,31 @@ async function openBoundedHistoryStreamWithSecondMessage(
 }
 
 describe("session history HTTP endpoints", () => {
+  test("caches live emotion mode reads across bursty SSE updates", () => {
+    vi.useFakeTimers();
+    try {
+      const loadEmotionMode = vi
+        .fn<() => "off" | "on" | "full">()
+        .mockReturnValueOnce("full")
+        .mockReturnValue("on");
+      const resolveEmotionMode = createCachedEmotionModeResolver({
+        initialEmotionMode: "off",
+        ttlMs: 250,
+        loadEmotionMode,
+      });
+
+      expect(resolveEmotionMode()).toBe("full");
+      expect(resolveEmotionMode()).toBe("full");
+      expect(loadEmotionMode).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(251);
+      expect(resolveEmotionMode()).toBe("on");
+      expect(loadEmotionMode).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("returns session history over direct REST", async () => {
     await seedSession({ text: "hello from history" });
     await withGatewayHarness(async (harness) => {

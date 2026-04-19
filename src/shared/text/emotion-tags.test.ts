@@ -17,6 +17,17 @@ describe("stripEmotionTags", () => {
     expect(regex).toEqual({ text: "Use [A-Z] in the regex", changed: false });
     expect(version).toEqual({ text: "Look for [v1.2] in the changelog", changed: false });
   });
+
+  test("strips uppercase emotion tags while preserving bracketed technical content", () => {
+    const uppercase = stripEmotionTags("[Warmly] hello there");
+    const technical = stripEmotionTags("Keep [SOFTLY_TYPED] as a literal token");
+
+    expect(uppercase).toEqual({ text: "hello there", changed: true });
+    expect(technical).toEqual({
+      text: "Keep [SOFTLY_TYPED] as a literal token",
+      changed: false,
+    });
+  });
 });
 
 describe("sanitizeEmotionTagsForMode", () => {
@@ -26,5 +37,13 @@ describe("sanitizeEmotionTagsForMode", () => {
     });
 
     expect(result).toEqual({ text: "[warmly] hello ", changed: true });
+  });
+
+  test("hides a bare trailing bracket during streaming", () => {
+    const result = sanitizeEmotionTagsForMode("hello [", "on", {
+      allowTrailingPartialTag: true,
+    });
+
+    expect(result).toEqual({ text: "hello ", changed: true });
   });
 });

@@ -31,6 +31,26 @@ import {
 } from "./session-utils.js";
 
 const MAX_SESSION_HISTORY_LIMIT = 1000;
+const LIVE_EMOTION_MODE_CACHE_TTL_MS = 250;
+
+export function createCachedEmotionModeResolver(params: {
+  initialEmotionMode: "off" | "on" | "full";
+  ttlMs?: number;
+  loadEmotionMode: () => "off" | "on" | "full";
+}): () => "off" | "on" | "full" {
+  let cachedEmotionMode = params.initialEmotionMode;
+  let cachedEmotionModeAt = 0;
+  const ttlMs = params.ttlMs ?? LIVE_EMOTION_MODE_CACHE_TTL_MS;
+  return () => {
+    const now = Date.now();
+    if (now - cachedEmotionModeAt <= ttlMs) {
+      return cachedEmotionMode;
+    }
+    cachedEmotionMode = params.loadEmotionMode();
+    cachedEmotionModeAt = now;
+    return cachedEmotionMode;
+  };
+}
 
 function resolveSessionHistoryPath(req: IncomingMessage): string | null {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -179,11 +199,16 @@ export async function handleSessionHistoryHttpRequest(
           .filter((candidate): candidate is string => typeof candidate === "string"),
       )
     : new Set<string>();
-  const resolveLiveEmotionMode = () =>
-    normalizeEmotionMode(
-      resolveFreshestSessionEntryFromStoreKeys(loadSessionStore(target.storePath), target.storeKeys)
-        ?.emotionMode,
-    ) ?? "off";
+  const resolveLiveEmotionMode = createCachedEmotionModeResolver({
+    initialEmotionMode: emotionMode,
+    loadEmotionMode: () =>
+      normalizeEmotionMode(
+        resolveFreshestSessionEntryFromStoreKeys(
+          loadSessionStore(target.storePath),
+          target.storeKeys,
+        )?.emotionMode,
+      ) ?? "off",
+  });
 
   let sentHistory = history;
   const sseState = SessionHistorySseState.fromRawSnapshot({

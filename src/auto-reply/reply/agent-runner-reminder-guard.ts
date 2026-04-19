@@ -1,5 +1,6 @@
 import { loadCronStore, resolveCronStorePath } from "../../cron/store.js";
 import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
+import { cloneReplyPayloadMetadata } from "../reply-payload.js";
 import type { ReplyPayload } from "../types.js";
 
 export const UNSCHEDULED_REMINDER_NOTE =
@@ -57,9 +58,9 @@ export function appendUnscheduledReminderNote(payloads: ReplyPayload[]): ReplyPa
     }
     appended = true;
     const trimmed = payload.text.trimEnd();
-    return {
+    return cloneReplyPayloadMetadata(payload, {
       ...payload,
       text: `${trimmed}\n\n${UNSCHEDULED_REMINDER_NOTE}`,
-    };
+    });
   });
 }

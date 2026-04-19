@@ -1,8 +1,8 @@
 import type { EmotionMode } from "../../emotion-mode.js";
 import { findCodeRegions, isInsideCode } from "./code-regions.js";
 
-const EMOTION_TAG_RE = /\[([a-z]+(?:[ /-][a-z]+){0,7})\](?!\()/g;
-const TRAILING_EMOTION_TAG_RE = /\[[a-z]+(?:[ /-][a-z]+){0,7}$/u;
+const EMOTION_TAG_RE = /\[([A-Za-z]+(?:[ /-][A-Za-z]+){0,7})\](?!\()/g;
+const TRAILING_EMOTION_TAG_RE = /\[[A-Za-z]+(?:[ /-][A-Za-z]+){0,7}$/u;
 const EMOTION_TAG_WORDS = new Set([
   "amused",
   "angry",
@@ -112,7 +112,10 @@ function isLikelyEmotionTag(text: string, index: number, rawTag: string, body: s
   if (!trimmedBody || /^(?:https?|www)\b/i.test(trimmedBody)) {
     return false;
   }
-  const words = trimmedBody.split(/[ /-]+/u).filter(Boolean);
+  const words = trimmedBody
+    .split(/[ /-]+/u)
+    .map((word) => word.toLowerCase())
+    .filter(Boolean);
   if (words.length === 0 || words.some((word) => !EMOTION_TAG_WORDS.has(word))) {
     return false;
   }
@@ -124,6 +127,18 @@ function isLikelyEmotionTag(text: string, index: number, rawTag: string, body: s
 function stripTrailingPartialEmotionTag(text: string): StripEmotionTagsResult {
   if (!text.endsWith("[") && !TRAILING_EMOTION_TAG_RE.test(text)) {
     return { text, changed: false };
+  }
+  if (text.endsWith("[")) {
+    const index = text.length - 1;
+    const before = index > 0 ? text[index - 1] : undefined;
+    if (!isEmotionTagBoundary(before, "before")) {
+      return { text, changed: false };
+    }
+    const replacement = replacementPreservesWordBoundary(text, index, 1);
+    return {
+      text: text.slice(0, index) + replacement,
+      changed: true,
+    };
   }
   const trailingMatch = TRAILING_EMOTION_TAG_RE.exec(text);
   if (!trailingMatch || trailingMatch.index === undefined) {

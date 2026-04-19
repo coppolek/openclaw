@@ -18,6 +18,7 @@ import { formatErrorMessage } from "../../infra/errors.js";
 import { defaultRuntime } from "../../runtime.js";
 import { isInternalMessageChannel } from "../../utils/message-channel.js";
 import { stripHeartbeatToken } from "../heartbeat.js";
+import { cloneReplyPayloadMetadata } from "../reply-payload.js";
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../tokens.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import { runPreflightCompactionIfNeeded } from "./agent-runner-memory.js";
@@ -342,7 +343,7 @@ export function createFollowupRunner(params: {
         if (stripped.shouldSkip && !hasMedia) {
           return [];
         }
-        return [{ ...payload, text: stripped.text }];
+        return [cloneReplyPayloadMetadata(payload, { ...payload, text: stripped.text })];
       });
       const finalPayloads = resolveFollowupDeliveryPayloads({
         cfg: runtimeConfig,
