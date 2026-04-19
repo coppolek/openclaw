@@ -1123,7 +1123,11 @@ export const registerTelegramNativeCommands = ({
               linkPreview: runtimeTelegramCfg.linkPreview,
               buttons: telegramResultData?.buttons,
             });
-            recordSentMessage(chatId, progressMessageId);
+            recordSentMessage(chatId, progressMessageId, {
+              accountId: route.accountId,
+              kind: "edit",
+              silent: false,
+            });
             emitTelegramMessageSentHooks({
               sessionKeyForInternalHooks: route.sessionKey,
               chatId: String(chatId),
