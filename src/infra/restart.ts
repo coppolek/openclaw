@@ -127,9 +127,13 @@ export function emitGatewayRestart(): boolean {
   try {
     if (process.platform === "win32") {
       // On Windows, SIGUSR1 is not supported by Node.js process.kill().
-      // Calling triggerOpenClawRestart() directly instead, which uses schtasks on win32.
-      // The result is intentionally ignored here — triggerOpenClawRestart() logs its own errors.
-      triggerOpenClawRestart();
+      // Call triggerOpenClawRestart() directly — it uses schtasks on win32.
+      const result = triggerOpenClawRestart();
+      if (!result.ok) {
+        // Roll back the cycle marker so future restart requests can still proceed.
+        emittedRestartToken = consumedRestartToken;
+        return false;
+      }
     } else if (process.listenerCount("SIGUSR1") > 0) {
       process.emit("SIGUSR1");
     } else {
