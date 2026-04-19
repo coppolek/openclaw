@@ -137,7 +137,10 @@ export function applyFinalEffectiveToolPolicy(
     isSubagentSessionKey(params.sessionKey) && params.sessionKey
       ? resolveSubagentToolPolicyForSession(params.config, params.sessionKey)
       : undefined;
-  const ownerFiltered = applyOwnerOnlyToolPolicy(params.bundledTools, params.senderIsOwner === true);
+  const ownerFiltered = applyOwnerOnlyToolPolicy(
+    params.bundledTools,
+    params.senderIsOwner === true,
+  );
   // Suppress unavailable-core-tool warnings on every step of this pass.
   // `applyToolPolicyPipeline` infers `coreToolNames` from the `tools` array
   // it's filtering, and this pass only sees the bundled MCP/LSP subset.
@@ -165,7 +168,7 @@ export function applyFinalEffectiveToolPolicy(
     }),
     { policy: params.sandboxToolPolicy, label: "sandbox tools.allow" },
     { policy: subagentPolicy, label: "subagent tools.allow" },
-  ].map((step) => ({ ...step, suppressUnavailableCoreToolWarning: true }));
+  ].map((step) => Object.assign({}, step, { suppressUnavailableCoreToolWarning: true }));
   return applyToolPolicyPipeline({
     tools: ownerFiltered,
     toolMeta: (tool) => getPluginToolMeta(tool),
