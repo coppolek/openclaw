@@ -119,7 +119,8 @@ export async function sendMessageWhatsApp(
       });
       const caption = text || undefined;
       mediaBuffer = media.buffer;
-      mediaType = media.contentType ?? "application/octet-stream";
+      const sanitizedMediaType = sanitizeMediaMime(media.contentType);
+      mediaType = sanitizedMediaType ?? "application/octet-stream";
       const forceVoiceDelivery = options.audioAsVoice === true && isVerifiedAudioSource(media);
       if (forceVoiceDelivery) {
         // WhatsApp PTT requires opus codec. Sanitize the incoming contentType against
@@ -139,10 +140,13 @@ export async function sendMessageWhatsApp(
             ? "audio/ogg; codecs=opus"
             : (sanitized ?? "application/octet-stream");
       } else if (!forceVoiceDelivery && media.kind === "video") {
+        mediaType = sanitizedMediaType?.startsWith("video/") ? sanitizedMediaType : "video/mp4";
         text = caption ?? "";
       } else if (!forceVoiceDelivery && media.kind === "image") {
+        mediaType = sanitizedMediaType?.startsWith("image/") ? sanitizedMediaType : "image/jpeg";
         text = caption ?? "";
       } else if (!forceVoiceDelivery) {
+        mediaType = sanitizedMediaType ?? "application/octet-stream";
         text = caption ?? "";
         documentFileName = media.fileName;
       }

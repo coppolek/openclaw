@@ -131,12 +131,13 @@ export async function deliverWebReply(params: {
         logVerbose(`Web auto-reply media source: ${mediaUrl} (kind ${media.kind})`);
       }
       if (media.kind === "image") {
+        const safeMime = sanitizeMediaMime(media.contentType);
         await sendWithRetry(
           () =>
             msg.sendMedia({
               image: media.buffer,
               caption,
-              mimetype: media.contentType,
+              mimetype: safeMime?.startsWith("image/") ? safeMime : "image/jpeg",
             }),
           "media:image",
         );
@@ -162,18 +163,19 @@ export async function deliverWebReply(params: {
           "media:audio",
         );
       } else if (media.kind === "video") {
+        const safeMime = sanitizeMediaMime(media.contentType);
         await sendWithRetry(
           () =>
             msg.sendMedia({
               video: media.buffer,
               caption,
-              mimetype: media.contentType,
+              mimetype: safeMime?.startsWith("video/") ? safeMime : "video/mp4",
             }),
           "media:video",
         );
       } else {
         const fileName = media.fileName ?? mediaUrl.split("/").pop() ?? "file";
-        const mimetype = media.contentType ?? "application/octet-stream";
+        const mimetype = sanitizeMediaMime(media.contentType) ?? "application/octet-stream";
         await sendWithRetry(
           () =>
             msg.sendMedia({

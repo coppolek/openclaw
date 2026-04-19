@@ -123,7 +123,12 @@ export function isVerifiedAudioSource(media: {
   kind?: string | null;
   contentType?: string | null;
 }): boolean {
-  return media.kind === "audio" || media.contentType?.startsWith("audio/") === true;
+  if (media.kind === "audio") {
+    return true;
+  }
+  // Normalize through sanitizeMediaMime before classifying audio content.
+  const sanitized = sanitizeMediaMime(media.contentType);
+  return sanitized?.startsWith("audio/") === true;
 }
 
 /**

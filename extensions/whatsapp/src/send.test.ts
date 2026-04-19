@@ -263,6 +263,23 @@ describe("web outbound", () => {
     );
   });
 
+  it("uses image/jpeg fallback when image contentType contains control characters", async () => {
+    const buf = Buffer.from("img");
+    loadWebMediaMock.mockResolvedValueOnce({
+      buffer: buf,
+      contentType: "image/png\r\nX-Inj: bad",
+      kind: "image",
+      fileName: "photo.png",
+    });
+
+    await sendMessageWhatsApp("+1555", "img cap", {
+      verbose: false,
+      mediaUrl: "/tmp/photo.png",
+    });
+
+    expect(sendMessage).toHaveBeenLastCalledWith("+1555", "img cap", buf, "image/jpeg");
+  });
+
   it("does not force voice-note for non-audio files when audioAsVoice is true", async () => {
     const buf = Buffer.from("pdf");
     loadWebMediaMock.mockResolvedValueOnce({
