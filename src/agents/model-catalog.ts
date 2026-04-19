@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { loadConfig } from "../config/config.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { resolveProviderPluginsForHooks } from "../plugins/provider-hook-runtime.js";
 import { augmentModelCatalogWithProviderPlugins } from "../plugins/provider-runtime.runtime.js";
 import {
   normalizeLowercaseStringOrEmpty,
@@ -38,6 +39,7 @@ type PiRegistryClassLike = {
 
 let modelCatalogPromise: Promise<ModelCatalogEntry[]> | null = null;
 let hasLoggedModelCatalogError = false;
+let hasLoggedPreserveOrderLookupError = false;
 const defaultImportPiSdk = () => import("./pi-model-discovery-runtime.js");
 let importPiSdk = defaultImportPiSdk;
 let modelSuppressionPromise: Promise<typeof import("./model-suppression.runtime.js")> | undefined;
@@ -54,6 +56,7 @@ function loadModelSuppression() {
 export function resetModelCatalogCacheForTest() {
   modelCatalogPromise = null;
   hasLoggedModelCatalogError = false;
+  hasLoggedPreserveOrderLookupError = false;
   importPiSdk = defaultImportPiSdk;
 }
 
@@ -96,14 +99,50 @@ export async function loadModelCatalog(params?: {
       const suffix = extra ? ` ${extra}` : "";
       log.info(`model-catalog stage=${stage} elapsedMs=${Date.now() - startMs}${suffix}`);
     };
-    const sortModels = (entries: ModelCatalogEntry[]) =>
-      entries.sort((a, b) => {
+    const sortModels = (entries: ModelCatalogEntry[], cfg: OpenClawConfig | undefined) => {
+      // Relies on Array.prototype.toSorted being stable (ES2023): providers
+      // flagged as preserveDiscoveryOrder return 0 from the comparator on
+      // same-provider pairs, which keeps their insertion order inside the
+      // provider block. Resolve all plugins once up front to avoid per-provider
+      // plugin-lookup latency inside the sort.
+      const preserveOrderProviders = new Set<string>();
+      // Plugin resolution can throw (broken manifest, transient plugin-runtime failure).
+      // Treat that as a preserve-order degradation — keep sorting and returning models
+      // rather than rethrowing and losing the whole catalog from the catch-path fallback.
+      let plugins: ReturnType<typeof resolveProviderPluginsForHooks> = [];
+      try {
+        plugins = resolveProviderPluginsForHooks({
+          ...(cfg ? { config: cfg } : {}),
+          env: process.env,
+        });
+      } catch (error) {
+        if (!hasLoggedPreserveOrderLookupError) {
+          hasLoggedPreserveOrderLookupError = true;
+          log.warn(`Failed to resolve provider plugins for catalog sort: ${String(error)}`);
+        }
+      }
+      for (const plugin of plugins) {
+        if (plugin.catalog?.preserveDiscoveryOrder !== true) {
+          continue;
+        }
+        for (const id of [plugin.id, ...(plugin.aliases ?? []), ...(plugin.hookAliases ?? [])]) {
+          const normalized = normalizeProviderId(id);
+          if (normalized) {
+            preserveOrderProviders.add(normalized);
+          }
+        }
+      }
+      return entries.toSorted((a, b) => {
         const p = a.provider.localeCompare(b.provider);
         if (p !== 0) {
           return p;
         }
+        if (preserveOrderProviders.has(normalizeProviderId(a.provider))) {
+          return 0;
+        }
         return a.name.localeCompare(b.name);
       });
+    };
     try {
       const cfg = params?.config ?? loadConfig();
       await ensureOpenClawModelsJson(cfg);
@@ -181,7 +220,7 @@ export async function loadModelCatalog(params?: {
         modelCatalogPromise = null;
       }
 
-      const sorted = sortModels(models);
+      const sorted = sortModels(models, cfg);
       logStage("complete", `entries=${sorted.length}`);
       return sorted;
     } catch (error) {
@@ -192,7 +231,7 @@ export async function loadModelCatalog(params?: {
       // Don't poison the cache on transient dependency/filesystem issues.
       modelCatalogPromise = null;
       if (models.length > 0) {
-        return sortModels(models);
+        return sortModels(models, params?.config);
       }
       return [];
     }
