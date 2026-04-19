@@ -306,6 +306,46 @@ function hasNonTextContentBlocks(entry: Record<string, unknown>): boolean {
   });
 }
 
+function stripRuntimeContentFromContentArray(
+  content: unknown[],
+  heartbeatPrompt: string,
+): { content: unknown[]; changed: boolean; empty: boolean } {
+  let changed = false;
+  const next: unknown[] = [];
+  for (const item of content) {
+    if (!item || typeof item !== "object") {
+      next.push(item);
+      continue;
+    }
+    const block = item as Record<string, unknown>;
+    if (block.type !== "text" || typeof block.text !== "string") {
+      next.push(item);
+      continue;
+    }
+    const stripped = stripRuntimeContentFromText(block.text);
+    if (stripped === block.text) {
+      next.push(item);
+      continue;
+    }
+    changed = true;
+    if (hasRuntimeEnvelopeText(block.text) && isRuntimePromptText(stripped, heartbeatPrompt)) {
+      continue;
+    }
+    if (!stripped) {
+      continue;
+    }
+    next.push({
+      ...block,
+      text: stripped,
+    });
+  }
+  return {
+    content: changed ? next : content,
+    changed,
+    empty: next.length === 0,
+  };
+}
+
 function stripRuntimeContentFromMessage(
   message: unknown,
   heartbeatPrompt: string = HEARTBEAT_PROMPT,
@@ -317,6 +357,23 @@ function stripRuntimeContentFromMessage(
   const role = typeof entry.role === "string" ? entry.role.toLowerCase() : "";
   if (role !== "user") {
     return { message, changed: false, empty: false };
+  }
+  if (Array.isArray(entry.content)) {
+    const updated = stripRuntimeContentFromContentArray(entry.content, heartbeatPrompt);
+    if (!updated.changed) {
+      return { message, changed: false, empty: false };
+    }
+    if (updated.empty) {
+      return { message, changed: true, empty: true };
+    }
+    return {
+      message: {
+        ...entry,
+        content: updated.content,
+      },
+      changed: true,
+      empty: false,
+    };
   }
   const extracted = extractUserMessageText(entry);
   if (!extracted) {
