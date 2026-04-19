@@ -2,8 +2,12 @@ import { formatCliCommand } from "openclaw/plugin-sdk/cli-runtime";
 import { loadConfig, type OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import { resolveMarkdownTableMode } from "openclaw/plugin-sdk/config-runtime";
 import { generateSecureUuid } from "openclaw/plugin-sdk/core";
-import { normalizePollInput, type PollInput } from "openclaw/plugin-sdk/media-runtime";
-import { isAudioFileName } from "openclaw/plugin-sdk/media-runtime";
+import {
+  isVerifiedAudioSource,
+  normalizePollInput,
+  sanitizeMediaMime,
+  type PollInput,
+} from "openclaw/plugin-sdk/media-runtime";
 import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
 import { getChildLogger } from "openclaw/plugin-sdk/text-runtime";
 import { redactIdentifier } from "openclaw/plugin-sdk/text-runtime";
@@ -116,26 +120,24 @@ export async function sendMessageWhatsApp(
       const caption = text || undefined;
       mediaBuffer = media.buffer;
       mediaType = media.contentType ?? "application/octet-stream";
-      const forceVoiceDelivery =
-        options.audioAsVoice === true &&
-        (media.contentType?.startsWith("audio/") === true ||
-          isAudioFileName(media.fileName) ||
-          isAudioFileName(primaryMediaUrl));
+      const forceVoiceDelivery = options.audioAsVoice === true && isVerifiedAudioSource(media);
       if (forceVoiceDelivery) {
-        // Honor [[audio_as_voice]] regardless of media.kind; WhatsApp expects
-        // explicit opus codec for best PTT compatibility.
+        // WhatsApp PTT requires opus codec. Sanitize the incoming contentType against
+        // header injection; fall back to canonical opus on unsafe input.
+        const sanitized = sanitizeMediaMime(media.contentType, { preserveCodecsParam: true });
         mediaType =
-          media.contentType === "audio/ogg"
+          sanitized === "audio/ogg"
             ? "audio/ogg; codecs=opus"
-            : media.contentType?.startsWith("audio/")
-              ? media.contentType
+            : sanitized?.startsWith("audio/")
+              ? sanitized
               : "audio/ogg; codecs=opus";
       } else if (!forceVoiceDelivery && media.kind === "audio") {
         // WhatsApp expects explicit opus codec for PTT voice notes.
+        const sanitized = sanitizeMediaMime(media.contentType);
         mediaType =
-          media.contentType === "audio/ogg"
+          sanitized === "audio/ogg"
             ? "audio/ogg; codecs=opus"
-            : (media.contentType ?? "application/octet-stream");
+            : (sanitized ?? "application/octet-stream");
       } else if (!forceVoiceDelivery && media.kind === "video") {
         text = caption ?? "";
       } else if (!forceVoiceDelivery && media.kind === "image") {

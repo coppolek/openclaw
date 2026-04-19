@@ -264,7 +264,7 @@ describe("deliverWebReply", () => {
     );
   });
 
-  it("forces voice-note send when audioAsVoice is true even for non-audio media kind", async () => {
+  it("rejects voice-note coercion when audioAsVoice is true but media is not verified audio", async () => {
     const msg = makeMsg();
     (
       loadWebMedia as unknown as { mockResolvedValueOnce: (v: unknown) => void }
@@ -272,6 +272,36 @@ describe("deliverWebReply", () => {
       buffer: Buffer.from("aud"),
       contentType: "application/octet-stream",
       kind: "document",
+      fileName: "voice.ogg",
+    });
+
+    await deliverWebReply({
+      replyResult: { text: "cap", mediaUrl: "http://example.com/voice.ogg", audioAsVoice: true },
+      msg,
+      maxMediaBytes: 1024 * 1024,
+      textLimit: 200,
+      replyLogger,
+      skipLog: true,
+    });
+
+    expect(msg.sendMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        document: expect.any(Buffer),
+        fileName: "voice.ogg",
+        mimetype: "application/octet-stream",
+        caption: "cap",
+      }),
+    );
+  });
+
+  it("falls back to opus mimetype when contentType contains control characters", async () => {
+    const msg = makeMsg();
+    (
+      loadWebMedia as unknown as { mockResolvedValueOnce: (v: unknown) => void }
+    ).mockResolvedValueOnce({
+      buffer: Buffer.from("aud"),
+      contentType: "audio/ogg\r\nX-Inj: bad",
+      kind: "audio",
       fileName: "voice.ogg",
     });
 

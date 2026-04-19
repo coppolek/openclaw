@@ -1,5 +1,5 @@
 import type { MarkdownTableMode } from "openclaw/plugin-sdk/config-runtime";
-import { isAudioFileName } from "openclaw/plugin-sdk/media-runtime";
+import { isVerifiedAudioSource, sanitizeMediaMime } from "openclaw/plugin-sdk/media-runtime";
 import { chunkMarkdownTextWithMode, type ChunkMode } from "openclaw/plugin-sdk/reply-chunking";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-chunking";
 import {
@@ -142,16 +142,14 @@ export async function deliverWebReply(params: {
         );
       } else if (
         media.kind === "audio" ||
-        (replyResult.audioAsVoice === true &&
-          (media.contentType?.startsWith("audio/") === true ||
-            isAudioFileName(media.fileName) ||
-            isAudioFileName(mediaUrl)))
+        (replyResult.audioAsVoice === true && isVerifiedAudioSource(media))
       ) {
+        const sanitized = sanitizeMediaMime(media.contentType, { preserveCodecsParam: true });
         const voiceMimetype =
-          media.contentType === "audio/ogg"
+          sanitized === "audio/ogg"
             ? "audio/ogg; codecs=opus"
-            : media.contentType?.startsWith("audio/")
-              ? media.contentType
+            : sanitized?.startsWith("audio/")
+              ? sanitized
               : "audio/ogg; codecs=opus";
         await sendWithRetry(
           () =>

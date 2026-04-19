@@ -193,7 +193,7 @@ describe("web outbound", () => {
     );
   });
 
-  it("forces voice-note media type when audioAsVoice is true", async () => {
+  it("rejects voice-note coercion when audioAsVoice is true but media is not verified audio", async () => {
     const buf = Buffer.from("voice-bytes");
     loadWebMediaMock.mockResolvedValueOnce({
       buffer: buf,
@@ -212,7 +212,8 @@ describe("web outbound", () => {
       "+1555",
       "voice override",
       buf,
-      "audio/ogg; codecs=opus",
+      "application/octet-stream",
+      { fileName: "voice.ogg" },
     );
   });
 
@@ -234,6 +235,29 @@ describe("web outbound", () => {
     expect(sendMessage).toHaveBeenLastCalledWith(
       "+1555",
       "voice null content type",
+      buf,
+      "audio/ogg; codecs=opus",
+    );
+  });
+
+  it("falls back to opus mimetype when contentType contains control characters", async () => {
+    const buf = Buffer.from("voice");
+    loadWebMediaMock.mockResolvedValueOnce({
+      buffer: buf,
+      contentType: "audio/ogg\r\nX-Inj: bad",
+      kind: "audio",
+      fileName: "voice.ogg",
+    });
+
+    await sendMessageWhatsApp("+1555", "voice crlf", {
+      verbose: false,
+      mediaUrl: "/tmp/voice.ogg",
+      audioAsVoice: true,
+    });
+
+    expect(sendMessage).toHaveBeenLastCalledWith(
+      "+1555",
+      "voice crlf",
       buf,
       "audio/ogg; codecs=opus",
     );
