@@ -428,6 +428,11 @@ Launches a local child process and communicates over stdin/stdout.
 | `env`                      | Extra environment variables       |
 | `cwd` / `workingDirectory` | Working directory for the process |
 
+`env` values may be either plaintext strings or SecretRef inputs. Use
+[Secrets Management](/gateway/secrets) and
+[SecretRef Credential Surface](/reference/secretref-credential-surface) for
+the canonical supported paths and migration flow.
+
 ### SSE / HTTP transport
 
 Connects to a remote MCP server over HTTP Server-Sent Events.
@@ -458,6 +463,11 @@ Example:
 Sensitive values in `url` (userinfo) and `headers` are redacted in logs and
 status output.
 
+`headers` values may be either plaintext strings or SecretRef inputs. Use
+[Secrets Management](/gateway/secrets) and
+[SecretRef Credential Surface](/reference/secretref-credential-surface) for
+the canonical supported paths and migration flow.
+
 ### Streamable HTTP transport
 
 `streamable-http` is an additional transport option alongside `sse` and `stdio`. It uses HTTP streaming for bidirectional communication with remote MCP servers.
@@ -468,6 +478,8 @@ status output.
 | `transport`           | Set to `"streamable-http"` to select this transport; when omitted, OpenClaw uses `sse` |
 | `headers`             | Optional key-value map of HTTP headers (for example auth tokens)                       |
 | `connectionTimeoutMs` | Per-server connection timeout in ms (optional)                                         |
+
+As with SSE, `headers` values may be plaintext strings or SecretRef inputs.
 
 Example:
 

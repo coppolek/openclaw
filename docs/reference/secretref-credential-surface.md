@@ -36,6 +36,8 @@ Scope intent:
 - `models.providers.*.request.tls.key`
 - `models.providers.*.request.tls.passphrase`
 - `skills.entries.*.apiKey`
+- `mcp.servers.*.env.*`
+- `mcp.servers.*.headers.*`
 - `agents.defaults.memorySearch.remote.apiKey`
 - `agents.list[].memorySearch.remote.apiKey`
 - `talk.providers.*.apiKey`
