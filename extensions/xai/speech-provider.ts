@@ -58,12 +58,16 @@ function resolveSpeechResponseFormat(
   return target === "voice-note" ? "opus" : "mp3";
 }
 
-function responseFormatToFileExtension(format: XaiSpeechResponseFormat): ".mp3" | ".opus" | ".wav" {
+function responseFormatToFileExtension(
+  format: XaiSpeechResponseFormat,
+): ".mp3" | ".pcm" | ".opus" | ".wav" {
   switch (format) {
     case "opus":
       return ".opus";
     case "wav":
       return ".wav";
+    case "pcm":
+      return ".pcm";
     default:
       return ".mp3";
   }
