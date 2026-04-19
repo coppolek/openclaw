@@ -15,6 +15,7 @@ import {
   handleCronCliError,
   printCronJson,
   printCronList,
+  looksLikeShellCommand,
   warnIfCronSchedulerDisabled,
 } from "./shared.js";
 
@@ -240,6 +241,25 @@ export function registerCronAddCommand(cron: Command) {
                 }
               : undefined,
           };
+
+          // Warn when the user is about to create a main-session systemEvent job
+          // whose text looks like a shell command.  Such commands are never
+          // executed — the text is only dispatched as a context notification
+          // to the main agent session.
+          if (
+            sessionTarget === "main" &&
+            payload.kind === "systemEvent" &&
+            looksLikeShellCommand(payload.text)
+          ) {
+            process.stderr.write(
+              [
+                "Warning: --system-event on --session main does not execute shell commands.",
+                "  The text is dispatched as a notification to the main agent session only.",
+                '  To run a script, use: --message "..." --session isolated --wake now',
+                "",
+              ].join("\n"),
+            );
+          }
 
           const res = await callGatewayFromCli("cron.add", opts, params);
           printCronJson(res);

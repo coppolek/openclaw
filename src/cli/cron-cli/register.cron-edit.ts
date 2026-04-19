@@ -12,7 +12,7 @@ import {
   applyExistingCronSchedulePatch,
   resolveCronEditScheduleRequest,
 } from "./schedule-options.js";
-import { getCronChannelOptions, parseDurationMs, warnIfCronSchedulerDisabled } from "./shared.js";
+import { getCronChannelOptions, looksLikeShellCommand, parseDurationMs, warnIfCronSchedulerDisabled } from "./shared.js";
 
 const assignIf = (
   target: Record<string, unknown>,
@@ -307,6 +307,43 @@ export function registerCronEditCommand(cron: Command) {
               failureAlert.accountId = accountId ? accountId : undefined;
             }
             patch.failureAlert = failureAlert;
+          }
+
+          // Warn when --system-event is being set on a job that is (or will be) a
+          // main-session job and the text looks like a shell command.  Such commands
+          // are never executed — the text is only dispatched as a context notification.
+          // When --session is not passed, fetch the existing job to check its target.
+          let effectiveSessionIsMain = opts.session === "main";
+          if (
+            hasSystemEventPatch &&
+            !effectiveSessionIsMain &&
+            typeof opts.session !== "string"
+          ) {
+            try {
+              const listed = (await callGatewayFromCli("cron.list", opts, {
+                includeDisabled: true,
+              })) as { jobs?: CronJob[] } | null;
+              const existing = (listed?.jobs ?? []).find((job) => job.id === id);
+              if (existing?.sessionTarget === "main") {
+                effectiveSessionIsMain = true;
+              }
+            } catch {
+              // Best-effort: if we cannot fetch the job, skip the warning.
+            }
+          }
+          if (
+            hasSystemEventPatch &&
+            effectiveSessionIsMain &&
+            looksLikeShellCommand(String(opts.systemEvent))
+          ) {
+            process.stderr.write(
+              [
+                "Warning: --system-event on --session main does not execute shell commands.",
+                "  The text is dispatched as a notification to the main agent session only.",
+                '  To run a script, use: --message "..." --session isolated --wake now',
+                "",
+              ].join("\n"),
+            );
           }
 
           const res = await callGatewayFromCli("cron.update", opts, {
