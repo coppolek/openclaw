@@ -4,6 +4,13 @@ import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 // Build a dynamic prompt for cron events by embedding the actual event content.
 // This ensures the model sees the reminder text directly instead of relying on
 // "shown in the system messages above" which may not be visible in context.
+export const CRON_NO_CONTENT_PROMPT_PREFIX =
+  "A scheduled cron event was triggered, but no event content was found.";
+export const REMINDER_PROMPT_PREFIX =
+  "A scheduled reminder has been triggered. The reminder content is:";
+export const EXEC_COMPLETION_PROMPT_PREFIX =
+  "An async command you ran earlier has completed. The result is shown in the system messages above.";
+
 export function buildCronEventPrompt(
   pendingEvents: string[],
   opts?: {
@@ -15,40 +22,31 @@ export function buildCronEventPrompt(
   if (!eventText) {
     if (!deliverToUser) {
       return (
-        "A scheduled cron event was triggered, but no event content was found. " +
-        "Handle this internally and reply HEARTBEAT_OK when nothing needs user-facing follow-up."
+        CRON_NO_CONTENT_PROMPT_PREFIX +
+        " Handle this internally and reply HEARTBEAT_OK when nothing needs user-facing follow-up."
       );
     }
-    return (
-      "A scheduled cron event was triggered, but no event content was found. " +
-      "Reply HEARTBEAT_OK."
-    );
+    return CRON_NO_CONTENT_PROMPT_PREFIX + " Reply HEARTBEAT_OK.";
   }
   if (!deliverToUser) {
-    return (
-      "A scheduled reminder has been triggered. The reminder content is:\n\n" +
-      eventText +
-      "\n\nHandle this reminder internally. Do not relay it to the user unless explicitly requested."
-    );
+    return REMINDER_PROMPT_PREFIX + "\n\n" + eventText +
+      "\n\nHandle this reminder internally. Do not relay it to the user unless explicitly requested.";
   }
-  return (
-    "A scheduled reminder has been triggered. The reminder content is:\n\n" +
-    eventText +
+  return REMINDER_PROMPT_PREFIX + "\n\n" + eventText +
     "\n\nPlease relay this reminder to the user in a helpful and friendly way."
-  );
 }
 
 export function buildExecEventPrompt(opts?: { deliverToUser?: boolean }): string {
   const deliverToUser = opts?.deliverToUser ?? true;
   if (!deliverToUser) {
     return (
-      "An async command you ran earlier has completed. The result is shown in the system messages above. " +
-      "Handle the result internally. Do not relay it to the user unless explicitly requested."
+      EXEC_COMPLETION_PROMPT_PREFIX +
+      " Handle the result internally. Do not relay it to the user unless explicitly requested."
     );
   }
   return (
-    "An async command you ran earlier has completed. The result is shown in the system messages above. " +
-    "Please relay the command output to the user in a helpful way. If the command succeeded, share the relevant output. " +
+    EXEC_COMPLETION_PROMPT_PREFIX +
+    " Please relay the command output to the user in a helpful way. If the command succeeded, share the relevant output. " +
     "If it failed, explain what went wrong."
   );
 }

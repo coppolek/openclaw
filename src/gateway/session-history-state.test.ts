@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
+import { HEARTBEAT_PROMPT } from "../auto-reply/heartbeat.js";
 import { buildSessionHistorySnapshot, SessionHistorySseState } from "./session-history-state.js";
 import * as sessionUtils from "./session-utils.js";
 
@@ -74,5 +75,299 @@ describe("SessionHistorySseState", () => {
     expect(snapshot.history.items).toBe(snapshot.history.messages);
     expect(snapshot.history.messages[0]?.__openclaw?.seq).toBe(2);
     expect(snapshot.rawTranscriptSeq).toBe(2);
+  });
+
+  test("filters mixed system-line plus heartbeat prompt entries from snapshot history", () => {
+    const snapshot = buildSessionHistorySnapshot({
+      rawMessages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text:
+                "System: [2026-04-17 12:20:33 AKDT] Gateway restart restart ok\n" +
+                "System: [2026-04-17 12:20:33 AKDT] Run: openclaw doctor --non-interactive\n\n" +
+                HEARTBEAT_PROMPT,
+            },
+          ],
+          __openclaw: { seq: 1 },
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "HEARTBEAT_OK" }],
+          __openclaw: { seq: 2 },
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "kept" }],
+          __openclaw: { seq: 3 },
+        },
+      ],
+    });
+
+    expect(snapshot.history.messages).toEqual([
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "kept" }],
+        __openclaw: { seq: 3 },
+      },
+    ]);
+    expect(snapshot.rawTranscriptSeq).toBe(3);
+  });
+
+  test("filters current-session cron prompts from snapshot history", () => {
+    const snapshot = buildSessionHistorySnapshot({
+      rawMessages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text:
+                "[cron:job-1 Recheck PR #68262 CI] Re-check GitHub PR #68262 in /tmp/openclaw-upstream. " +
+                "If CI failed, inspect the failing checks/logs and fix any regression that belongs to this branch, then push. " +
+                "If CI passed, send Kevin a brief update. Keep it concise and action-oriented.\n" +
+                "Current time: Sunday, April 19th, 2026 - 1:10 PM (America/Anchorage) / 2026-04-19 21:10 UTC",
+            },
+          ],
+          __openclaw: { seq: 1 },
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "kept" }],
+          __openclaw: { seq: 2 },
+        },
+      ],
+    });
+
+    expect(snapshot.history.messages).toEqual([
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "kept" }],
+        __openclaw: { seq: 2 },
+      },
+    ]);
+  });
+
+  test("strips inbound envelopes from snapshot history messages", () => {
+    const snapshot = buildSessionHistorySnapshot({
+      rawMessages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: 'Sender (untrusted metadata):\n```json\n{"label":"openclaw-control-ui"}\n```\n\n[Sun 2026-04-19 10:08 AKDT] Does this look correct?',
+            },
+          ],
+          __openclaw: { seq: 1 },
+        },
+      ],
+    });
+
+    expect(snapshot.history.messages).toEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "Does this look correct?" }],
+        senderLabel: "openclaw-control-ui",
+        __openclaw: { seq: 1 },
+      },
+    ]);
+  });
+
+  test("truncates visible session-history text after stripping inbound envelopes", () => {
+    const snapshot = buildSessionHistorySnapshot({
+      rawMessages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text:
+                'Sender (untrusted metadata):\n```json\n{"label":"openclaw-control-ui","context":"' +
+                "x".repeat(200) +
+                '"}\n```\n\n[Sun 2026-04-19 10:08 AKDT] Actual body that should survive truncation',
+            },
+          ],
+          __openclaw: { seq: 1 },
+        },
+      ],
+      maxChars: 10,
+    });
+
+    expect(snapshot.history.messages).toEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "Actual bod\n...(truncated)..." }],
+        senderLabel: "openclaw-control-ui",
+        __openclaw: { seq: 1 },
+      },
+    ]);
+  });
+
+  test("filters punctuated heartbeat-only assistant acks from snapshot history", () => {
+    const snapshot = buildSessionHistorySnapshot({
+      rawMessages: [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "HEARTBEAT_OK." }],
+          __openclaw: { seq: 1 },
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "kept" }],
+          __openclaw: { seq: 2 },
+        },
+      ],
+    });
+
+    expect(snapshot.history.messages).toEqual([
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "kept" }],
+        __openclaw: { seq: 2 },
+      },
+    ]);
+  });
+
+  test("strips inbound envelopes from inline appended messages", () => {
+    const state = SessionHistorySseState.fromRawSnapshot({
+      target: { sessionId: "sess-main" },
+      rawMessages: [],
+    });
+
+    const appended = state.appendInlineMessage({
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: 'Sender (untrusted metadata):\n```json\n{"label":"openclaw-control-ui"}\n```\n\n[Sun 2026-04-19 10:08 AKDT] Does this look correct?',
+          },
+        ],
+      },
+    });
+
+    expect(appended?.message).toEqual({
+      role: "user",
+      content: [{ type: "text", text: "Does this look correct?" }],
+      senderLabel: "openclaw-control-ui",
+      __openclaw: { seq: 1 },
+    });
+    expect(state.snapshot().messages).toEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "Does this look correct?" }],
+        senderLabel: "openclaw-control-ui",
+        __openclaw: { seq: 1 },
+      },
+    ]);
+  });
+
+  test("truncates visible inline session-history text after stripping inbound envelopes", () => {
+    const state = SessionHistorySseState.fromRawSnapshot({
+      target: { sessionId: "sess-main" },
+      rawMessages: [],
+      maxChars: 10,
+    });
+
+    const appended = state.appendInlineMessage({
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text:
+              'Sender (untrusted metadata):\n```json\n{"label":"openclaw-control-ui","context":"' +
+              "x".repeat(200) +
+              '"}\n```\n\n[Sun 2026-04-19 10:08 AKDT] Actual body that should survive truncation',
+          },
+        ],
+      },
+    });
+
+    expect(appended?.message).toEqual({
+      role: "user",
+      content: [{ type: "text", text: "Actual bod\n...(truncated)..." }],
+      senderLabel: "openclaw-control-ui",
+      __openclaw: { seq: 1 },
+    });
+  });
+
+  test("filters pre-compaction memory flush prompts from inline updates", () => {
+    const state = SessionHistorySseState.fromRawSnapshot({
+      target: { sessionId: "sess-main" },
+      rawMessages: [],
+    });
+
+    const appended = state.appendInlineMessage({
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text:
+              "Pre-compaction memory flush. Store durable memories only in memory/2026-04-19.md (create memory/ if needed). " +
+              "Treat workspace bootstrap/reference files such as MEMORY.md, DREAMS.md, SOUL.md, TOOLS.md, and AGENTS.md as read-only during this flush; never overwrite, replace, or edit them. " +
+              "If memory/2026-04-19.md already exists, APPEND new content only and do not overwrite existing entries. " +
+              "Do NOT create timestamped variant files (e.g., 2026-04-19-HHMM.md); always use the canonical 2026-04-19.md filename. " +
+              "If nothing to store, reply with NO_REPLY.\n" +
+              "Current time: Sunday, April 19th, 2026 - 1:20 PM (America/Anchorage) / 2026-04-19 21:20 UTC",
+          },
+        ],
+      },
+    });
+
+    expect(appended).toBeNull();
+    expect(state.snapshot().messages).toEqual([]);
+  });
+
+  test("filters inline appended mixed system-line plus heartbeat entries", () => {
+    const state = SessionHistorySseState.fromRawSnapshot({
+      target: { sessionId: "sess-main" },
+      rawMessages: [],
+    });
+
+    const appendedUser = state.appendInlineMessage({
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text:
+              "System: [2026-04-17 12:20:33 AKDT] Gateway restart restart ok\n\n" +
+              HEARTBEAT_PROMPT,
+          },
+        ],
+      },
+    });
+    const appendedAck = state.appendInlineMessage({
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "HEARTBEAT_OK" }],
+      },
+    });
+    const appendedReply = state.appendInlineMessage({
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "kept" }],
+      },
+    });
+
+    expect(appendedUser).toBeNull();
+    expect(appendedAck).toBeNull();
+    expect(appendedReply?.message).toEqual({
+      role: "assistant",
+      content: [{ type: "text", text: "kept" }],
+      __openclaw: { seq: 3 },
+    });
+    expect(state.snapshot().messages).toEqual([
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "kept" }],
+        __openclaw: { seq: 3 },
+      },
+    ]);
   });
 });

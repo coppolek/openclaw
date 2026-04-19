@@ -1,6 +1,8 @@
+import { stripEnvelopeFromMessages } from "./chat-sanitize.js";
 import {
   DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
   sanitizeChatHistoryMessages,
+  stripRuntimeInjectedContent,
 } from "./server-methods/chat.js";
 import { attachOpenClawTranscriptMeta, readSessionMessages } from "./session-utils.js";
 
@@ -98,12 +100,18 @@ export function buildSessionHistorySnapshot(params: {
   maxChars?: number;
   limit?: number;
   cursor?: string;
+  heartbeatPrompt?: string;
 }): SessionHistorySnapshot {
+  const sanitizedRawMessages = stripRuntimeInjectedContent(params.rawMessages, {
+    heartbeatPrompt: params.heartbeatPrompt,
+  });
+  const visibleRawMessages = stripEnvelopeFromMessages(sanitizedRawMessages);
   const history = paginateSessionMessages(
     toSessionHistoryMessages(
       sanitizeChatHistoryMessages(
-        params.rawMessages,
+        visibleRawMessages,
         params.maxChars ?? DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
+        { heartbeatPrompt: params.heartbeatPrompt },
       ),
     ),
     params.limit,
@@ -121,6 +129,7 @@ export class SessionHistorySseState {
   private readonly maxChars: number;
   private readonly limit: number | undefined;
   private readonly cursor: string | undefined;
+  private readonly heartbeatPrompt: string | undefined;
   private sentHistory: PaginatedSessionHistory;
   private rawTranscriptSeq: number;
 
@@ -130,12 +139,14 @@ export class SessionHistorySseState {
     maxChars?: number;
     limit?: number;
     cursor?: string;
+    heartbeatPrompt?: string;
   }): SessionHistorySseState {
     return new SessionHistorySseState({
       target: params.target,
       maxChars: params.maxChars,
       limit: params.limit,
       cursor: params.cursor,
+      heartbeatPrompt: params.heartbeatPrompt,
       initialRawMessages: params.rawMessages,
     });
   }
@@ -145,18 +156,21 @@ export class SessionHistorySseState {
     maxChars?: number;
     limit?: number;
     cursor?: string;
+    heartbeatPrompt?: string;
     initialRawMessages?: unknown[];
   }) {
     this.target = params.target;
     this.maxChars = params.maxChars ?? DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS;
     this.limit = params.limit;
     this.cursor = params.cursor;
+    this.heartbeatPrompt = params.heartbeatPrompt;
     const rawMessages = params.initialRawMessages ?? this.readRawMessages();
     const snapshot = buildSessionHistorySnapshot({
       rawMessages,
       maxChars: this.maxChars,
       limit: this.limit,
       cursor: this.cursor,
+      heartbeatPrompt: this.heartbeatPrompt,
     });
     this.sentHistory = snapshot.history;
     this.rawTranscriptSeq = snapshot.rawTranscriptSeq;
@@ -178,7 +192,15 @@ export class SessionHistorySseState {
       ...(typeof update.messageId === "string" ? { id: update.messageId } : {}),
       seq: this.rawTranscriptSeq,
     });
-    const sanitized = sanitizeChatHistoryMessages([nextMessage], this.maxChars);
+    const sanitized = sanitizeChatHistoryMessages(
+      stripEnvelopeFromMessages(
+        stripRuntimeInjectedContent([nextMessage], {
+          heartbeatPrompt: this.heartbeatPrompt,
+        }),
+      ),
+      this.maxChars,
+      { heartbeatPrompt: this.heartbeatPrompt },
+    );
     if (sanitized.length === 0) {
       return null;
     }
@@ -203,6 +225,7 @@ export class SessionHistorySseState {
       maxChars: this.maxChars,
       limit: this.limit,
       cursor: this.cursor,
+      heartbeatPrompt: this.heartbeatPrompt,
     });
     this.rawTranscriptSeq = snapshot.rawTranscriptSeq;
     this.sentHistory = snapshot.history;
