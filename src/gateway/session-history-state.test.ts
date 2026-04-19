@@ -143,6 +143,36 @@ describe("SessionHistorySseState", () => {
     ]);
   });
 
+  test("truncates visible session-history text after stripping inbound envelopes", () => {
+    const snapshot = buildSessionHistorySnapshot({
+      rawMessages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text:
+                'Sender (untrusted metadata):\n```json\n{"label":"openclaw-control-ui","context":"' +
+                "x".repeat(200) +
+                '"}\n```\n\n[Sun 2026-04-19 10:08 AKDT] Actual body that should survive truncation',
+            },
+          ],
+          __openclaw: { seq: 1 },
+        },
+      ],
+      maxChars: 10,
+    });
+
+    expect(snapshot.history.messages).toEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "Actual bod\n...(truncated)..." }],
+        senderLabel: "openclaw-control-ui",
+        __openclaw: { seq: 1 },
+      },
+    ]);
+  });
+
   test("strips inbound envelopes from inline appended messages", () => {
     const state = SessionHistorySseState.fromRawSnapshot({
       target: { sessionId: "sess-main" },

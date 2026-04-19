@@ -762,6 +762,36 @@ describe("chat.history sanitization ordering", () => {
     expect(concatAllTextFields(newOrdering)).toContain("hello");
     expect(concatAllTextFields(newOrdering)).toContain("real reply");
   });
+
+  it("truncates user-visible text after stripping inbound envelopes", () => {
+    const result = sanitizeChatHistoryMessages(
+      [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text:
+                'Sender (untrusted metadata):\n```json\n{"label":"openclaw-control-ui","context":"' +
+                "x".repeat(200) +
+                '"}\n```\n\n[Fri 2026-04-17 11:19 AKDT] Actual body that should survive truncation',
+            },
+          ],
+          timestamp: 1,
+        },
+      ],
+      10,
+    );
+
+    expect(result).toEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "Actual bod\n...(truncated)..." }],
+        senderLabel: "openclaw-control-ui",
+        timestamp: 1,
+      },
+    ]);
+  });
 });
 
 describe("resolveEffectiveChatHistoryMaxChars", () => {

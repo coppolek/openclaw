@@ -68,7 +68,7 @@ import {
   parseMessageWithAttachments,
 } from "../chat-attachments.js";
 import { MediaOffloadError } from "../chat-attachments.js";
-import { stripEnvelopeFromMessage, stripEnvelopeFromMessages } from "../chat-sanitize.js";
+import { stripEnvelopeFromMessage } from "../chat-sanitize.js";
 import { augmentChatHistoryWithCliSessionImports } from "../cli-session-history.js";
 import { isSuppressedControlReplyText } from "../control-reply-text.js";
 import { ADMIN_SCOPE } from "../method-scopes.js";
@@ -906,7 +906,7 @@ function extractChatHistoryBlockText(message: unknown): string | undefined {
 
 function sanitizeChatHistoryContentBlock(
   block: unknown,
-  opts?: { preserveExactToolPayload?: boolean; maxChars?: number },
+  opts?: { preserveExactToolPayload?: boolean; maxChars?: number; skipTextTruncation?: boolean },
 ): { block: unknown; changed: boolean } {
   if (!block || typeof block !== "object") {
     return { block, changed: false };
@@ -916,9 +916,10 @@ function sanitizeChatHistoryContentBlock(
   const preserveExactToolPayload =
     opts?.preserveExactToolPayload === true || isToolHistoryBlockType(entry.type);
   const maxChars = opts?.maxChars ?? DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS;
+  const skipTextTruncation = opts?.skipTextTruncation === true;
   if (typeof entry.text === "string") {
     const stripped = stripInlineDirectiveTagsForDisplay(entry.text);
-    if (preserveExactToolPayload) {
+    if (preserveExactToolPayload || skipTextTruncation) {
       entry.text = stripped.text;
       changed ||= stripped.changed;
     } else {
@@ -929,7 +930,7 @@ function sanitizeChatHistoryContentBlock(
   }
   if (typeof entry.content === "string") {
     const stripped = stripInlineDirectiveTagsForDisplay(entry.content);
-    if (preserveExactToolPayload) {
+    if (preserveExactToolPayload || skipTextTruncation) {
       entry.content = stripped.text;
       changed ||= stripped.changed;
     } else {
@@ -1069,6 +1070,7 @@ function sanitizeCost(raw: unknown): { total?: number } | undefined {
 function sanitizeChatHistoryMessage(
   message: unknown,
   maxChars: number = DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
+  options?: { skipTextTruncation?: boolean },
 ): { message: unknown; changed: boolean } {
   if (!message || typeof message !== "object") {
     return { message, changed: false };
@@ -1085,6 +1087,7 @@ function sanitizeChatHistoryMessage(
     typeof entry.tool_name === "string" ||
     typeof entry.toolCallId === "string" ||
     typeof entry.tool_call_id === "string";
+  const skipTextTruncation = options?.skipTextTruncation === true;
 
   if ("details" in entry) {
     delete entry.details;
@@ -1126,7 +1129,7 @@ function sanitizeChatHistoryMessage(
 
   if (typeof entry.content === "string") {
     const stripped = stripInlineDirectiveTagsForDisplay(entry.content);
-    if (preserveExactToolPayload) {
+    if (preserveExactToolPayload || skipTextTruncation) {
       entry.content = stripped.text;
       changed ||= stripped.changed;
     } else {
@@ -1136,7 +1139,11 @@ function sanitizeChatHistoryMessage(
     }
   } else if (Array.isArray(entry.content)) {
     const updated = entry.content.map((block) =>
-      sanitizeChatHistoryContentBlock(block, { preserveExactToolPayload, maxChars }),
+      sanitizeChatHistoryContentBlock(block, {
+        preserveExactToolPayload,
+        maxChars,
+        skipTextTruncation,
+      }),
     );
     if (updated.some((item) => item.changed)) {
       entry.content = updated.map((item) => item.block);
@@ -1153,7 +1160,7 @@ function sanitizeChatHistoryMessage(
 
   if (typeof entry.text === "string") {
     const stripped = stripInlineDirectiveTagsForDisplay(entry.text);
-    if (preserveExactToolPayload) {
+    if (preserveExactToolPayload || skipTextTruncation) {
       entry.text = stripped.text;
       changed ||= stripped.changed;
     } else {
@@ -1356,7 +1363,7 @@ export function sanitizeChatHistoryMessages(
       changed = true;
       continue;
     }
-    const res = sanitizeChatHistoryMessage(message, maxChars);
+    const res = sanitizeChatHistoryMessage(message, maxChars, { skipTextTruncation: true });
     changed ||= res.changed;
     if (shouldDropUserHistoryMessage(res.message, heartbeatPrompt)) {
       changed = true;
@@ -1366,7 +1373,10 @@ export function sanitizeChatHistoryMessages(
       changed = true;
       continue;
     }
-    next.push(res.message);
+    const visibleMessage = stripEnvelopeFromMessage(res.message);
+    const finalRes = sanitizeChatHistoryMessage(visibleMessage, maxChars);
+    changed ||= visibleMessage !== res.message || finalRes.changed;
+    next.push(finalRes.message);
   }
   return changed ? next : messages;
 }
@@ -2029,12 +2039,11 @@ export const chatHandlers: GatewayRequestHandlers = {
     const withoutRuntimeContent = stripRuntimeInjectedContent(sliced, {
       heartbeatPrompt,
     });
-    const normalized = augmentChatHistoryWithCanvasBlocks(
+    const sanitized = augmentChatHistoryWithCanvasBlocks(
       sanitizeChatHistoryMessages(withoutRuntimeContent, effectiveMaxChars, {
         heartbeatPrompt,
       }),
     );
-    const sanitized = stripEnvelopeFromMessages(normalized);
     const maxHistoryBytes = getMaxChatHistoryMessagesBytes();
     const perMessageHardCap = Math.min(CHAT_HISTORY_MAX_SINGLE_MESSAGE_BYTES, maxHistoryBytes);
     const replaced = replaceOversizedChatHistoryMessages({
