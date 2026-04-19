@@ -94,6 +94,10 @@ function replacementPreservesWordBoundary(source: string, offset: number, length
   return before && after && !/\s/u.test(before) && !/\s/u.test(after) ? " " : "";
 }
 
+function isInlineSpacing(char: string | undefined): boolean {
+  return char === " " || char === "\t";
+}
+
 function isEmotionTagBoundary(char: string | undefined, side: "before" | "after"): boolean {
   if (!char) {
     return true;
@@ -189,7 +193,7 @@ export function stripEmotionTags(
     const after = text[nextCursor];
     const alreadySeparated =
       index === 0 || replacement === " " || (before ? /\s/u.test(before) : false);
-    if (alreadySeparated && after && /\s/u.test(after)) {
+    if (alreadySeparated && isInlineSpacing(after)) {
       nextCursor += 1;
     }
     cursor = nextCursor;

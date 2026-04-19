@@ -28,6 +28,12 @@ describe("stripEmotionTags", () => {
       changed: false,
     });
   });
+
+  test("preserves newlines after stripping a standalone emotion tag", () => {
+    const result = stripEmotionTags("[warmly]\nHello there");
+
+    expect(result).toEqual({ text: "\nHello there", changed: true });
+  });
 });
 
 describe("sanitizeEmotionTagsForMode", () => {
