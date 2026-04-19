@@ -2,12 +2,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { CURRENT_SESSION_VERSION, SessionManager } from "@mariozechner/pi-coding-agent";
 import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
-import { resolveSessionAgentId } from "../../agents/agent-scope.js";
+import { resolveAgentConfig, resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { resolveThinkingDefault } from "../../agents/model-selection.js";
 import { rewriteTranscriptEntriesInSessionFile } from "../../agents/pi-embedded-runner/transcript-rewrite.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { dispatchInboundMessage } from "../../auto-reply/dispatch.js";
-import { HEARTBEAT_PROMPT } from "../../auto-reply/heartbeat.js";
+import {
+  HEARTBEAT_PROMPT,
+  resolveHeartbeatPrompt as resolveHeartbeatPromptText,
+} from "../../auto-reply/heartbeat.js";
 import {
   buildCronEventPrompt,
   buildExecEventPrompt,
@@ -200,6 +203,15 @@ const USER_REMINDER_PROMPT_TEMPLATE = buildCronEventPrompt([RUNTIME_PROMPT_TEMPL
   deliverToUser: true,
 });
 
+function resolveChatHistoryHeartbeatPrompt(config: Record<string, unknown>, agentId?: string): string {
+  const cfg = config as {
+    agents?: { defaults?: { heartbeat?: { prompt?: string } } };
+  };
+  const defaults = cfg.agents?.defaults?.heartbeat;
+  const agentHeartbeat = agentId ? resolveAgentConfig(cfg as never, agentId)?.heartbeat : undefined;
+  return resolveHeartbeatPromptText(agentHeartbeat?.prompt ?? defaults?.prompt);
+}
+
 function matchesTemplateWithDynamicBody(text: string, template: string, marker: string): boolean {
   const markerIndex = template.indexOf(marker);
   if (markerIndex < 0) {
@@ -296,6 +308,7 @@ function hasNonTextContentBlocks(entry: Record<string, unknown>): boolean {
 
 function stripRuntimeContentFromMessage(
   message: unknown,
+  heartbeatPrompt: string = HEARTBEAT_PROMPT,
 ): { message: unknown; changed: boolean; empty: boolean } {
   if (!message || typeof message !== "object") {
     return { message, changed: false, empty: false };
@@ -313,7 +326,7 @@ function stripRuntimeContentFromMessage(
   if (stripped === extracted.text) {
     return { message, changed: false, empty: false };
   }
-  if (hasRuntimeEnvelopeText(extracted.text) && isRuntimePromptText(stripped)) {
+  if (hasRuntimeEnvelopeText(extracted.text) && isRuntimePromptText(stripped, heartbeatPrompt)) {
     return { message, changed: true, empty: true };
   }
   if (!stripped) {
@@ -343,14 +356,18 @@ function stripRuntimeContentFromMessage(
   return { message: updated, changed: true, empty: false };
 }
 
-export function stripRuntimeInjectedContent(messages: unknown[]): unknown[] {
+export function stripRuntimeInjectedContent(
+  messages: unknown[],
+  options?: { heartbeatPrompt?: string },
+): unknown[] {
   if (messages.length === 0) {
     return messages;
   }
   let changed = false;
   const result: unknown[] = [];
+  const heartbeatPrompt = options?.heartbeatPrompt ?? HEARTBEAT_PROMPT;
   for (const message of messages) {
-    const res = stripRuntimeContentFromMessage(message);
+    const res = stripRuntimeContentFromMessage(message, heartbeatPrompt);
     if (res.empty) {
       changed = true;
       continue;
@@ -1161,13 +1178,13 @@ function hasRuntimeEnvelopeText(text: string): boolean {
   );
 }
 
-function isRuntimePromptText(text: string): boolean {
+function isRuntimePromptText(text: string, heartbeatPrompt: string = HEARTBEAT_PROMPT): boolean {
   const trimmed = text.trim();
   if (!trimmed) {
     return false;
   }
   return (
-    isHeartbeatUserMessage({ role: "user", content: trimmed }, HEARTBEAT_PROMPT) ||
+    isHeartbeatUserMessage({ role: "user", content: trimmed }, heartbeatPrompt) ||
     trimmed === INTERNAL_EXEC_COMPLETION_PROMPT ||
     trimmed === USER_EXEC_COMPLETION_PROMPT ||
     trimmed === INTERNAL_CRON_NO_CONTENT_PROMPT ||
@@ -1185,7 +1202,10 @@ function isRuntimePromptText(text: string): boolean {
   );
 }
 
-function shouldDropUserHistoryMessage(message: unknown): boolean {
+function shouldDropUserHistoryMessage(
+  message: unknown,
+  heartbeatPrompt: string = HEARTBEAT_PROMPT,
+): boolean {
   if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== "user") {
     return false;
   }
@@ -1199,13 +1219,13 @@ function shouldDropUserHistoryMessage(message: unknown): boolean {
   }
   const runtimeText = stripRuntimeContentFromText(text);
   const hasRuntimeEnvelope = hasRuntimeEnvelopeText(rawText);
-  if (runtimeText !== text && hasRuntimeEnvelope && isRuntimePromptText(runtimeText)) {
+  if (runtimeText !== text && hasRuntimeEnvelope && isRuntimePromptText(runtimeText, heartbeatPrompt)) {
     return true;
   }
   if (!hasRuntimeEnvelope) {
     return false;
   }
-  if (isHeartbeatUserMessage({ role: "user", content: text }, HEARTBEAT_PROMPT)) {
+  if (isHeartbeatUserMessage({ role: "user", content: text }, heartbeatPrompt)) {
     return true;
   }
   if (
@@ -1262,14 +1282,16 @@ function shouldDropAssistantHistoryMessage(message: unknown): boolean {
 export function sanitizeChatHistoryMessages(
   messages: unknown[],
   maxChars: number = DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
+  options?: { heartbeatPrompt?: string },
 ): unknown[] {
   if (messages.length === 0) {
     return messages;
   }
+  const heartbeatPrompt = options?.heartbeatPrompt ?? HEARTBEAT_PROMPT;
   let changed = false;
   const next: unknown[] = [];
   for (const message of messages) {
-    if (shouldDropUserHistoryMessage(message)) {
+    if (shouldDropUserHistoryMessage(message, heartbeatPrompt)) {
       changed = true;
       continue;
     }
@@ -1279,7 +1301,7 @@ export function sanitizeChatHistoryMessages(
     }
     const res = sanitizeChatHistoryMessage(message, maxChars);
     changed ||= res.changed;
-    if (shouldDropUserHistoryMessage(res.message)) {
+    if (shouldDropUserHistoryMessage(res.message, heartbeatPrompt)) {
       changed = true;
       continue;
     }
@@ -1944,11 +1966,16 @@ export const chatHandlers: GatewayRequestHandlers = {
     const max = Math.min(hardMax, requested);
     const effectiveMaxChars = resolveEffectiveChatHistoryMaxChars(cfg, maxChars);
     const sliced = rawMessages.length > max ? rawMessages.slice(-max) : rawMessages;
+    const heartbeatPrompt = resolveChatHistoryHeartbeatPrompt(cfg, sessionAgentId);
     // Suppress leaked internal runtime prompts before stripping envelopes,
     // so sentinel detection still sees trusted inbound metadata.
-    const withoutRuntimeContent = stripRuntimeInjectedContent(sliced);
+    const withoutRuntimeContent = stripRuntimeInjectedContent(sliced, {
+      heartbeatPrompt,
+    });
     const normalized = augmentChatHistoryWithCanvasBlocks(
-      sanitizeChatHistoryMessages(withoutRuntimeContent, effectiveMaxChars),
+      sanitizeChatHistoryMessages(withoutRuntimeContent, effectiveMaxChars, {
+        heartbeatPrompt,
+      }),
     );
     const sanitized = stripEnvelopeFromMessages(normalized);
     const maxHistoryBytes = getMaxChatHistoryMessagesBytes();

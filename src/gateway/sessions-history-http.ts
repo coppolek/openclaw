@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
+import { resolveAgentConfig, resolveSessionAgentId } from "../agents/agent-scope.js";
+import { resolveHeartbeatPrompt as resolveHeartbeatPromptText } from "../auto-reply/heartbeat.js";
 import { loadConfig } from "../config/config.js";
 import { loadSessionStore } from "../config/sessions.js";
 import { onSessionTranscriptUpdate } from "../sessions/transcript-events.js";
@@ -32,6 +34,16 @@ import {
 } from "./session-utils.js";
 
 const MAX_SESSION_HISTORY_LIMIT = 1000;
+
+function resolveSessionHistoryHeartbeatPrompt(cfg: Record<string, unknown>, sessionKey: string): string {
+  const typed = cfg as {
+    agents?: { defaults?: { heartbeat?: { prompt?: string } } };
+  };
+  const sessionAgentId = resolveSessionAgentId({ sessionKey, config: typed as never });
+  const defaults = typed.agents?.defaults?.heartbeat;
+  const agentHeartbeat = resolveAgentConfig(typed as never, sessionAgentId)?.heartbeat;
+  return resolveHeartbeatPromptText(agentHeartbeat?.prompt ?? defaults?.prompt);
+}
 
 function resolveSessionHistoryPath(req: IncomingMessage): string | null {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -155,6 +167,7 @@ export async function handleSessionHistoryHttpRequest(
     typeof cfg.gateway?.webchat?.chatHistoryMaxChars === "number"
       ? cfg.gateway.webchat.chatHistoryMaxChars
       : DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS;
+  const heartbeatPrompt = resolveSessionHistoryHeartbeatPrompt(cfg, sessionKey);
   // Read the transcript once and derive both sanitized and raw views from the
   // same snapshot, eliminating the theoretical race window where a concurrent
   // write between two separate reads could cause seq/content divergence.
@@ -166,6 +179,7 @@ export async function handleSessionHistoryHttpRequest(
     maxChars: effectiveMaxChars,
     limit,
     cursor,
+    heartbeatPrompt,
   });
   const history = historySnapshot.history;
 
@@ -201,6 +215,7 @@ export async function handleSessionHistoryHttpRequest(
     maxChars: effectiveMaxChars,
     limit,
     cursor,
+    heartbeatPrompt,
   });
   sentHistory = sseState.snapshot();
   setSseHeaders(res);

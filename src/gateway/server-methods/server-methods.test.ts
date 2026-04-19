@@ -352,6 +352,57 @@ describe("sanitizeChatHistoryMessages", () => {
     ]);
   });
 
+  it("drops leaked custom heartbeat prompt + ack from chat history", () => {
+    const customHeartbeatPrompt =
+      "Custom heartbeat ping. Reply HEARTBEAT_OK when nothing needs attention.";
+    const result = sanitizeChatHistoryMessages(
+      [
+        {
+          role: "user",
+          content: [{ type: "text", text: "hello" }],
+          timestamp: 1,
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text:
+                'Sender (untrusted metadata):\n```json\n{"label":"openclaw-control-ui"}\n```\n\n[Fri 2026-04-17 11:19 AKDT] ' +
+                customHeartbeatPrompt,
+            },
+          ],
+          timestamp: 2,
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "HEARTBEAT_OK" }],
+          timestamp: 3,
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "real reply" }],
+          timestamp: 4,
+        },
+      ],
+      DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
+      { heartbeatPrompt: customHeartbeatPrompt },
+    );
+
+    expect(result).toEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "hello" }],
+        timestamp: 1,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "real reply" }],
+        timestamp: 4,
+      },
+    ]);
+  });
+
   it("keeps assistant text that merely mentions HEARTBEAT_OK", () => {
     const result = sanitizeChatHistoryMessages([
       {
