@@ -123,7 +123,8 @@ export class SessionHistorySseState {
   private readonly maxChars: number;
   private readonly limit: number | undefined;
   private readonly cursor: string | undefined;
-  private readonly emotionMode: "off" | "on" | "full";
+  private readonly resolveEmotionMode?: () => "off" | "on" | "full";
+  private emotionMode: "off" | "on" | "full";
   private sentHistory: PaginatedSessionHistory;
   private rawTranscriptSeq: number;
 
@@ -134,6 +135,7 @@ export class SessionHistorySseState {
     limit?: number;
     cursor?: string;
     emotionMode?: "off" | "on" | "full";
+    resolveEmotionMode?: () => "off" | "on" | "full";
   }): SessionHistorySseState {
     return new SessionHistorySseState({
       target: params.target,
@@ -141,6 +143,7 @@ export class SessionHistorySseState {
       limit: params.limit,
       cursor: params.cursor,
       emotionMode: params.emotionMode,
+      resolveEmotionMode: params.resolveEmotionMode,
       initialRawMessages: params.rawMessages,
     });
   }
@@ -151,13 +154,15 @@ export class SessionHistorySseState {
     limit?: number;
     cursor?: string;
     emotionMode?: "off" | "on" | "full";
+    resolveEmotionMode?: () => "off" | "on" | "full";
     initialRawMessages?: unknown[];
   }) {
     this.target = params.target;
     this.maxChars = params.maxChars ?? DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS;
     this.limit = params.limit;
     this.cursor = params.cursor;
-    this.emotionMode = params.emotionMode ?? "off";
+    this.resolveEmotionMode = params.resolveEmotionMode;
+    this.emotionMode = this.resolveEmotionMode?.() ?? params.emotionMode ?? "off";
     const rawMessages = params.initialRawMessages ?? this.readRawMessages();
     const snapshot = buildSessionHistorySnapshot({
       rawMessages,
@@ -168,6 +173,11 @@ export class SessionHistorySseState {
     });
     this.sentHistory = snapshot.history;
     this.rawTranscriptSeq = snapshot.rawTranscriptSeq;
+  }
+
+  private getCurrentEmotionMode(): "off" | "on" | "full" {
+    this.emotionMode = this.resolveEmotionMode?.() ?? this.emotionMode;
+    return this.emotionMode;
   }
 
   snapshot(): PaginatedSessionHistory {
@@ -186,7 +196,11 @@ export class SessionHistorySseState {
       ...(typeof update.messageId === "string" ? { id: update.messageId } : {}),
       seq: this.rawTranscriptSeq,
     });
-    const sanitized = sanitizeChatHistoryMessages([nextMessage], this.maxChars, this.emotionMode);
+    const sanitized = sanitizeChatHistoryMessages(
+      [nextMessage],
+      this.maxChars,
+      this.getCurrentEmotionMode(),
+    );
     if (sanitized.length === 0) {
       return null;
     }
@@ -211,7 +225,7 @@ export class SessionHistorySseState {
       maxChars: this.maxChars,
       limit: this.limit,
       cursor: this.cursor,
-      emotionMode: this.emotionMode,
+      emotionMode: this.getCurrentEmotionMode(),
     });
     this.rawTranscriptSeq = snapshot.rawTranscriptSeq;
     this.sentHistory = snapshot.history;

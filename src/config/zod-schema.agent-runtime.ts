@@ -821,6 +821,9 @@ export const AgentEntrySchema = z
     thinkingDefault: z
       .enum(["off", "minimal", "low", "medium", "high", "xhigh", "adaptive", "max"])
       .optional(),
+    // `full` is intentionally excluded here so default config stays on the
+    // end-user operational modes. The raw-tag inspection view remains a
+    // session-level override via `/emotions full`.
     emotionDefault: z.enum(["off", "on"]).optional(),
     reasoningDefault: z.enum(["on", "off", "stream"]).optional(),
     fastModeDefault: z.boolean().optional(),

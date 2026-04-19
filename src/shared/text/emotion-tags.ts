@@ -23,7 +23,7 @@ function isEmotionTagBoundary(char: string | undefined, side: "before" | "after"
     return true;
   }
   if (side === "before") {
-    return /[\s([{>"'`]/u.test(char);
+    return /[\s({>"'`]/u.test(char);
   }
   return /[\s.,!?;:)\]}>/"'`-]/u.test(char);
 }
@@ -125,7 +125,10 @@ export function sanitizeEmotionTagsForMode(
   options: StripEmotionTagsOptions = {},
 ): StripEmotionTagsResult {
   if (mode === "full") {
-    return { text, changed: false };
+    if (!options.allowTrailingPartialTag) {
+      return { text, changed: false };
+    }
+    return stripTrailingPartialEmotionTag(text);
   }
   return stripEmotionTags(text, options);
 }

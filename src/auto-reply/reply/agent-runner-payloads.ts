@@ -126,7 +126,7 @@ export async function buildReplyPayloads(params: {
     ? params.payloads
     : params.payloads.flatMap((payload) => {
         let text = payload.text;
-        const rawEmotionTtsText = typeof payload.text === "string" ? payload.text : undefined;
+        let rawEmotionTtsText: string | undefined;
 
         if (payload.isError && text && isBunFetchSocketError(text)) {
           text = formatBunFetchSocketError(text);
@@ -134,6 +134,7 @@ export async function buildReplyPayloads(params: {
 
         if (!text || !text.includes("HEARTBEAT_OK")) {
           if (typeof text === "string") {
+            rawEmotionTtsText = text;
             const emotionSanitized = sanitizeEmotionTagsForMode(text, params.emotionMode);
             text = emotionSanitized.text;
           }
@@ -156,6 +157,7 @@ export async function buildReplyPayloads(params: {
         if (stripped.shouldSkip && !hasMedia) {
           return [];
         }
+        rawEmotionTtsText = stripped.text;
         const emotionSanitized = sanitizeEmotionTagsForMode(stripped.text, params.emotionMode);
         return [
           {

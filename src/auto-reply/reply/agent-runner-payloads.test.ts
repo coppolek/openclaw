@@ -306,4 +306,38 @@ describe("buildReplyPayloads media filter integration", () => {
     }
     expect(getReplyPayloadMetadata(payload)?.ttsSourceText).toBe("[warmly] hello there");
   });
+
+  it("captures raw TTS metadata after heartbeat cleanup", async () => {
+    const { replyPayloads } = await buildReplyPayloads({
+      ...baseParams,
+      emotionMode: "on",
+      payloads: [{ text: "HEARTBEAT_OK [warmly] hello there" }],
+    });
+
+    expect(replyPayloads).toHaveLength(1);
+    const [payload] = replyPayloads;
+    expect(payload?.text).toBe("hello there");
+    if (!payload) {
+      throw new Error("expected payload");
+    }
+    expect(getReplyPayloadMetadata(payload)?.ttsSourceText).toBe("[warmly] hello there");
+  });
+
+  it("preserves inline directives while hiding emotion tags", async () => {
+    const { replyPayloads } = await buildReplyPayloads({
+      ...baseParams,
+      emotionMode: "on",
+      payloads: [{ text: "[[audio_as_voice]] [warmly] hello there" }],
+    });
+
+    expect(replyPayloads).toHaveLength(1);
+    const [payload] = replyPayloads;
+    expect(payload).toMatchObject({ text: "hello there", audioAsVoice: true });
+    if (!payload) {
+      throw new Error("expected payload");
+    }
+    expect(getReplyPayloadMetadata(payload)?.ttsSourceText).toBe(
+      "[[audio_as_voice]] [warmly] hello there",
+    );
+  });
 });

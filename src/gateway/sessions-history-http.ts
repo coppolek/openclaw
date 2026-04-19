@@ -179,6 +179,11 @@ export async function handleSessionHistoryHttpRequest(
           .filter((candidate): candidate is string => typeof candidate === "string"),
       )
     : new Set<string>();
+  const resolveLiveEmotionMode = () =>
+    normalizeEmotionMode(
+      resolveFreshestSessionEntryFromStoreKeys(loadSessionStore(target.storePath), target.storeKeys)
+        ?.emotionMode,
+    ) ?? "off";
 
   let sentHistory = history;
   const sseState = SessionHistorySseState.fromRawSnapshot({
@@ -192,6 +197,7 @@ export async function handleSessionHistoryHttpRequest(
     limit,
     cursor,
     emotionMode,
+    resolveEmotionMode: resolveLiveEmotionMode,
   });
   sentHistory = sseState.snapshot();
   setSseHeaders(res);
