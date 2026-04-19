@@ -112,11 +112,12 @@ export type GoogleChatAccountConfig = {
    */
   typingIndicator?: "none" | "message" | "reaction";
   /**
-   * When true, bind each OpenClaw session to a single Google Chat thread: the
-   * inbound `thread.name` is used as the session peer id, so each Chat thread
-   * has its own conversation history and no context bleeds across threads in
-   * the same space. Falls back to the space id when the inbound message has no
-   * thread. Default: false (space-scoped session, prior behavior).
+   * When true, partition the OpenClaw session per Google Chat thread by
+   * appending a `:thread:<threadId>` suffix to the session key derived from
+   * the space. Agent route matching still keys on the space id, so existing
+   * bindings keep working; only session history is thread-scoped. Falls back
+   * to the space-level session key when the inbound message has no thread.
+   * Default: false (space-scoped session, prior behavior).
    */
   sessionThread?: boolean;
   /** Outbound response prefix override for this channel/account. */

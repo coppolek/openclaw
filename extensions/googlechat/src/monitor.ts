@@ -7,6 +7,7 @@ import type { OpenClawConfig } from "../runtime-api.js";
 import {
   createChannelReplyPipeline,
   resolveInboundRouteEnvelopeBuilderWithRuntime,
+  resolveThreadSessionKeys,
   resolveWebhookPath,
 } from "../runtime-api.js";
 import { type ResolvedGoogleChatAccount } from "./accounts.js";
@@ -47,15 +48,18 @@ function logVerbose(core: GoogleChatCoreRuntime, runtime: GoogleChatRuntimeEnv, 
   }
 }
 
-export function resolveGoogleChatPeerId(params: {
-  spaceId: string;
+export function resolveGoogleChatSessionKey(params: {
+  baseSessionKey: string;
   threadName: string | null | undefined;
   sessionThread: boolean | undefined;
 }): string {
-  if (params.sessionThread && params.threadName) {
-    return params.threadName;
+  if (!params.sessionThread || !params.threadName) {
+    return params.baseSessionKey;
   }
-  return params.spaceId;
+  return resolveThreadSessionKeys({
+    baseSessionKey: params.baseSessionKey,
+    threadId: params.threadName,
+  }).sessionKey;
 }
 
 function normalizeAudienceType(value?: string | null): GoogleChatAudienceType | undefined {
@@ -181,21 +185,24 @@ async function processMessageWithPipeline(params: {
   }
   const { commandAuthorized, effectiveWasMentioned, groupSystemPrompt } = access;
 
-  const peerId = resolveGoogleChatPeerId({
-    spaceId,
-    threadName: message.thread?.name,
-    sessionThread: account.config.sessionThread,
-  });
   const { route, buildEnvelope } = resolveInboundRouteEnvelopeBuilderWithRuntime({
     cfg: config,
     channel: "googlechat",
     accountId: account.accountId,
     peer: {
       kind: isGroup ? ("group" as const) : ("direct" as const),
-      id: peerId,
+      id: spaceId,
     },
     runtime: core.channel,
     sessionStore: config.session?.store,
+  });
+  // When sessionThread is enabled, partition the session per Chat thread via a
+  // sessionKey suffix. Routing still keys on spaceId above, so existing
+  // agent bindings to the space are preserved.
+  route.sessionKey = resolveGoogleChatSessionKey({
+    baseSessionKey: route.sessionKey,
+    threadName: message.thread?.name,
+    sessionThread: account.config.sessionThread,
   });
 
   let mediaPath: string | undefined;
