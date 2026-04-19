@@ -70,13 +70,25 @@ describe("gateway silent scope-upgrade reconnect", () => {
         (obj) => obj.type === "event" && obj.event === "device.pair.requested",
       );
       sharedAuthReconnectWs = await openTrackedWs(started.port);
+      const closeFrame = new Promise<{ code: number; reason: string }>((resolve) => {
+        sharedAuthReconnectWs?.once("close", (code, reason) => {
+          resolve({ code, reason: reason.toString() });
+        });
+      });
       const sharedAuthUpgradeAttempt = await connectReq(sharedAuthReconnectWs, {
         token: "secret",
         deviceIdentityPath: paired.identityPath,
         scopes: ["operator.admin"],
       });
       expect(sharedAuthUpgradeAttempt.ok).toBe(false);
-      expect(sharedAuthUpgradeAttempt.error?.message).toBe("pairing required");
+      expect(sharedAuthUpgradeAttempt.error?.message).toBe("pairing required (scope-upgrade)");
+      // Issue #64421: close-frame reason must also carry the specific pairing reason
+      // so CLI/TUI users see "pairing required (scope-upgrade)" instead of a generic
+      // "pairing required" when cron.add (or any admin-scope call) hits scope elevation.
+      await expect(closeFrame).resolves.toEqual({
+        code: 1008,
+        reason: "pairing required (scope-upgrade)",
+      });
 
       await expectRejectedScopeUpgradeAttempt({
         attempt: sharedAuthUpgradeAttempt,
@@ -137,7 +149,7 @@ describe("gateway silent scope-upgrade reconnect", () => {
         scopes: ["operator.admin"],
       });
       expect(reconnectAttempt.ok).toBe(false);
-      expect(reconnectAttempt.error?.message).toBe("pairing required");
+      expect(reconnectAttempt.error?.message).toBe("pairing required (scope-upgrade)");
 
       await expectRejectedScopeUpgradeAttempt({
         attempt: reconnectAttempt,
@@ -230,7 +242,7 @@ describe("gateway silent scope-upgrade reconnect", () => {
       });
 
       expect(res.ok).toBe(false);
-      expect(res.error?.message).toBe("pairing required");
+      expect(res.error?.message).toBe("pairing required (not-paired)");
       expect(
         (res.error?.details as { requestId?: unknown; code?: string } | undefined)?.requestId,
       ).toBeUndefined();
@@ -283,7 +295,7 @@ describe("gateway silent scope-upgrade reconnect", () => {
       });
 
       expect(res.ok).toBe(false);
-      expect(res.error?.message).toBe("pairing required");
+      expect(res.error?.message).toBe("pairing required (not-paired)");
       expect(replacementRequestId).toBeTruthy();
       expect(
         (res.error?.details as { requestId?: unknown; code?: string } | undefined)?.requestId,
