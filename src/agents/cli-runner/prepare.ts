@@ -166,16 +166,24 @@ export async function prepareCliRunContext(
     additionalConfig: mcpLoopbackRuntime
       ? prepareDeps.createMcpLoopbackServerConfig(mcpLoopbackRuntime.port)
       : undefined,
-    env: mcpLoopbackRuntime
-      ? {
-          OPENCLAW_MCP_TOKEN: mcpLoopbackRuntime.token,
-          OPENCLAW_MCP_AGENT_ID: sessionAgentId ?? "",
-          OPENCLAW_MCP_ACCOUNT_ID: params.agentAccountId ?? "",
-          OPENCLAW_MCP_SESSION_KEY: params.sessionKey ?? "",
-          OPENCLAW_MCP_MESSAGE_CHANNEL: params.messageProvider ?? "",
-          OPENCLAW_MCP_SENDER_IS_OWNER: params.senderIsOwner === true ? "true" : "false",
-        }
-      : undefined,
+    env: {
+      ...(mcpLoopbackRuntime
+        ? {
+            OPENCLAW_MCP_TOKEN: mcpLoopbackRuntime.token,
+            OPENCLAW_MCP_AGENT_ID: sessionAgentId ?? "",
+            OPENCLAW_MCP_ACCOUNT_ID: params.agentAccountId ?? "",
+            OPENCLAW_MCP_SESSION_KEY: params.sessionKey ?? "",
+            OPENCLAW_MCP_MESSAGE_CHANNEL: params.messageProvider ?? "",
+            OPENCLAW_MCP_SENDER_IS_OWNER: params.senderIsOwner === true ? "true" : "false",
+          }
+        : {}),
+      // Scope ceiling: always write to subprocess env, even when no loopback runtime.
+      // Overrides any value the parent process may have inherited. Unconditionally
+      // enforces that a cron job's effective scopes cannot exceed creatorScopes.
+      ...(params.operatorScopes !== undefined
+        ? { OPENCLAW_MCP_OPERATOR_SCOPES: params.operatorScopes.join(",") }
+        : {}),
+    },
     warn: (message) => cliBackendLog.warn(message),
   });
   const preparedExecution = await backendResolved.prepareExecution?.({

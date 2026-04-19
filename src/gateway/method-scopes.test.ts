@@ -37,6 +37,7 @@ describe("method scope resolution", () => {
     ["config.patch", ["operator.admin"]],
     ["wizard.start", ["operator.admin"]],
     ["update.run", ["operator.admin"]],
+    ["cron.add", ["operator.write"]],
   ])("resolves least-privilege scopes for %s", (method, expected) => {
     expect(resolveLeastPrivilegeOperatorScopesForMethod(method)).toEqual(expected);
   });
@@ -84,6 +85,19 @@ describe("operator scope authorization", () => {
     expect(authorizeOperatorScopesForMethod("send", ["operator.read"])).toEqual({
       allowed: false,
       missingScope: "operator.write",
+    });
+  });
+
+  it("requires operator.write for cron.add", () => {
+    expect(authorizeOperatorScopesForMethod("cron.add", ["operator.read"])).toEqual({
+      allowed: false,
+      missingScope: "operator.write",
+    });
+    expect(authorizeOperatorScopesForMethod("cron.add", ["operator.write"])).toEqual({
+      allowed: true,
+    });
+    expect(authorizeOperatorScopesForMethod("cron.add", ["operator.admin"])).toEqual({
+      allowed: true,
     });
   });
 
