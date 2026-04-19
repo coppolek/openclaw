@@ -130,8 +130,7 @@ export async function sendMessageWhatsApp(
             : media.contentType?.startsWith("audio/")
               ? media.contentType
               : "audio/ogg; codecs=opus";
-      }
-      if (media.kind === "audio") {
+      } else if (!forceVoiceDelivery && media.kind === "audio") {
         // WhatsApp expects explicit opus codec for PTT voice notes.
         mediaType =
           media.contentType === "audio/ogg"

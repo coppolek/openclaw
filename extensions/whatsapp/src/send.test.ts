@@ -216,6 +216,29 @@ describe("web outbound", () => {
     );
   });
 
+  it("forces voice-note when audioAsVoice is true and contentType is null", async () => {
+    const buf = Buffer.from("aud");
+    loadWebMediaMock.mockResolvedValueOnce({
+      buffer: buf,
+      contentType: null,
+      kind: "audio",
+      fileName: "voice.ogg",
+    });
+
+    await sendMessageWhatsApp("+1555", "voice null content type", {
+      verbose: false,
+      mediaUrl: "/tmp/voice.ogg",
+      audioAsVoice: true,
+    });
+
+    expect(sendMessage).toHaveBeenLastCalledWith(
+      "+1555",
+      "voice null content type",
+      buf,
+      "audio/ogg; codecs=opus",
+    );
+  });
+
   it("does not force voice-note for non-audio files when audioAsVoice is true", async () => {
     const buf = Buffer.from("pdf");
     loadWebMediaMock.mockResolvedValueOnce({
