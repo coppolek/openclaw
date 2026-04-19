@@ -312,6 +312,166 @@ describe("sanitizeUserFacingText", () => {
     expect(sanitizeUserFacingText(undefined as unknown as string)).toBe("");
     expect(sanitizeUserFacingText(42 as unknown as string)).toBe("42");
   });
+
+  it("strips tool_call XML tags from text", () => {
+    const text =
+      'Here is my response <tool_call>{"name": "exec", "arguments": {"command": "echo test"}}</tool_call>';
+    // Leading space before the stripped tag is preserved, matching the
+    // existing FINAL_TAG_RE stripper's whitespace handling. Callers that
+    // care can trim downstream.
+    expect(sanitizeUserFacingText(text)).toBe("Here is my response ");
+  });
+
+  it("strips multiple tool_call tags", () => {
+    const text =
+      'Before <tool_call>{"name": "read"}</tool_call> middle <tool_call>{"name": "write"}</tool_call> after';
+    expect(sanitizeUserFacingText(text)).toBe("Before middle after");
+  });
+
+  it("strips JSON tool_result XML tags from text", () => {
+    const text = 'Response <tool_result>{"output":"some output"}</tool_result> continues';
+    expect(sanitizeUserFacingText(text)).toBe("Response continues");
+  });
+
+  it("preserves plain tool_result XML examples", () => {
+    const text = "Use <tool_result>payload</tool_result> in XML examples.";
+    expect(sanitizeUserFacingText(text)).toBe(text);
+  });
+
+  it("strips multiline tool_call tags", () => {
+    const text = 'Hello <tool_call>\n{"name": "exec",\n"arguments": {}}\n</tool_call> world';
+    expect(sanitizeUserFacingText(text)).toBe("Hello world");
+  });
+
+  it("preserves non-tool XML examples that mention tool_call tags", () => {
+    const text = "Use <tool_call>payload</tool_call> in XML examples.";
+    expect(sanitizeUserFacingText(text)).toBe(text);
+  });
+
+  it("preserves literal closing-tool-tag syntax in instructional prose", () => {
+    const text = "Use </tool_call> to close the tag.";
+    expect(sanitizeUserFacingText(text)).toBe(text);
+    expect(sanitizeUserFacingText("Use </tool_call>.")).toBe("Use </tool_call>.");
+    expect(sanitizeUserFacingText("Example: </tool_result>")).toBe("Example: </tool_result>");
+  });
+
+  it("preserves newline-formatted literal closing-tool-tag syntax", () => {
+    const text = "Use this closing tag:\n</tool_call>";
+    expect(sanitizeUserFacingText(text)).toBe(text);
+    expect(sanitizeUserFacingText("Example:\n</tool_result>")).toBe("Example:\n</tool_result>");
+  });
+
+  it("preserves literal JSON tool-call examples in instructional prose", () => {
+    const text = 'Example: <tool_call>{"name":"exec"}</tool_call> in docs.';
+    expect(sanitizeUserFacingText(text)).toBe(text);
+  });
+
+  it("preserves literal JSON tool-call examples at sentence end", () => {
+    const text = 'Example: <tool_call>{"name":"exec"}</tool_call>';
+    expect(sanitizeUserFacingText(text)).toBe(text);
+    const syntax = 'Syntax: <tool_call>{"name":"exec"}</tool_call>.';
+    expect(sanitizeUserFacingText(syntax)).toBe(syntax);
+    const literal = 'Literal: <tool_call>{"name":"exec"}</tool_call>';
+    expect(sanitizeUserFacingText(literal)).toBe(literal);
+  });
+
+  it("preserves newline-formatted literal JSON tool-call examples", () => {
+    const text = 'Use this syntax:\n<tool_call>{"name":"exec"}</tool_call>';
+    expect(sanitizeUserFacingText(text)).toBe(text);
+    const example = 'Example:\n<tool_call>{"name":"exec"}</tool_call>';
+    expect(sanitizeUserFacingText(example)).toBe(example);
+  });
+
+  it("strips broad prose that wraps JSON tool-call payloads", () => {
+    expect(sanitizeUserFacingText('show <tool_call>{"name":"exec"}</tool_call> xml')).toBe(
+      "show xml",
+    );
+  });
+
+  it("strips real tool-call payloads despite nearby docs prose", () => {
+    expect(
+      sanitizeUserFacingText(
+        'I will use <tool_call>{"name":"read","arguments":{"path":"/secret"}}</tool_call> to check docs.',
+      ),
+    ).toBe("I will use to check docs.");
+    expect(
+      sanitizeUserFacingText(
+        'Use <tool_call>{"name":"read","arguments":{"path":"/secret"}}</tool_call> to check docs.',
+      ),
+    ).toBe("Use to check docs.");
+    expect(
+      sanitizeUserFacingText(
+        'Use <tool_call>{"name":"read","arguments":{"path":"/secret"}}</tool_call>.',
+      ),
+    ).toBe("Use .");
+  });
+
+  it("does not preserve newline JSON tool-call payloads without a literal syntax cue", () => {
+    expect(sanitizeUserFacingText('Use this:\n<tool_call>{"name":"exec"}</tool_call>')).toBe(
+      "Use this:\n",
+    );
+    expect(
+      sanitizeUserFacingText(
+        'Use this tag:\n<tool_call>{"name":"read","arguments":{"path":"/secret"}}</tool_call>',
+      ),
+    ).toBe("Use this tag:\n");
+  });
+
+  it("strips tool-call tags inside indented code blocks", () => {
+    const text = [
+      "Code:",
+      "",
+      '    <tool_call>{"name":"find","arguments":{"query":"x"}}</tool_call>',
+      "After",
+    ].join("\n");
+    expect(sanitizeUserFacingText(text)).toBe(["Code:", "", "    ", "After"].join("\n"));
+    expect(
+      sanitizeUserFacingText(
+        ["Before", "", '    <tool_call>{"name":"exec"}</tool_call>', "After"].join("\n"),
+      ),
+    ).toBe(["Before", "", "    ", "After"].join("\n"));
+  });
+
+  it("strips tool-call tags from ordinary indented prose", () => {
+    const text = ["Before", '    <tool_call>{"name":"find"}</tool_call>', "After"].join("\n");
+    expect(sanitizeUserFacingText(text)).toBe(["Before", "    ", "After"].join("\n"));
+    expect(sanitizeUserFacingText('    <tool_call>{"name":"find"}</tool_call>')).toBe("");
+    expect(sanitizeUserFacingText('\t<tool_call>{"name":"find"}</tool_call>')).toBe("");
+    const afterColon = ["Before:", '    <tool_call>{"name":"find"}</tool_call>', "After"].join(
+      "\n",
+    );
+    expect(sanitizeUserFacingText(afterColon)).toBe(["Before:", "    ", "After"].join("\n"));
+  });
+
+  it("does not collapse unrelated formatting when no tool tags are stripped", () => {
+    const text = "Code:\n    indented\nA  B\t\tC";
+    expect(sanitizeUserFacingText(text)).toBe(text);
+  });
+
+  it("strips self-closing tool tags without removing visible trailing text", () => {
+    expect(sanitizeUserFacingText("Before <tool_call /> after")).toBe("Before after");
+    expect(sanitizeUserFacingText("Before <tool_result data-id='x'/> after")).toBe("Before after");
+  });
+
+  it("strips orphaned tool tags through the end of text", () => {
+    expect(sanitizeUserFacingText('Visible <tool_call>{"name": "exec"}')).toBe("Visible ");
+    expect(sanitizeUserFacingText('Visible <tool_result>{"output":"partial output"}')).toBe(
+      "Visible ",
+    );
+  });
+
+  it("does not leak embedded closing-tag text from tool payloads", () => {
+    expect(
+      sanitizeUserFacingText(
+        'Before <tool_call>{"arguments":{"cmd":"echo </tool_call> hi"}}</tool_call> after',
+      ),
+    ).toBe("Before after");
+    expect(
+      sanitizeUserFacingText(
+        'Before <tool_result>{"output":"literal </tool_result> text"}</tool_result> after',
+      ),
+    ).toBe("Before after");
+  });
 });
 
 describe("stripThoughtSignatures", () => {

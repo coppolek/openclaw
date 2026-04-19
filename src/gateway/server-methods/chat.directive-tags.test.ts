@@ -213,6 +213,21 @@ async function waitForAssertion(assertion: () => void, timeoutMs = 1000, stepMs 
   }
 }
 
+async function waitForRealTimeAssertion(assertion: () => void, timeoutMs = 1000, stepMs = 5) {
+  let lastError: unknown;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    try {
+      assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, stepMs));
+  }
+  throw lastError ?? new Error("assertion did not pass in time");
+}
+
 function createTranscriptFixture(prefix: string) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   const transcriptPath = path.join(dir, "sess.jsonl");
@@ -510,11 +525,12 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
       context,
       respond,
       idempotencyKey: "idem-agent-audio",
-      expectBroadcast: false,
+      waitFor: "none",
     });
 
-    await waitForAssertion(() => {
-      const assistantUpdate = mockState.emittedTranscriptUpdates.find(
+    let assistantUpdate: (typeof mockState.emittedTranscriptUpdates)[number] | undefined;
+    await waitForRealTimeAssertion(() => {
+      assistantUpdate = mockState.emittedTranscriptUpdates.find(
         (update) =>
           typeof update.message === "object" &&
           update.message !== null &&
@@ -525,22 +541,23 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
           ) ??
             false),
       );
-      expect(assistantUpdate).toMatchObject({
-        message: {
-          role: "assistant",
-          idempotencyKey: "idem-agent-audio:assistant-audio",
-          content: [
-            { type: "text", text: "Audio reply" },
-            {
-              type: "audio",
-              source: {
-                type: "base64",
-                media_type: "audio/mpeg",
-              },
+      expect(assistantUpdate).toBeDefined();
+    }, 5000);
+    expect(assistantUpdate).toMatchObject({
+      message: {
+        role: "assistant",
+        idempotencyKey: "idem-agent-audio:assistant-audio",
+        content: [
+          { type: "text", text: "Audio reply" },
+          {
+            type: "audio",
+            source: {
+              type: "base64",
+              media_type: "audio/mpeg",
             },
-          ],
-        },
-      });
+          },
+        ],
+      },
     });
   });
 

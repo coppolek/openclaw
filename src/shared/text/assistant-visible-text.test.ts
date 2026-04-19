@@ -127,6 +127,10 @@ describe("stripAssistantInternalScaffolding", () => {
       );
     });
 
+    it("preserves plain <tool_result> examples", () => {
+      expectLiteralVisibleText("Use <tool_result>payload</tool_result> in XML examples.");
+    });
+
     it("strips dangling <tool_result> content to end-of-string", () => {
       expectVisibleText('Result:\n<tool_result>\n{"output": "data"}\n', "Result:\n");
     });
@@ -221,6 +225,94 @@ describe("stripAssistantInternalScaffolding", () => {
 
     it("preserves lone <tool_call> mentions in normal prose", () => {
       expectVisibleText("Use <tool_call> to invoke tools.", "Use <tool_call> to invoke tools.");
+    });
+
+    it("preserves literal closing-tag syntax in instructional prose", () => {
+      expectVisibleText("Use </tool_call> to close the tag.", "Use </tool_call> to close the tag.");
+      expectVisibleText("Use </tool_call>.", "Use </tool_call>.");
+      expectVisibleText("Example: </tool_result>", "Example: </tool_result>");
+      expectVisibleText("Closing tag: </tool_call>", "Closing tag: </tool_call>");
+    });
+
+    it("preserves newline-formatted literal closing-tag syntax", () => {
+      expectVisibleText(
+        "Use this closing tag:\n</tool_call>",
+        "Use this closing tag:\n</tool_call>",
+      );
+      expectVisibleText("Example:\n</tool_result>", "Example:\n</tool_result>");
+      expectVisibleText("Literal:\n</tool_call>", "Literal:\n</tool_call>");
+      expectVisibleText("Closing tag:\n</function_calls>", "Closing tag:\n</function_calls>");
+    });
+
+    it("preserves literal JSON tool-call examples in instructional prose", () => {
+      expectVisibleText(
+        'Example: <tool_call>{"name":"exec"}</tool_call> in docs.',
+        'Example: <tool_call>{"name":"exec"}</tool_call> in docs.',
+      );
+    });
+
+    it("preserves literal JSON tool-call examples at sentence end", () => {
+      expectVisibleText(
+        'Example: <tool_call>{"name":"exec"}</tool_call>',
+        'Example: <tool_call>{"name":"exec"}</tool_call>',
+      );
+      expectVisibleText(
+        'Syntax: <tool_call>{"name":"exec"}</tool_call>.',
+        'Syntax: <tool_call>{"name":"exec"}</tool_call>.',
+      );
+      expectVisibleText(
+        'Literal: <tool_call>{"name":"exec"}</tool_call>',
+        'Literal: <tool_call>{"name":"exec"}</tool_call>',
+      );
+    });
+
+    it("does not apply one literal cue to later tool-call payloads", () => {
+      expectVisibleText(
+        'Example: <tool_call>{"name":"exec"}</tool_call> and then <tool_call>{"name":"read","arguments":{"path":"/secret"}}</tool_call>',
+        "Example:  and then ",
+      );
+      expectVisibleText(
+        'Example: <tool_call>{"name":"exec"}</tool_call>.\nThen <tool_call>{"name":"read","arguments":{"path":"/secret"}}</tool_call>',
+        'Example: <tool_call>{"name":"exec"}</tool_call>.\nThen ',
+      );
+    });
+
+    it("preserves newline-formatted literal JSON tool-call examples", () => {
+      expectVisibleText(
+        'Use this syntax:\n<tool_call>{"name":"exec"}</tool_call>',
+        'Use this syntax:\n<tool_call>{"name":"exec"}</tool_call>',
+      );
+      expectVisibleText(
+        'Example:\n<tool_call>{"name":"exec"}</tool_call>',
+        'Example:\n<tool_call>{"name":"exec"}</tool_call>',
+      );
+    });
+
+    it("strips broad prose that wraps JSON tool-call payloads", () => {
+      expectVisibleText('show <tool_call>{"name":"exec"}</tool_call> xml', "show  xml");
+    });
+
+    it("strips real tool-call payloads despite nearby docs prose", () => {
+      expectVisibleText(
+        'I will use <tool_call>{"name":"read","arguments":{"path":"/secret"}}</tool_call> to check docs.',
+        "I will use  to check docs.",
+      );
+      expectVisibleText(
+        'Use <tool_call>{"name":"read","arguments":{"path":"/secret"}}</tool_call> to check docs.',
+        "Use  to check docs.",
+      );
+      expectVisibleText(
+        'Use <tool_call>{"name":"read","arguments":{"path":"/secret"}}</tool_call>.',
+        "Use .",
+      );
+    });
+
+    it("does not preserve newline JSON tool-call payloads without a literal syntax cue", () => {
+      expectVisibleText('Use this:\n<tool_call>{"name":"exec"}</tool_call>', "Use this:\n");
+      expectVisibleText(
+        'Use this tag:\n<tool_call>{"name":"read","arguments":{"path":"/secret"}}</tool_call>',
+        "Use this tag:\n",
+      );
     });
 
     it("strips self-closing <tool_call/> tags", () => {
@@ -383,6 +475,33 @@ describe("stripAssistantInternalScaffolding", () => {
         "Visible text",
       ].join("\n");
       expectVisibleText(input, input);
+    });
+
+    it("strips tool-call tags inside indented code blocks", () => {
+      const input = [
+        "Code:",
+        "",
+        '    <tool_call>{"name":"find","arguments":{"query":"x"}}</tool_call>',
+        "After",
+      ].join("\n");
+      expectVisibleText(input, ["Code:", "", "    ", "After"].join("\n"));
+      expectVisibleText(
+        ["Before", "", '    <tool_call>{"name":"exec"}</tool_call>', "After"].join("\n"),
+        ["Before", "", "    ", "After"].join("\n"),
+      );
+    });
+
+    it("strips tool-call tags from ordinary indented prose", () => {
+      expectVisibleText(
+        ["Before", '    <tool_call>{"name":"find"}</tool_call>', "After"].join("\n"),
+        ["Before", "    ", "After"].join("\n"),
+      );
+      expectVisibleText('    <tool_call>{"name":"find"}</tool_call>', "");
+      expectVisibleText('\t<tool_call>{"name":"find"}</tool_call>', "");
+      expectVisibleText(
+        ["Before:", '    <tool_call>{"name":"find"}</tool_call>', "After"].join("\n"),
+        ["Before:", "    ", "After"].join("\n"),
+      );
     });
 
     it("preserves inline code references to tool_call tags", () => {

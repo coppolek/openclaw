@@ -21,6 +21,9 @@ const DIST_ENTRY = "dist/entry.js";
 const BUILD_STAMP = "dist/.buildstamp";
 const QA_LAB_PLUGIN_SDK_ENTRY = "dist/plugin-sdk/qa-lab.js";
 const QA_RUNTIME_PLUGIN_SDK_ENTRY = "dist/plugin-sdk/qa-runtime.js";
+const QA_CHANNEL_RUNTIME_API_ENTRY = bundledDistPluginFile("qa-channel", "runtime-api.js");
+const QA_LAB_CLI_ENTRY = bundledDistPluginFile("qa-lab", "cli.js");
+const QA_LAB_RUNTIME_API_ENTRY = bundledDistPluginFile("qa-lab", "runtime-api.js");
 const EXTENSION_SRC = bundledPluginFile("demo", "src/index.ts");
 const EXTENSION_MANIFEST = bundledPluginFile("demo", "openclaw.plugin.json");
 const EXTENSION_PACKAGE = bundledPluginFile("demo", "package.json");
@@ -497,6 +500,9 @@ describe("run-node script", () => {
           [ROOT_SRC]: "export const value = 1;\n",
           [QA_LAB_PLUGIN_SDK_ENTRY]: "export const qaLab = true;\n",
           [QA_RUNTIME_PLUGIN_SDK_ENTRY]: "export const qaRuntime = true;\n",
+          [QA_CHANNEL_RUNTIME_API_ENTRY]: "export const qaChannelRuntime = true;\n",
+          [QA_LAB_CLI_ENTRY]: "export const qaLabCli = true;\n",
+          [QA_LAB_RUNTIME_API_ENTRY]: "export const qaLabRuntime = true;\n",
         },
         oldPaths: [
           ROOT_SRC,
@@ -504,6 +510,9 @@ describe("run-node script", () => {
           ROOT_PACKAGE,
           QA_LAB_PLUGIN_SDK_ENTRY,
           QA_RUNTIME_PLUGIN_SDK_ENTRY,
+          QA_CHANNEL_RUNTIME_API_ENTRY,
+          QA_LAB_CLI_ENTRY,
+          QA_LAB_RUNTIME_API_ENTRY,
         ],
         buildPaths: [DIST_ENTRY, BUILD_STAMP],
       });
@@ -536,8 +545,19 @@ describe("run-node script", () => {
         files: {
           [ROOT_SRC]: "export const value = 1;\n",
           [QA_LAB_PLUGIN_SDK_ENTRY]: "export const qaLab = true;\n",
+          [QA_CHANNEL_RUNTIME_API_ENTRY]: "export const qaChannelRuntime = true;\n",
+          [QA_LAB_CLI_ENTRY]: "export const qaLabCli = true;\n",
+          [QA_LAB_RUNTIME_API_ENTRY]: "export const qaLabRuntime = true;\n",
         },
-        oldPaths: [ROOT_SRC, ROOT_TSCONFIG, ROOT_PACKAGE, QA_LAB_PLUGIN_SDK_ENTRY],
+        oldPaths: [
+          ROOT_SRC,
+          ROOT_TSCONFIG,
+          ROOT_PACKAGE,
+          QA_LAB_PLUGIN_SDK_ENTRY,
+          QA_CHANNEL_RUNTIME_API_ENTRY,
+          QA_LAB_CLI_ENTRY,
+          QA_LAB_RUNTIME_API_ENTRY,
+        ],
         buildPaths: [DIST_ENTRY, BUILD_STAMP],
       });
 
@@ -570,8 +590,19 @@ describe("run-node script", () => {
         files: {
           [ROOT_SRC]: "export const value = 1;\n",
           [QA_LAB_PLUGIN_SDK_ENTRY]: "export const qaLab = true;\n",
+          [QA_RUNTIME_PLUGIN_SDK_ENTRY]: "export const qaRuntime = true;\n",
+          [QA_LAB_CLI_ENTRY]: "export const qaLabCli = true;\n",
+          [QA_LAB_RUNTIME_API_ENTRY]: "export const qaLabRuntime = true;\n",
         },
-        oldPaths: [ROOT_SRC, ROOT_TSCONFIG, ROOT_PACKAGE, QA_LAB_PLUGIN_SDK_ENTRY],
+        oldPaths: [
+          ROOT_SRC,
+          ROOT_TSCONFIG,
+          ROOT_PACKAGE,
+          QA_LAB_PLUGIN_SDK_ENTRY,
+          QA_RUNTIME_PLUGIN_SDK_ENTRY,
+          QA_LAB_CLI_ENTRY,
+          QA_LAB_RUNTIME_API_ENTRY,
+        ],
         buildPaths: [DIST_ENTRY, BUILD_STAMP],
       });
 

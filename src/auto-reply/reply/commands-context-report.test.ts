@@ -9,6 +9,7 @@ function makeParams(
   options?: {
     omitBootstrapLimits?: boolean;
     contextTokens?: number | null;
+    cfg?: HandleCommandsParams["cfg"];
     totalTokens?: number | null;
     totalTokensFresh?: boolean;
   },
@@ -65,7 +66,7 @@ function makeParams(
         },
       },
     },
-    cfg: {},
+    cfg: options?.cfg ?? {},
     ctx: {},
     commandBody: "",
     commandArgs: [],
@@ -89,11 +90,19 @@ describe("buildContextReply", () => {
   it("falls back to config defaults when legacy reports are missing bootstrap limits", async () => {
     const result = await buildContextReply(
       makeParams("/context list", false, {
+        cfg: {
+          agents: {
+            defaults: {
+              bootstrapMaxChars: 20_000,
+              bootstrapTotalMaxChars: 150_000,
+            },
+          },
+        },
         omitBootstrapLimits: true,
       }),
     );
-    expect(result.text).toContain("Bootstrap max/file: 12,000 chars");
-    expect(result.text).toContain("Bootstrap max/total: 60,000 chars");
+    expect(result.text).toContain("Bootstrap max/file: 20,000 chars");
+    expect(result.text).toContain("Bootstrap max/total: 150,000 chars");
     expect(result.text).not.toContain("Bootstrap max/file: ? chars");
   });
 

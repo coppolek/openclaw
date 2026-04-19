@@ -82,6 +82,9 @@ const statMtime = (filePath, fsImpl = fs) => {
 const resolvePrivateQaRequiredDistEntries = (distRoot) => [
   path.join(distRoot, "plugin-sdk", "qa-lab.js"),
   path.join(distRoot, "plugin-sdk", "qa-runtime.js"),
+  path.join(distRoot, "extensions", "qa-lab", "cli.js"),
+  path.join(distRoot, "extensions", "qa-lab", "runtime-api.js"),
+  path.join(distRoot, "extensions", "qa-channel", "runtime-api.js"),
 ];
 
 const isExcludedSource = (filePath, sourceRoot, sourceRootName) => {
@@ -267,7 +270,6 @@ const SIGNAL_EXIT_CODES = {
   SIGINT: 130,
   SIGTERM: 143,
 };
-
 const isSignalKey = (signal) => Object.hasOwn(SIGNAL_EXIT_CODES, signal);
 
 const getSignalExitCode = (signal) => (isSignalKey(signal) ? SIGNAL_EXIT_CODES[signal] : 1);
@@ -431,7 +433,7 @@ const closeRunNodeOutputTee = async (deps, exitCode) => {
 
 const syncRuntimeArtifacts = (deps) => {
   try {
-    deps.runRuntimePostBuild({ cwd: deps.cwd });
+    deps.runRuntimePostBuild({ cwd: deps.cwd, env: deps.env });
   } catch (error) {
     logRunner(
       `Failed to write runtime build artifacts: ${error?.message ?? "unknown error"}`,

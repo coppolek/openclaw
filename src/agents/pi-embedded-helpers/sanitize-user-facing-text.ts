@@ -10,6 +10,7 @@ import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
 } from "../../shared/string-coerce.js";
+import { stripToolCallXmlTags } from "../../shared/text/assistant-visible-text.js";
 import { formatExecDeniedUserMessage } from "../exec-approval-result.js";
 import { stripInternalRuntimeContext } from "../internal-runtime-context.js";
 import { stableStringify } from "../stable-stringify.js";
@@ -37,6 +38,7 @@ const RATE_LIMIT_ERROR_USER_MESSAGE = "⚠️ API rate limit reached. Please try
 const OVERLOADED_ERROR_USER_MESSAGE =
   "The AI service is temporarily overloaded. Please try again in a moment.";
 const FINAL_TAG_RE = /<\s*\/?\s*final\s*>/gi;
+
 const ERROR_PREFIX_RE =
   /^(?:error|(?:[a-z][\w-]*\s+)?api\s*error|openai\s*error|anthropic\s*error|gateway\s*error|codex\s*error|request failed|failed|exception)(?:\s+\d{3})?[:\s-]+/i;
 const CONTEXT_OVERFLOW_ERROR_HEAD_RE =
@@ -309,6 +311,15 @@ function stripFinalTagsFromText(text: unknown): string {
   return normalized.replace(FINAL_TAG_RE, "");
 }
 
+function stripToolCallTagsFromText(text: string): string {
+  if (!text) {
+    return text;
+  }
+  return stripToolCallXmlTags(text, {
+    collapseRemovedInlineWhitespace: true,
+  });
+}
+
 function collapseConsecutiveDuplicateBlocks(text: string): string {
   const trimmed = text.trim();
   if (!trimmed) {
@@ -359,7 +370,9 @@ export function sanitizeUserFacingText(text: unknown, opts?: { errorContext?: bo
     return raw;
   }
   const errorContext = opts?.errorContext ?? false;
-  const stripped = stripInternalRuntimeContext(stripFinalTagsFromText(raw));
+  const stripped = stripInternalRuntimeContext(
+    stripToolCallTagsFromText(stripFinalTagsFromText(raw)),
+  );
   const trimmed = stripped.trim();
   if (!trimmed) {
     return "";

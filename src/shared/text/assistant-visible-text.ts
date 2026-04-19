@@ -196,7 +196,113 @@ function parseToolCallTagAt(text: string, start: number): ParsedToolCallTag | nu
   };
 }
 
-export function stripToolCallXmlTags(text: string): string {
+interface StripToolCallXmlTagsOptions {
+  collapseRemovedInlineWhitespace?: boolean;
+}
+
+interface LiteralToolBlockEnd {
+  closeTagEnd: number;
+}
+
+const LITERAL_TOOL_TAG_BEFORE_RE =
+  /(?:\b(?:use|type|write|include|document|example|literal(?:ly)?|syntax)\b|\b(?:close|closing)\b[^.!?\n]*\btag\b)[^.!?\n]*$/i;
+const LITERAL_TOOL_TAG_MULTILINE_BEFORE_RE =
+  /(?:^|[\n.!?]\s*)(?:(?:use|type|write|include|document)\b[^.!?\n]*\b(?:close|closing|example|literal(?:ly)?|syntax|tag)\b|(?:example|literal(?:ly)?|syntax)\b[^.!?\n]*|\b(?:close|closing)\b[^.!?\n]*\btag\b[^.!?\n]*)[ \t:;]*(?:\r?\n[ \t]*)$/i;
+const LITERAL_TOOL_TAG_AFTER_RE =
+  /^[^.!?\n]*\b(?:close|closing|docs?|documentation|example|literal(?:ly)?|syntax|tag)\b/i;
+const LITERAL_TOOL_PAYLOAD_AFTER_RE =
+  /^[^.!?\n]*\b(?:docs?|documentation|example|literal(?:ly)?|syntax)\b/i;
+const LITERAL_TOOL_PAYLOAD_INLINE_BEFORE_RE =
+  /(?:^|[\n.!?]\s*)(?:example|literal(?:ly)?|syntax)\b[^.!?\n]*$/i;
+const LITERAL_TOOL_PAYLOAD_MULTILINE_BEFORE_RE =
+  /(?:^|[\n.!?]\s*)(?:(?:use|type|write|include|document)\b[^.!?\n]*\b(?:example|literal(?:ly)?|syntax)\b|(?:example|literal(?:ly)?|syntax)\b[^.!?\n]*)[ \t:;]*(?:\r?\n[ \t]*)$/i;
+const LITERAL_TOOL_PAYLOAD_SENTENCE_END_BEFORE_RE =
+  /(?:^|[\n.!?]\s*)(?:example|literal(?:ly)?|syntax)\b[^.!?\n]*$/i;
+const LITERAL_TOOL_SENTENCE_END_AFTER_RE = /^[\s)"'`.,:;!?]*(?:$|\n)/;
+
+function getCurrentToolTagLeadIn(text: string, start: number): string {
+  const before = text.slice(Math.max(0, start - 80), start);
+  let leadInStart = 0;
+
+  for (let idx = 0; idx < before.length; idx += 1) {
+    if (before[idx] !== "<") {
+      continue;
+    }
+    const tag = parseToolCallTagAt(before, idx);
+    if (!tag) {
+      continue;
+    }
+    leadInStart = tag.end;
+    idx = Math.max(idx, tag.end - 1);
+  }
+
+  return before.slice(leadInStart);
+}
+
+function looksLikeLiteralToolTagContext(text: string, start: number, end: number): boolean {
+  const before = getCurrentToolTagLeadIn(text, start);
+  const after = text.slice(end, Math.min(text.length, end + 80));
+  return (
+    (LITERAL_TOOL_TAG_BEFORE_RE.test(before) ||
+      LITERAL_TOOL_TAG_MULTILINE_BEFORE_RE.test(before)) &&
+    (LITERAL_TOOL_TAG_AFTER_RE.test(after) || LITERAL_TOOL_SENTENCE_END_AFTER_RE.test(after))
+  );
+}
+
+function looksLikeLiteralToolPayloadContext(text: string, start: number, end: number): boolean {
+  const before = getCurrentToolTagLeadIn(text, start);
+  const after = text.slice(end, Math.min(text.length, end + 80));
+  const hasLiteralPayloadCueBefore =
+    LITERAL_TOOL_PAYLOAD_INLINE_BEFORE_RE.test(before) ||
+    LITERAL_TOOL_PAYLOAD_MULTILINE_BEFORE_RE.test(before);
+  return (
+    (hasLiteralPayloadCueBefore && LITERAL_TOOL_PAYLOAD_AFTER_RE.test(after)) ||
+    (LITERAL_TOOL_PAYLOAD_MULTILINE_BEFORE_RE.test(before) &&
+      LITERAL_TOOL_SENTENCE_END_AFTER_RE.test(after)) ||
+    (LITERAL_TOOL_PAYLOAD_SENTENCE_END_BEFORE_RE.test(before) &&
+      LITERAL_TOOL_SENTENCE_END_AFTER_RE.test(after))
+  );
+}
+
+function findLiteralToolBlockEnd(
+  text: string,
+  openTag: ParsedToolCallTag,
+): LiteralToolBlockEnd | null {
+  for (let idx = openTag.end; idx < text.length; idx += 1) {
+    if (text[idx] !== "<") {
+      continue;
+    }
+    const tag = parseToolCallTagAt(text, idx);
+    if (
+      tag?.isClose &&
+      tag.tagName === openTag.tagName &&
+      !endsInsideQuotedString(text, openTag.end, idx)
+    ) {
+      return {
+        closeTagEnd: tag.end,
+      };
+    }
+  }
+  return null;
+}
+
+function appendVisibleToolText(
+  result: string,
+  segment: string,
+  options: StripToolCallXmlTagsOptions | undefined,
+): string {
+  if (!options?.collapseRemovedInlineWhitespace || !result || !segment) {
+    return result + segment;
+  }
+  const resultLast = result[result.length - 1];
+  const segmentFirst = segment[0];
+  if (!/[ \t]/.test(resultLast) || !/[ \t]/.test(segmentFirst)) {
+    return result + segment;
+  }
+  return result + segment.replace(/^[ \t]+/, "");
+}
+
+export function stripToolCallXmlTags(text: string, options?: StripToolCallXmlTagsOptions): string {
   if (!text || !TOOL_CALL_QUICK_RE.test(text)) {
     return text;
   }
@@ -225,19 +331,21 @@ export function stripToolCallXmlTags(text: string): string {
     }
 
     if (!inToolCallBlock) {
-      result += text.slice(lastIndex, idx);
+      result = appendVisibleToolText(result, text.slice(lastIndex, idx), options);
       if (tag.isClose) {
         if (tag.isTruncated) {
           const preserveEnd = tag.contentStart;
-          result += text.slice(idx, preserveEnd);
+          result = appendVisibleToolText(result, text.slice(idx, preserveEnd), options);
           lastIndex = preserveEnd;
           idx = Math.max(idx, preserveEnd - 1);
           continue;
         }
         const balance = visibleTagBalance.get(tag.tagName) ?? 0;
         if (balance > 0) {
-          result += text.slice(idx, tag.end);
+          result = appendVisibleToolText(result, text.slice(idx, tag.end), options);
           visibleTagBalance.set(tag.tagName, balance - 1);
+        } else if (looksLikeLiteralToolTagContext(text, idx, tag.end)) {
+          result = appendVisibleToolText(result, text.slice(idx, tag.end), options);
         }
         lastIndex = tag.end;
         idx = Math.max(idx, tag.end - 1);
@@ -255,6 +363,21 @@ export function stripToolCallXmlTags(text: string): string {
           : TOOL_CALL_JSON_PAYLOAD_START_RE.test(text.slice(payloadStart))
             ? "json"
             : null;
+      const literalToolBlockEnd =
+        !tag.isClose && payloadKind ? findLiteralToolBlockEnd(text, tag) : null;
+      if (
+        literalToolBlockEnd &&
+        looksLikeLiteralToolPayloadContext(text, idx, literalToolBlockEnd.closeTagEnd)
+      ) {
+        result = appendVisibleToolText(
+          result,
+          text.slice(idx, literalToolBlockEnd.closeTagEnd),
+          options,
+        );
+        lastIndex = literalToolBlockEnd.closeTagEnd;
+        idx = Math.max(idx, literalToolBlockEnd.closeTagEnd - 1);
+        continue;
+      }
       const shouldStripStandaloneFunction =
         tag.tagName !== "function" || isLikelyStandaloneFunctionToolCall(text, idx, tag);
       if (!tag.isClose && payloadKind && shouldStripStandaloneFunction) {
@@ -269,7 +392,7 @@ export function stripToolCallXmlTags(text: string): string {
         }
       } else {
         const preserveEnd = tag.isTruncated ? tag.contentStart : tag.end;
-        result += text.slice(idx, preserveEnd);
+        result = appendVisibleToolText(result, text.slice(idx, preserveEnd), options);
         if (!tag.isTruncated) {
           visibleTagBalance.set(tag.tagName, (visibleTagBalance.get(tag.tagName) ?? 0) + 1);
         }
@@ -294,9 +417,9 @@ export function stripToolCallXmlTags(text: string): string {
   }
 
   if (!inToolCallBlock) {
-    result += text.slice(lastIndex);
+    result = appendVisibleToolText(result, text.slice(lastIndex), options);
   } else if (toolCallBlockTagName === "function") {
-    result += text.slice(toolCallBlockStart);
+    result = appendVisibleToolText(result, text.slice(toolCallBlockStart), options);
   }
 
   return result;
