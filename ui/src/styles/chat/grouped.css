@@ -23,13 +23,19 @@
   flex-direction: column;
   gap: 2px;
   flex: 1 1 auto;
-  max-width: min(900px, 68%);
+  max-width: min(900px, 90%);
   align-items: flex-start;
 }
 
 /* User messages align content right */
 .chat-group.user .chat-group-messages {
   align-items: flex-end;
+}
+
+@media (max-width: 600px) {
+  .chat-group-messages {
+    max-width: 95%;
+  }
 }
 
 .chat-group.user .chat-group-footer {
@@ -185,7 +191,7 @@ img.chat-avatar {
   border: 1px solid var(--border);
   background: var(--card);
   border-radius: var(--radius-lg);
-  padding: 10px 14px;
+  padding: 0px 14px 0px 14px;
   box-shadow: none;
   transition:
     background var(--duration-fast) ease-out,
@@ -194,6 +200,26 @@ img.chat-avatar {
   max-width: 100%;
   box-sizing: border-box;
   word-wrap: break-word;
+}
+
+/* Chat bubbles containing videos or embeds should expand to their specific max-width */
+.chat-bubble:has(.video-embed-container),
+.chat-bubble:has(video),
+.chat-bubble:has(.chat-message-video) {
+  width: fit-content;
+  max-width: 100%;
+}
+
+/* Chat bubbles containing only images should shrink to fit */
+.chat-bubble:has(.chat-message-images) {
+  width: fit-content;
+  max-width: 100%;
+}
+
+/* Ensure images/video in tool messages are properly centered */
+.chat-tool-msg-body .chat-message-images,
+.chat-tool-msg-body .chat-media-wrapper {
+  justify-content: center;
 }
 
 .chat-bubble.has-copy {
@@ -289,6 +315,132 @@ img.chat-avatar {
   display: inline-flex;
   width: 14px;
   height: 14px;
+}
+
+/* Image container styling */
+.chat-image-container {
+  margin: 8px 0 12px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.chat-message-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chat-image-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  max-width: 854px;
+}
+
+.chat-message-images .chat-message-image {
+  max-width: min(854px, 100%);
+  max-height: 480px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Filename link below images/video */
+.chat-image-filename, .chat-video-filename {
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+  padding: 2px 0;
+  word-break: break-all;
+  max-width: 100%;
+}
+
+.chat-image-filename:hover, .chat-video-filename:hover {
+  text-decoration: underline;
+}
+
+/* Portrait images - allow up to 480x640 */
+.chat-message-images .chat-message-image[data-orientation="portrait"],
+.chat-message-images .chat-message-image:only-child {
+  max-width: 480px;
+  max-height: 640px;
+}
+
+.chat-message-images .chat-message-image[data-orientation="landscape"] {
+  max-width: 854px;
+  max-height: 480px;
+}
+
+/* Media wrapper for native video tags - FIXED */
+.chat-message-media {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.chat-media-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: auto;
+  max-width: 854px;
+  margin: 8px 0;
+}
+
+.chat-media-wrapper video {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 480px;
+  border-radius: 6px;
+  object-fit: contain;
+}
+
+.chat-media-filename {
+  font-size: 12px;
+  color: var(--accent);
+  text-align: center;
+  margin-top: 4px;
+  word-break: break-all;
+}
+
+/* Video Embed Container for YouTube/Vimeo */
+.video-embed-container {
+  position: relative;
+  width: 100%;
+  max-width: 854px;
+  margin: 12px 0;
+  box-sizing: border-box;
+}
+
+.video-embed-frame {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  border: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Scope summary styling to chat bubbles and tool messages only */
+.chat-bubble summary,
+.chat-tool-msg-collapse > summary {
+  margin: 0;
+  padding: 4px 8px;
+  list-style: none;
+}
+
+.chat-bubble summary::-webkit-details-marker,
+.chat-tool-msg-collapse > summary::-webkit-details-marker {
+  display: none;
 }
 
 /* Light mode: restore borders */
@@ -479,6 +631,18 @@ img.chat-avatar {
   background: #dc2626;
 }
 
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 @media (max-width: 768px) {
   .chat-group {
     margin-left: 0;
@@ -499,4 +663,17 @@ img.chat-avatar {
   img.chat-avatar {
     display: none;
   }
+}
+
+.chat-bubble:has(video),
+.chat-bubble:has(.chat-message-video) {
+  max-width: min(854px, 100%) !important;
+}
+
+.chat-bubble:has(video) video,
+.chat-bubble:has(.chat-message-video) video {
+  width: 100%;
+  height: auto;
+  max-width: 854px;
+  display: block;
 }

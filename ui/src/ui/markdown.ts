@@ -6,6 +6,7 @@ import { normalizeLowercaseStringOrEmpty } from "./string-coerce.ts";
 
 const allowedTags = [
   "a",
+  "audio",
   "b",
   "blockquote",
   "br",
@@ -26,6 +27,7 @@ const allowedTags = [
   "ol",
   "p",
   "pre",
+  "source",
   "s",
   "span",
   "strong",
@@ -37,12 +39,14 @@ const allowedTags = [
   "thead",
   "tr",
   "ul",
+  "video",
   "img",
 ];
 
 const allowedAttrs = [
   "checked",
   "class",
+  "controls",
   "disabled",
   "href",
   "rel",
@@ -475,6 +479,9 @@ md.renderer.rules.code_block = (tokens, idx) => {
 };
 
 export function toSanitizedMarkdownHtml(markdown: string): string {
+  // REMOVED: Dangerous bypass that returns raw audio tags without sanitization
+  // This allowed XSS attacks by bypassing DOMPurify entirely
+  
   const input = markdown.trim();
   if (!input) {
     return "";

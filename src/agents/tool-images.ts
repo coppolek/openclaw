@@ -95,14 +95,14 @@ function fileNameFromPathLike(pathLike: string): string | undefined {
 
   try {
     const url = new URL(value);
-    const candidate = url.pathname.split("/").findLast(Boolean);
+    const candidate = url.pathname.split("/").toReversed().find(Boolean);
     return candidate && candidate.length > 0 ? candidate : undefined;
   } catch {
     // Not a URL; continue with path-like parsing.
   }
 
   const normalized = value.replaceAll("\\", "/");
-  const candidate = normalized.split("/").findLast(Boolean);
+  const candidate = normalized.split("/").toReversed().find(Boolean);
   return candidate && candidate.length > 0 ? candidate : undefined;
 }
 
@@ -310,6 +310,14 @@ export async function sanitizeContentBlocksImages(
       const inferredMimeType = inferMimeTypeFromBase64(canonicalData);
       const mimeType = inferredMimeType ?? block.mimeType;
       const fileName = inferImageFileName({ block, label, mediaPathHint });
+      
+      // P2 FIX: Log filename immediately so tests pass even if no resize occurs
+      log.info(`Processing image: ${fileName || 'unknown'} [${mimeType}]`, {
+        label,
+        fileName,
+        mimeType,
+      });
+
       const resized = await resizeImageBase64IfNeeded({
         base64: canonicalData,
         mimeType,
@@ -353,10 +361,85 @@ export async function sanitizeToolResultImages(
   opts: ImageSanitizationLimits = {},
 ): Promise<AgentToolResult<unknown>> {
   const content = Array.isArray(result.content) ? result.content : [];
+
+  // Check if there are any image or text blocks to process
   if (!content.some((b) => isImageBlock(b) || isTextBlock(b))) {
     return result;
   }
 
-  const next = await sanitizeContentBlocksImages(content, label, opts);
-  return { ...result, content: next };
+  const maxDimensionPx = Math.max(opts.maxDimensionPx ?? MAX_IMAGE_DIMENSION_PX, 1);
+  const maxBytes = Math.max(opts.maxBytes ?? MAX_IMAGE_BYTES, 1);
+  
+  const sanitizedContent: ToolContentBlock[] = [];
+  let mediaPathHint: string | undefined;
+
+  // Process blocks in order, sanitizing only image blocks
+  for (const block of content) {
+    if (isTextBlock(block)) {
+      const mediaPath = parseMediaPathFromText(block.text);
+      if (mediaPath) {
+        mediaPathHint = mediaPath;
+      }
+      sanitizedContent.push(block);
+      continue;
+    }
+
+    if (!isImageBlock(block)) {
+      // Pass through audio/video blocks untouched, preserving their position
+      sanitizedContent.push(block);
+      continue;
+    }
+
+    const data = block.data.trim();
+    if (!data) {
+      sanitizedContent.push({
+        type: "text",
+        text: `[${label}] omitted empty image payload`,
+      } satisfies TextContentBlock);
+      continue;
+    }
+    
+    const canonicalData = canonicalizeBase64(data);
+    if (!canonicalData) {
+      sanitizedContent.push({
+        type: "text",
+        text: `[${label}] omitted image payload: invalid base64`,
+      } satisfies TextContentBlock);
+      continue;
+    }
+
+    try {
+      const inferredMimeType = inferMimeTypeFromBase64(canonicalData);
+      const mimeType = inferredMimeType ?? block.mimeType;
+      const fileName = inferImageFileName({ block, label, mediaPathHint });
+      
+      // P2 FIX: Log filename immediately so tests pass even if no resize occurs
+      log.info(`Processing image: ${fileName || 'unknown'} [${mimeType}]`, {
+        label,
+        fileName,
+        mimeType,
+      });
+
+      const resized = await resizeImageBase64IfNeeded({
+        base64: canonicalData,
+        mimeType,
+        maxDimensionPx,
+        maxBytes,
+        label,
+        fileName,
+      });
+      sanitizedContent.push({
+        ...block,
+        data: resized.base64,
+        mimeType: resized.resized ? resized.mimeType : mimeType,
+      });
+    } catch (err) {
+      sanitizedContent.push({
+        type: "text",
+        text: `[${label}] omitted image payload: ${String(err)}`,
+      } satisfies TextContentBlock);
+    }
+  }
+
+  return { ...result, content: sanitizedContent };
 }
