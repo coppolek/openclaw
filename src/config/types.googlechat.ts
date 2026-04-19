@@ -111,6 +111,12 @@ export type GoogleChatAccountConfig = {
    *   If configured, falls back to message mode with a warning.
    */
   typingIndicator?: "none" | "message" | "reaction";
+  /**
+   * When true, route all outbound messages for a given OpenClaw session into a
+   * single Google Chat thread by passing a deterministic threadKey derived from
+   * the session key. Default: false (use inbound message thread).
+   */
+  sessionThread?: boolean;
   /** Outbound response prefix override for this channel/account. */
   responsePrefix?: string;
 };

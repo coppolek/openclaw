@@ -47,6 +47,26 @@ function logVerbose(core: GoogleChatCoreRuntime, runtime: GoogleChatRuntimeEnv, 
   }
 }
 
+// Google Chat threadKey must be <=4000 chars. Collapse non-alphanumerics and
+// truncate aggressively so the sanitized key is deterministic. Prefer the
+// inbound thread name so replies cluster per Chat thread. Fall back to the
+// OpenClaw session key when the inbound has no thread (shouldn't happen in
+// threaded spaces).
+function deriveGoogleChatSessionThreadKey(
+  inboundThreadName: string | null | undefined,
+  sessionKey: string | null | undefined,
+): string | undefined {
+  const source = inboundThreadName || sessionKey;
+  if (!source) {
+    return undefined;
+  }
+  const sanitized = source
+    .replace(/[^A-Za-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 180);
+  return sanitized ? `oc-${sanitized}` : undefined;
+}
+
 function normalizeAudienceType(value?: string | null): GoogleChatAudienceType | undefined {
   const normalized = normalizeOptionalLowercaseString(value);
   if (normalized === "app-url" || normalized === "app_url" || normalized === "app") {
@@ -170,13 +190,18 @@ async function processMessageWithPipeline(params: {
   }
   const { commandAuthorized, effectiveWasMentioned, groupSystemPrompt } = access;
 
+  // When sessionThread is enabled, bind the OpenClaw session to the Chat
+  // thread so each Google Chat thread gets its own conversation history.
+  // Otherwise keep the space-level peer id for backwards-compatible behavior.
+  const inboundThreadForPeer = account.config.sessionThread ? message.thread?.name : undefined;
+  const peerId = inboundThreadForPeer ?? spaceId;
   const { route, buildEnvelope } = resolveInboundRouteEnvelopeBuilderWithRuntime({
     cfg: config,
     channel: "googlechat",
     accountId: account.accountId,
     peer: {
       kind: isGroup ? ("group" as const) : ("direct" as const),
-      id: spaceId,
+      id: peerId,
     },
     runtime: core.channel,
     sessionStore: config.session?.store,
@@ -256,7 +281,20 @@ async function processMessageWithPipeline(params: {
   }
   let typingMessageName: string | undefined;
 
-  // Start typing indicator (message mode only, reaction mode not supported with app auth)
+  // Session-scoped threading: when enabled, prefer the inbound thread.name so
+  // replies land in the user's current Google Chat thread. If there's no
+  // inbound thread (rare in threaded spaces), fall back to a session-derived
+  // threadKey so messages still cluster together.
+  const inboundThreadName = message.thread?.name;
+  const sessionThreadKey =
+    account.config.sessionThread && !inboundThreadName
+      ? deriveGoogleChatSessionThreadKey(undefined, route.sessionKey)
+      : undefined;
+  const threadForSend = account.config.sessionThread
+    ? (inboundThreadName ?? undefined)
+    : inboundThreadName;
+
+  // Start typing indicator.
   if (typingIndicator === "message") {
     try {
       const botName = resolveBotDisplayName({
@@ -268,7 +306,8 @@ async function processMessageWithPipeline(params: {
         account,
         space: spaceId,
         text: `_${botName} is typing..._`,
-        thread: message.thread?.name,
+        thread: threadForSend,
+        threadKey: sessionThreadKey,
       });
       typingMessageName = result?.messageName;
     } catch (err) {
@@ -298,6 +337,8 @@ async function processMessageWithPipeline(params: {
           config,
           statusSink,
           typingMessageName,
+          sessionThreadKey,
+          forcedThreadName: threadForSend,
         });
         // Only use typing message for first delivery
         typingMessageName = undefined;
@@ -345,9 +386,21 @@ async function deliverGoogleChatReply(params: {
   config: OpenClawConfig;
   statusSink?: (patch: { lastInboundAt?: number; lastOutboundAt?: number }) => void;
   typingMessageName?: string;
+  sessionThreadKey?: string;
+  forcedThreadName?: string;
 }): Promise<void> {
-  const { payload, account, spaceId, runtime, core, config, statusSink, typingMessageName } =
-    params;
+  const {
+    payload,
+    account,
+    spaceId,
+    runtime,
+    core,
+    config,
+    statusSink,
+    typingMessageName,
+    sessionThreadKey,
+    forcedThreadName,
+  } = params;
   const reply = resolveSendableOutboundReplyParts(payload);
   const mediaCount = reply.mediaCount;
   const hasMedia = reply.hasMedia;
@@ -402,7 +455,8 @@ async function deliverGoogleChatReply(params: {
             account,
             space: spaceId,
             text: chunk,
-            thread: payload.replyToId,
+            thread: forcedThreadName ?? payload.replyToId,
+            threadKey: sessionThreadKey,
           });
         }
         firstTextChunk = false;
@@ -431,7 +485,8 @@ async function deliverGoogleChatReply(params: {
           account,
           space: spaceId,
           text: caption,
-          thread: payload.replyToId,
+          thread: forcedThreadName ?? payload.replyToId,
+          threadKey: sessionThreadKey,
           attachments: [
             { attachmentUploadToken: upload.attachmentUploadToken, contentName: loaded.fileName },
           ],

@@ -143,14 +143,17 @@ export async function sendGoogleChatMessage(params: {
   space: string;
   text?: string;
   thread?: string;
+  threadKey?: string;
   attachments?: Array<{ attachmentUploadToken: string; contentName?: string }>;
 }): Promise<{ messageName?: string } | null> {
-  const { account, space, text, thread, attachments } = params;
+  const { account, space, text, thread, threadKey, attachments } = params;
   const body: Record<string, unknown> = {};
   if (text) {
     body.text = text;
   }
-  if (thread) {
+  if (threadKey) {
+    body.thread = { threadKey };
+  } else if (thread) {
     body.thread = { name: thread };
   }
   if (attachments && attachments.length > 0) {
@@ -162,7 +165,7 @@ export async function sendGoogleChatMessage(params: {
     );
   }
   const urlObj = new URL(`${CHAT_API_BASE}/${space}/messages`);
-  if (thread) {
+  if (threadKey || thread) {
     urlObj.searchParams.set("messageReplyOption", "REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD");
   }
   const url = urlObj.toString();

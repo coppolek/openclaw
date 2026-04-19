@@ -4681,6 +4681,9 @@ export const GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA = [
           type: "string",
           enum: ["none", "message", "reaction"],
         },
+        sessionThread: {
+          type: "boolean",
+        },
         responsePrefix: {
           type: "string",
         },
@@ -5058,6 +5061,9 @@ export const GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA = [
               typingIndicator: {
                 type: "string",
                 enum: ["none", "message", "reaction"],
+              },
+              sessionThread: {
+                type: "boolean",
               },
               responsePrefix: {
                 type: "string",
