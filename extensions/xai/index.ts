@@ -5,12 +5,12 @@ import { defaultToolStreamExtraParams } from "openclaw/plugin-sdk/provider-strea
 import { jsonResult, readProviderEnvValue } from "openclaw/plugin-sdk/provider-web-search";
 import {
   applyXaiModelCompat,
+  buildXaiImageGenerationProvider,
   normalizeXaiModelId,
   resolveXaiTransport,
   resolveXaiModelCompatPatch,
   shouldContributeXaiCompat,
 } from "./api.js";
-import { buildXaiImageGenerationProvider } from "./api.js";
 import { applyXaiConfig, XAI_DEFAULT_MODEL_REF } from "./onboard.js";
 import { buildXaiProvider } from "./provider-catalog.js";
 import { isModernXaiModel, resolveXaiForwardCompatModel } from "./provider-models.js";
