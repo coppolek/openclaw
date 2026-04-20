@@ -39,6 +39,7 @@ Looking for chat channel docs (WhatsApp/Telegram/Discord/Slack/Mattermost (plugi
 - [Fireworks](/providers/fireworks)
 - [GitHub Copilot](/providers/github-copilot)
 - [GLM models](/providers/glm)
+- [GMI Cloud](/providers/gmicloud)
 - [Google (Gemini)](/providers/google)
 - [Groq (LPU inference)](/providers/groq)
 - [Hugging Face (Inference)](/providers/huggingface)
