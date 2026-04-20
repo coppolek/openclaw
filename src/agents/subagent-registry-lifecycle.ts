@@ -7,8 +7,9 @@ import {
   completeTaskRunByRunId,
   failTaskRunByRunId,
   setDetachedTaskDeliveryStatusByRunId,
-} from "../tasks/task-executor.js";
+} from "../tasks/detached-task-runtime.js";
 import { normalizeDeliveryContext } from "../utils/delivery-context.js";
+import { withSubagentOutcomeTiming } from "./subagent-announce-output.js";
 import {
   captureSubagentCompletionReply,
   runSubagentAnnounceFlow,
@@ -22,7 +23,7 @@ import {
   resolveCleanupCompletionReason,
   resolveDeferredCleanupDecision,
 } from "./subagent-registry-cleanup.js";
-import { runOutcomesEqual } from "./subagent-registry-completion.js";
+import { shouldUpdateRunOutcome } from "./subagent-registry-completion.js";
 import {
   ANNOUNCE_COMPLETION_HARD_EXPIRY_MS,
   ANNOUNCE_EXPIRY_MS,
@@ -65,6 +66,27 @@ export function createSubagentRegistryLifecycleController(params: {
   runSubagentAnnounceFlow: typeof runSubagentAnnounceFlow;
   warn(message: string, meta?: Record<string, unknown>): void;
 }) {
+  const scheduledResumeTimers = new Set<ReturnType<typeof setTimeout>>();
+
+  const scheduleResumeSubagentRun = (runId: string, entry: SubagentRunRecord, delayMs: number) => {
+    const timer = setTimeout(() => {
+      scheduledResumeTimers.delete(timer);
+      if (params.runs.get(runId) !== entry) {
+        return;
+      }
+      params.resumeSubagentRun(runId);
+    }, delayMs);
+    timer.unref?.();
+    scheduledResumeTimers.add(timer);
+  };
+
+  const clearScheduledResumeTimers = () => {
+    for (const timer of scheduledResumeTimers) {
+      clearTimeout(timer);
+    }
+    scheduledResumeTimers.clear();
+  };
+
   const maskRunId = (runId: string): string => {
     const trimmed = runId.trim();
     if (!trimmed) {
@@ -265,14 +287,16 @@ export function createSubagentRegistryLifecycleController(params: {
       await safeRemoveAttachmentsDir(giveUpParams.entry);
     }
     const completionReason = resolveCleanupCompletionReason(giveUpParams.entry);
-    await emitCompletionEndedHookIfNeeded(giveUpParams.entry, completionReason);
     logAnnounceGiveUp(giveUpParams.entry, giveUpParams.reason);
+    // Retry-limit / expiry give-up should not leave cleanup stuck behind the
+    // best-effort ended hook. Mark the run cleaned first, then fire the hook.
     completeCleanupBookkeeping({
       runId: giveUpParams.runId,
       entry: giveUpParams.entry,
       cleanup: giveUpParams.entry.cleanup,
       completedAt: Date.now(),
     });
+    await emitCompletionEndedHookIfNeeded(giveUpParams.entry, completionReason);
   };
 
   const beginSubagentCleanup = (runId: string) => {
@@ -420,9 +444,7 @@ export function createSubagentRegistryLifecycleController(params: {
       entry.cleanupHandled = false;
       params.resumedRuns.delete(runId);
       params.persist();
-      setTimeout(() => {
-        params.resumeSubagentRun(runId);
-      }, deferredDecision.delayMs).unref?.();
+      scheduleResumeSubagentRun(runId, entry, deferredDecision.delayMs);
       return;
     }
 
@@ -445,14 +467,16 @@ export function createSubagentRegistryLifecycleController(params: {
         await safeRemoveAttachmentsDir(entry);
       }
       const completionReason = resolveCleanupCompletionReason(entry);
-      await emitCompletionEndedHookIfNeeded(entry, completionReason);
       logAnnounceGiveUp(entry, deferredDecision.reason);
+      // Giving up on announce delivery is terminal for cleanup even if the
+      // best-effort hook is still resolving.
       completeCleanupBookkeeping({
         runId,
         entry,
         cleanup,
         completedAt: now,
       });
+      await emitCompletionEndedHookIfNeeded(entry, completionReason);
       return;
     }
 
@@ -462,9 +486,7 @@ export function createSubagentRegistryLifecycleController(params: {
     if (deferredDecision.resumeDelayMs == null) {
       return;
     }
-    setTimeout(() => {
-      params.resumeSubagentRun(runId);
-    }, deferredDecision.resumeDelayMs).unref?.();
+    scheduleResumeSubagentRun(runId, entry, deferredDecision.resumeDelayMs);
   };
 
   const startSubagentAnnounceCleanupFlow = (runId: string, entry: SubagentRunRecord): boolean => {
@@ -568,8 +590,12 @@ export function createSubagentRegistryLifecycleController(params: {
       entry.endedAt = endedAt;
       mutated = true;
     }
-    if (!runOutcomesEqual(entry.outcome, completeParams.outcome)) {
-      entry.outcome = completeParams.outcome;
+    const outcome = withSubagentOutcomeTiming(completeParams.outcome, {
+      startedAt: entry.startedAt,
+      endedAt,
+    });
+    if (shouldUpdateRunOutcome(entry.outcome, outcome)) {
+      entry.outcome = outcome;
       mutated = true;
     }
     if (entry.endedReason !== completeParams.reason) {
@@ -586,7 +612,7 @@ export function createSubagentRegistryLifecycleController(params: {
     }
     safeFinalizeSubagentTaskRun({
       entry,
-      outcome: completeParams.outcome,
+      outcome,
     });
 
     try {
@@ -641,6 +667,7 @@ export function createSubagentRegistryLifecycleController(params: {
   };
 
   return {
+    clearScheduledResumeTimers,
     completeCleanupBookkeeping,
     completeSubagentRun,
     finalizeResumedAnnounceGiveUp,
