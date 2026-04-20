@@ -284,6 +284,7 @@ function resolveExecutionConfig(
   fallback: MemoryDreamingExecutionConfig,
 ): MemoryDreamingExecutionConfig {
   const record = asNullableRecord(value);
+  const model = normalizeTrimmedString(record?.model) ?? fallback.model;
   const maxOutputTokens = normalizeOptionalPositiveInt(record?.maxOutputTokens);
   const timeoutMs = normalizeOptionalPositiveInt(record?.timeoutMs);
   const temperatureRaw = record?.temperature;
@@ -296,9 +297,7 @@ function resolveExecutionConfig(
     speed: normalizeSpeed(record?.speed) ?? fallback.speed,
     thinking: normalizeThinking(record?.thinking) ?? fallback.thinking,
     budget: normalizeBudget(record?.budget) ?? fallback.budget,
-    ...(normalizeTrimmedString(record?.model)
-      ? { model: normalizeTrimmedString(record?.model) }
-      : {}),
+    ...(model ? { model } : {}),
     ...(typeof maxOutputTokens === "number" ? { maxOutputTokens } : {}),
     ...(typeof temperature === "number" ? { temperature } : {}),
     ...(typeof timeoutMs === "number" ? { timeoutMs } : {}),
@@ -350,6 +349,7 @@ export function resolveMemoryDreamingConfig(params: {
   cfg?: OpenClawConfig;
 }): MemoryDreamingConfig {
   const dreaming = asNullableRecord(params.pluginConfig?.dreaming);
+  const dreamingModel = normalizeTrimmedString(dreaming?.model);
   const frequency =
     normalizeTrimmedString(dreaming?.frequency) ?? DEFAULT_MEMORY_DREAMING_FREQUENCY;
   const timezone =
@@ -364,6 +364,7 @@ export function resolveMemoryDreamingConfig(params: {
     speed: DEFAULT_MEMORY_DREAMING_SPEED,
     thinking: DEFAULT_MEMORY_DREAMING_THINKING,
     budget: DEFAULT_MEMORY_DREAMING_BUDGET,
+    ...(dreamingModel ? { model: dreamingModel } : {}),
   });
 
   const light = asNullableRecord(phases?.light);

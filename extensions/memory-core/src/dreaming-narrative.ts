@@ -26,6 +26,7 @@ type SubagentSurface = {
     idempotencyKey: string;
     sessionKey: string;
     message: string;
+    model?: string;
     extraSystemPrompt?: string;
     deliver?: boolean;
   }) => Promise<{ runId: string }>;
@@ -135,45 +136,147 @@ function buildRequestScopedFallbackNarrative(data: NarrativePhaseData): string {
   );
 }
 
+async function writeRequestScopedFallbackNarrative(params: {
+  data: NarrativePhaseData;
+  workspaceDir: string;
+  nowMs: number;
+  timezone?: string;
+  logger: Logger;
+}): Promise<void> {
+  try {
+    await appendNarrativeEntry({
+      workspaceDir: params.workspaceDir,
+      narrative: buildRequestScopedFallbackNarrative(params.data),
+      nowMs: params.nowMs,
+      timezone: params.timezone,
+    });
+    params.logger.warn(
+      `memory-core: narrative generation used fallback for ${params.data.phase} phase because subagent runtime is request-scoped.`,
+    );
+  } catch (fallbackErr) {
+    params.logger.warn(
+      `memory-core: narrative fallback failed for ${params.data.phase} phase (${formatFallbackWriteFailure(fallbackErr)})`,
+    );
+  }
+}
+
+function buildNarrativeAttemptSessionKey(baseSessionKey: string, attempt: number): string {
+  return attempt === 0 ? baseSessionKey : `${baseSessionKey}-retry-${attempt}`;
+}
+
+function isModelUnavailableNarrativeErrorMessage(raw: string): boolean {
+  const message = raw.trim();
+  if (!message) {
+    return false;
+  }
+  if (/requested model may be(?: temporarily)? unavailable/i.test(message)) {
+    return true;
+  }
+  if (/model unavailable/i.test(message)) {
+    return true;
+  }
+  if (/no endpoints found for/i.test(message)) {
+    return true;
+  }
+  if (/unknown model/i.test(message)) {
+    return true;
+  }
+  if (/model(?:[_\-\s])?not(?:[_\-\s])?found/i.test(message)) {
+    return true;
+  }
+  if (/\b404\b/.test(message) && /not(?:[_\-\s])?found/i.test(message)) {
+    return true;
+  }
+  if (/not_found_error/i.test(message)) {
+    return true;
+  }
+  if (/model:\s*[a-z0-9._/-]+/i.test(message) && /not(?:[_\-\s])?found/i.test(message)) {
+    return true;
+  }
+  if (/models\/[^\s]+ is not found/i.test(message)) {
+    return true;
+  }
+  if (/model/i.test(message) && /does not exist/i.test(message)) {
+    return true;
+  }
+  if (/unsupported model/i.test(message)) {
+    return true;
+  }
+  if (
+    /model/i.test(message) &&
+    /deprecated/i.test(message) &&
+    /(upgrade|transition) to/i.test(message)
+  ) {
+    return true;
+  }
+  if (/stealth model/i.test(message) && /find it here/i.test(message)) {
+    return true;
+  }
+  if (/is not a valid model id/i.test(message)) {
+    return true;
+  }
+  if (/invalid model/i.test(message) && !/invalid model reference/i.test(message)) {
+    return true;
+  }
+  return false;
+}
+
+function isConfiguredModelRetryableNarrativeErrorMessage(raw: string): boolean {
+  const message = raw.trim();
+  if (!message) {
+    return false;
+  }
+  return (
+    isModelUnavailableNarrativeErrorMessage(message) ||
+    /provider\/model override is not authorized for this plugin subagent run/i.test(message) ||
+    /provider\/model overrides are not authorized for this caller/i.test(message) ||
+    /provider\/model override requires plugin identity in fallback subagent runs/i.test(message) ||
+    /is not trusted for fallback provider\/model override requests/i.test(message) ||
+    /configured subagent\.allowedModels, but none of the entries normalized to a valid provider\/model target/i.test(
+      message,
+    ) ||
+    /fallback provider\/model overrides that use an allowlist must resolve to a canonical provider\/model target/i.test(
+      message,
+    ) ||
+    /model override ".*" is not allowlisted for plugin /i.test(message)
+  );
+}
+
+function formatNarrativeTerminalStatus(params: { status: string; error?: string }): string {
+  const detail = params.error?.trim();
+  return detail ? `status=${params.status} (${detail})` : `status=${params.status}`;
+}
+
 async function startNarrativeRunOrFallback(params: {
   subagent: SubagentSurface;
   sessionKey: string;
   message: string;
+  model?: string;
   data: NarrativePhaseData;
   workspaceDir: string;
   nowMs: number;
   timezone?: string;
   logger: Logger;
 }): Promise<string | null> {
-  try {
-    const run = await params.subagent.run({
+  const startRun = async (model?: string) =>
+    await params.subagent.run({
       idempotencyKey: params.sessionKey,
       sessionKey: params.sessionKey,
       message: params.message,
+      ...(model ? { model } : {}),
       extraSystemPrompt: NARRATIVE_SYSTEM_PROMPT,
       deliver: false,
     });
+
+  try {
+    const run = await startRun(params.model);
     return run.runId;
   } catch (runErr) {
-    if (!isRequestScopedSubagentRuntimeError(runErr)) {
-      throw runErr;
+    if (isRequestScopedSubagentRuntimeError(runErr)) {
+      await writeRequestScopedFallbackNarrative(params);
+      return null;
     }
-    try {
-      await appendNarrativeEntry({
-        workspaceDir: params.workspaceDir,
-        narrative: buildRequestScopedFallbackNarrative(params.data),
-        nowMs: params.nowMs,
-        timezone: params.timezone,
-      });
-      params.logger.warn(
-        `memory-core: narrative generation used fallback for ${params.data.phase} phase because subagent runtime is request-scoped.`,
-      );
-    } catch (fallbackErr) {
-      params.logger.warn(
-        `memory-core: narrative fallback failed for ${params.data.phase} phase (${formatFallbackWriteFailure(fallbackErr)})`,
-      );
-    }
-    return null;
+    throw runErr;
   }
 }
 
@@ -835,6 +938,7 @@ export async function generateAndAppendDreamNarrative(params: {
   subagent: SubagentSurface;
   workspaceDir: string;
   data: NarrativePhaseData;
+  model?: string;
   nowMs?: number;
   timezone?: string;
   logger: Logger;
@@ -851,39 +955,94 @@ export async function generateAndAppendDreamNarrative(params: {
     nowMs,
   });
   const message = buildNarrativePrompt(params.data);
-  let runId: string | null = null;
-  let waitStatus: string | null = null;
+  const attempts: Array<{
+    sessionKey: string;
+    runId: string | null;
+    waitStatus: string | null;
+  }> = [];
+  let successfulSessionKey: string | null = null;
 
   try {
-    runId = await startNarrativeRunOrFallback({
-      subagent: params.subagent,
-      sessionKey,
-      message,
-      data: params.data,
-      workspaceDir: params.workspaceDir,
-      nowMs,
-      timezone: params.timezone,
-      logger: params.logger,
-    });
-    if (!runId) {
-      return;
+    const attemptModels = params.model ? [params.model, undefined] : [undefined];
+
+    for (const [attemptIndex, attemptModel] of attemptModels.entries()) {
+      const attemptSessionKey = buildNarrativeAttemptSessionKey(sessionKey, attemptIndex);
+      const attemptState = {
+        sessionKey: attemptSessionKey,
+        runId: null as string | null,
+        waitStatus: null as string | null,
+      };
+      attempts.push(attemptState);
+
+      try {
+        const runId = await startNarrativeRunOrFallback({
+          subagent: params.subagent,
+          sessionKey: attemptSessionKey,
+          message,
+          model: attemptModel,
+          data: params.data,
+          workspaceDir: params.workspaceDir,
+          nowMs,
+          timezone: params.timezone,
+          logger: params.logger,
+        });
+        if (!runId) {
+          return;
+        }
+
+        attemptState.runId = runId;
+        const result = await params.subagent.waitForRun({
+          runId,
+          timeoutMs: NARRATIVE_TIMEOUT_MS,
+        });
+        attemptState.waitStatus = result.status;
+
+        if (result.status === "ok") {
+          successfulSessionKey = attemptSessionKey;
+          break;
+        }
+
+        if (
+          attemptModel &&
+          result.status === "error" &&
+          isConfiguredModelRetryableNarrativeErrorMessage(result.error ?? "")
+        ) {
+          params.logger.warn(
+            `memory-core: narrative generation ended with ${formatNarrativeTerminalStatus({
+              status: result.status,
+              error: result.error,
+            })} for ${params.data.phase} phase using configured model "${attemptModel}"; retrying with the session default.`,
+          );
+          continue;
+        }
+
+        params.logger.warn(
+          `memory-core: narrative generation ended with ${formatNarrativeTerminalStatus({
+            status: result.status,
+            error: result.error,
+          })} for ${params.data.phase} phase.`,
+        );
+        return;
+      } catch (err) {
+        if (
+          attemptModel &&
+          isConfiguredModelRetryableNarrativeErrorMessage(formatErrorMessage(err))
+        ) {
+          params.logger.warn(
+            `memory-core: narrative generation could not start with configured model "${attemptModel}" for ${params.data.phase} phase; retrying with the session default (${formatErrorMessage(err)}).`,
+          );
+          continue;
+        }
+        throw err;
+      }
     }
 
-    const result = await params.subagent.waitForRun({
-      runId,
-      timeoutMs: NARRATIVE_TIMEOUT_MS,
-    });
-    waitStatus = result.status;
-
-    if (result.status !== "ok") {
-      params.logger.warn(
-        `memory-core: narrative generation ended with status=${result.status} for ${params.data.phase} phase.`,
-      );
+    if (!successfulSessionKey) {
       return;
     }
 
     const { messages } = await params.subagent.getSessionMessages({
-      sessionKey,
+      sessionKey: successfulSessionKey,
       limit: 5,
     });
 
@@ -911,10 +1070,13 @@ export async function generateAndAppendDreamNarrative(params: {
       `memory-core: narrative generation failed for ${params.data.phase} phase: ${formatErrorMessage(err)}`,
     );
   } finally {
-    if (runId && waitStatus === "timeout") {
+    for (const attempt of attempts) {
+      if (!attempt.runId || attempt.waitStatus !== "timeout") {
+        continue;
+      }
       try {
         const settle = await params.subagent.waitForRun({
-          runId,
+          runId: attempt.runId,
           timeoutMs: NARRATIVE_DELETE_SETTLE_TIMEOUT_MS,
         });
         if (settle.status !== "ok" && settle.status !== "error") {
@@ -929,12 +1091,19 @@ export async function generateAndAppendDreamNarrative(params: {
       }
     }
 
-    try {
-      await params.subagent.deleteSession({ sessionKey });
-    } catch (cleanupErr) {
-      params.logger.warn(
-        `memory-core: narrative session cleanup failed for ${params.data.phase} phase: ${formatErrorMessage(cleanupErr)}`,
-      );
+    const cleanedSessionKeys = new Set<string>();
+    for (const attempt of attempts) {
+      if (cleanedSessionKeys.has(attempt.sessionKey)) {
+        continue;
+      }
+      cleanedSessionKeys.add(attempt.sessionKey);
+      try {
+        await params.subagent.deleteSession({ sessionKey: attempt.sessionKey });
+      } catch (cleanupErr) {
+        params.logger.warn(
+          `memory-core: narrative session cleanup failed for ${params.data.phase} phase: ${formatErrorMessage(cleanupErr)}`,
+        );
+      }
     }
 
     await scrubDreamingNarrativeArtifacts(params.logger).catch((scrubErr: unknown) => {

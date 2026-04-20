@@ -6,6 +6,8 @@ const manifest = JSON.parse(
   fs.readFileSync(new URL("../openclaw.plugin.json", import.meta.url), "utf-8"),
 ) as { configSchema: Record<string, unknown> };
 
+const TEST_DREAMING_MODEL = "example/dreaming-model";
+
 describe("memory-core manifest config schema", () => {
   it("accepts dreaming phase thresholds used by QA and runtime", () => {
     const result = validateJsonSchemaValue({
@@ -14,6 +16,7 @@ describe("memory-core manifest config schema", () => {
       value: {
         dreaming: {
           enabled: true,
+          model: TEST_DREAMING_MODEL,
           timezone: "Europe/London",
           verboseLogging: true,
           storage: {

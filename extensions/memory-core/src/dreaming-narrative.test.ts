@@ -27,6 +27,7 @@ import { createMemoryCoreTestHarness } from "./test-helpers.js";
 
 const { createTempWorkspace } = createMemoryCoreTestHarness();
 const DREAMS_FILE_LOCKS_KEY = Symbol.for("openclaw.memoryCore.dreamingNarrative.fileLocks");
+const TEST_DREAMING_MODEL = "example/dreaming-model";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -611,6 +612,168 @@ describe("generateAndAppendDreamNarrative", () => {
     const content = await fs.readFile(path.join(workspaceDir, "DREAMS.md"), "utf-8");
     expect(content).toContain("The repository whispered of forgotten endpoints.");
     expect(logger.info).toHaveBeenCalled();
+  });
+
+  it("passes an explicit model override into the narrative subagent run", async () => {
+    const workspaceDir = await createTempWorkspace("openclaw-dreaming-narrative-");
+    const subagent = createMockSubagent("The repository whispered of forgotten endpoints.");
+    const logger = createMockLogger();
+
+    await generateAndAppendDreamNarrative({
+      subagent,
+      workspaceDir,
+      data: {
+        phase: "light",
+        snippets: ["API endpoints need authentication"],
+      },
+      model: TEST_DREAMING_MODEL,
+      logger,
+    });
+
+    expect(subagent.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: TEST_DREAMING_MODEL,
+      }),
+    );
+  });
+
+  it.each([
+    "model unavailable",
+    "HTTP 400 not_found_error: model: claude-3-5-haiku-20241022 (request_id: req_123)",
+    "models/openai/gpt-6 is not found",
+    "provider/model override is not authorized for this plugin subagent run.",
+    "provider/model overrides are not authorized for this caller.",
+    "provider/model override requires plugin identity in fallback subagent runs.",
+    'plugin "memory-core" is not trusted for fallback provider/model override requests. See https://docs.openclaw.ai/tools/plugin#runtime-helpers and search for: plugins.entries.<id>.subagent.allowModelOverride',
+    'plugin "memory-core" configured subagent.allowedModels, but none of the entries normalized to a valid provider/model target.',
+    "fallback provider/model overrides that use an allowlist must resolve to a canonical provider/model target.",
+    'model override "anthropic/claude-haiku-4-5" is not allowlisted for plugin "memory-core".',
+  ])(
+    "falls back to the session default model when the configured model cannot start (%s)",
+    async (startupError) => {
+      const workspaceDir = await createTempWorkspace("openclaw-dreaming-narrative-");
+      const subagent = createMockSubagent("The repository whispered of forgotten endpoints.");
+      subagent.run.mockRejectedValueOnce(new Error(startupError)).mockResolvedValueOnce({
+        runId: "run-456",
+      });
+      const logger = createMockLogger();
+
+      await generateAndAppendDreamNarrative({
+        subagent,
+        workspaceDir,
+        data: {
+          phase: "light",
+          snippets: ["API endpoints need authentication"],
+        },
+        model: TEST_DREAMING_MODEL,
+        logger,
+      });
+
+      expect(subagent.run).toHaveBeenCalledTimes(2);
+      expect(subagent.run.mock.calls[0][0]).toMatchObject({
+        model: TEST_DREAMING_MODEL,
+      });
+      expect(subagent.run.mock.calls[1][0]).not.toHaveProperty("model");
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("retrying with the session default"),
+      );
+    },
+  );
+
+  it("does not fall back to the session default model for generic startup failures", async () => {
+    const workspaceDir = await createTempWorkspace("openclaw-dreaming-narrative-");
+    const subagent = createMockSubagent("The repository whispered of forgotten endpoints.");
+    subagent.run.mockRejectedValueOnce(new Error("auth failed"));
+    const logger = createMockLogger();
+
+    await generateAndAppendDreamNarrative({
+      subagent,
+      workspaceDir,
+      data: {
+        phase: "light",
+        snippets: ["API endpoints need authentication"],
+      },
+      model: TEST_DREAMING_MODEL,
+      logger,
+    });
+
+    expect(subagent.run).toHaveBeenCalledOnce();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("narrative generation failed for light phase: auth failed"),
+    );
+    expect(logger.warn).not.toHaveBeenCalledWith(
+      expect.stringContaining("retrying with the session default"),
+    );
+  });
+
+  it("falls back to the session default model when waitForRun reports a configured-model error", async () => {
+    const workspaceDir = await createTempWorkspace("openclaw-dreaming-narrative-");
+    const subagent = createMockSubagent("The repository whispered of forgotten endpoints.");
+    subagent.run
+      .mockResolvedValueOnce({ runId: "run-123" })
+      .mockResolvedValueOnce({ runId: "run-456" });
+    subagent.waitForRun
+      .mockResolvedValueOnce({ status: "error", error: "gpt-foo is not a valid model id" })
+      .mockResolvedValueOnce({ status: "ok" });
+    const logger = createMockLogger();
+
+    await generateAndAppendDreamNarrative({
+      subagent,
+      workspaceDir,
+      data: {
+        phase: "light",
+        snippets: ["API endpoints need authentication"],
+      },
+      model: TEST_DREAMING_MODEL,
+      logger,
+    });
+
+    expect(subagent.run).toHaveBeenCalledTimes(2);
+    expect(subagent.run.mock.calls[0]?.[0]).toMatchObject({
+      model: TEST_DREAMING_MODEL,
+    });
+    expect(subagent.run.mock.calls[1]?.[0]).not.toHaveProperty("model");
+    expect(subagent.run.mock.calls[1]?.[0]?.sessionKey).not.toBe(
+      subagent.run.mock.calls[0]?.[0]?.sessionKey,
+    );
+    expect(subagent.run.mock.calls[1]?.[0]?.idempotencyKey).not.toBe(
+      subagent.run.mock.calls[0]?.[0]?.idempotencyKey,
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("retrying with the session default"),
+    );
+    const content = await fs.readFile(path.join(workspaceDir, "DREAMS.md"), "utf-8");
+    expect(content).toContain("The repository whispered of forgotten endpoints.");
+  });
+
+  it("does not fall back to the session default model for generic wait errors", async () => {
+    const workspaceDir = await createTempWorkspace("openclaw-dreaming-narrative-");
+    const subagent = createMockSubagent("The repository whispered of forgotten endpoints.");
+    subagent.waitForRun.mockResolvedValueOnce({ status: "error", error: "gateway failure" });
+    const logger = createMockLogger();
+
+    await generateAndAppendDreamNarrative({
+      subagent,
+      workspaceDir,
+      data: {
+        phase: "light",
+        snippets: ["API endpoints need authentication"],
+      },
+      model: TEST_DREAMING_MODEL,
+      logger,
+    });
+
+    expect(subagent.run).toHaveBeenCalledOnce();
+    expect(subagent.waitForRun).toHaveBeenCalledOnce();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("status=error (gateway failure)"),
+    );
+    expect(logger.warn).not.toHaveBeenCalledWith(
+      expect.stringContaining("retrying with the session default"),
+    );
+    await expect(fs.access(path.join(workspaceDir, "DREAMS.md"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 
   it("skips narrative when no snippets are available", async () => {

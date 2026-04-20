@@ -20,6 +20,9 @@ import {
   resolveMemoryDreamingWorkspaces,
 } from "./dreaming.js";
 
+const TEST_DREAMING_MODEL = "example/dreaming-model";
+const TEST_REM_OVERRIDE_MODEL = "example/rem-override-model";
+
 describe("memory dreaming host helpers", () => {
   it("normalizes string settings from the dreaming config", () => {
     const resolved = resolveMemoryDreamingConfig({
@@ -129,6 +132,45 @@ describe("memory dreaming host helpers", () => {
     expect(resolved.phases.light.cron).toBe("15 */8 * * *");
     expect(resolved.phases.deep.cron).toBe("15 */8 * * *");
     expect(resolved.phases.rem.cron).toBe("15 */8 * * *");
+  });
+
+  it("propagates dreaming.model through execution defaults and phase execution overrides", () => {
+    const resolved = resolveMemoryDreamingConfig({
+      pluginConfig: {
+        dreaming: {
+          model: TEST_DREAMING_MODEL,
+          execution: {
+            defaults: {
+              timeoutMs: 45_000,
+            },
+          },
+          phases: {
+            rem: {
+              execution: {
+                model: TEST_REM_OVERRIDE_MODEL,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(resolved.execution.defaults).toMatchObject({
+      model: TEST_DREAMING_MODEL,
+      timeoutMs: 45_000,
+    });
+    expect(resolved.phases.light.execution).toMatchObject({
+      model: TEST_DREAMING_MODEL,
+    });
+    expect(resolved.phases.deep.execution).toMatchObject({
+      model: TEST_DREAMING_MODEL,
+    });
+    expect(resolved.phases.rem.execution).toMatchObject({
+      model: TEST_REM_OVERRIDE_MODEL,
+    });
+    expect(resolved.phases.light.execution).not.toHaveProperty("timeoutMs");
+    expect(resolved.phases.deep.execution).not.toHaveProperty("timeoutMs");
+    expect(resolved.phases.rem.execution).not.toHaveProperty("timeoutMs");
   });
 
   it("dedupes shared workspaces across all configured agents", () => {
