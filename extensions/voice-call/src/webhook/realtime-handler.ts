@@ -13,6 +13,7 @@ import type { CallManager } from "../manager.js";
 import type { VoiceCallProvider } from "../providers/base.js";
 import type { CallRecord, NormalizedEvent } from "../types.js";
 import type { WebhookResponsePayload } from "../webhook.types.js";
+import { logger } from "../logger.js";
 
 export type ToolHandlerFn = (args: unknown, callId: string) => Promise<unknown>;
 
@@ -187,7 +188,7 @@ export class RealtimeCallHandler {
             bridge.close();
           }
         } catch (error) {
-          console.error("[voice-call] realtime WS parse failed:", error);
+          logger.error("realtime WS parse failed:", error);
         }
       });
 
@@ -196,7 +197,7 @@ export class RealtimeCallHandler {
       });
 
       ws.on("error", (error) => {
-        console.error("[voice-call] realtime WS error:", error);
+        logger.error("realtime WS error:", error);
       });
     });
   }
@@ -326,7 +327,7 @@ export class RealtimeCallHandler {
         bridgeRef.current?.triggerGreeting?.(initialGreetingInstructions);
       },
       onError: (error) => {
-        console.error("[voice-call] realtime voice error:", error.message);
+        logger.error("realtime voice error:", error.message);
       },
       onClose: (reason) => {
         if (reason !== "error") {
@@ -339,11 +340,7 @@ export class RealtimeCallHandler {
         void this.provider
           .hangupCall({ callId, providerCallId: callSid, reason: "error" })
           .catch((error: unknown) => {
-            console.warn(
-              `[voice-call] Failed to hang up realtime call ${callSid}: ${formatErrorMessage(
-                error,
-              )}`,
-            );
+            logger.warn(`Failed to hang up realtime call ${callSid}: ${formatErrorMessage(error)}`);
           });
       },
     });
@@ -351,7 +348,7 @@ export class RealtimeCallHandler {
     bridgeRef.current = bridge;
 
     bridge.connect().catch((error: Error) => {
-      console.error("[voice-call] Failed to connect realtime bridge:", error);
+      logger.error("Failed to connect realtime bridge:", error);
       bridge.close();
       emitCallEnd("error");
       ws.close(1011, "Failed to connect");

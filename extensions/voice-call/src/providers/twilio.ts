@@ -28,6 +28,7 @@ import {
   mapProviderStatusToEndReason,
   normalizeProviderStatus,
 } from "./shared/call-status.js";
+import { logger } from "../logger.js";
 import { guardedJsonApiRequest } from "./shared/guarded-json-api.js";
 import type { TwilioProviderOptions } from "./twilio.types.js";
 import { twilioApiRequest } from "./twilio/api.js";
@@ -562,10 +563,7 @@ export class TwilioProvider implements VoiceCallProvider {
         await this.playTtsViaStream(input.text, streamSid);
         return;
       } catch (err) {
-        console.warn(
-          `[voice-call] Telephony TTS failed:`,
-          err instanceof Error ? err.message : err,
-        );
+        logger.warn(`Telephony TTS failed: ${err instanceof Error ? err.message : err}`);
         throw err instanceof Error ? err : new Error(String(err));
       }
     }
@@ -576,9 +574,7 @@ export class TwilioProvider implements VoiceCallProvider {
       throw new Error("Missing webhook URL for this call (provider state not initialized)");
     }
 
-    console.warn(
-      "[voice-call] Using TwiML <Say> fallback - telephony TTS not configured or media stream not active",
-    );
+    logger.warn("Using TwiML <Say> fallback - telephony TTS not configured or media stream not active");
 
     const pollyVoice = mapVoiceToPolly(input.voice);
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>

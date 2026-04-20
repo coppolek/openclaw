@@ -13,7 +13,7 @@ import {
 import { createAcpConnection, createAcpGateway } from "./translator.test-helpers.js";
 
 describe("acp translator stop reason mapping", () => {
-  it("error state resolves as end_turn, not refusal", async () => {
+  it("error state rejects with the gateway error message", async () => {
     const { agent, promptPromise, runId } = await createPendingPromptHarness();
 
     await agent.handleGatewayEvent(
@@ -22,14 +22,14 @@ describe("acp translator stop reason mapping", () => {
         sessionKey: "agent:main:main",
         seq: 1,
         state: "error",
-        errorMessage: "gateway timeout",
+        error: "gateway timeout",
       }),
     );
 
-    await expect(promptPromise).resolves.toEqual({ stopReason: "end_turn" });
+    await expect(promptPromise).rejects.toThrow("gateway timeout");
   });
 
-  it("error state with no errorMessage resolves as end_turn", async () => {
+  it("error state with no error message rejects with a default message", async () => {
     const { agent, promptPromise, runId } = await createPendingPromptHarness();
 
     await agent.handleGatewayEvent(
@@ -41,7 +41,7 @@ describe("acp translator stop reason mapping", () => {
       }),
     );
 
-    await expect(promptPromise).resolves.toEqual({ stopReason: "end_turn" });
+    await expect(promptPromise).rejects.toThrow("Gateway chat error");
   });
 
   it("aborted state resolves as cancelled", async () => {

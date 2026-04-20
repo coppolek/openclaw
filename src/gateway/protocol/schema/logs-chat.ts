@@ -92,6 +92,16 @@ export const ChatEventSchema = Type.Object(
     ),
     usage: Type.Optional(Type.Unknown()),
     stopReason: Type.Optional(Type.String()),
+    errorKind: Type.Optional(
+      Type.Union([
+        Type.Literal("refusal"),
+        Type.Literal("timeout"),
+        Type.Literal("rate_limit"),
+        Type.Literal("capacity"),
+        Type.Literal("overloaded"),
+        Type.Literal("unknown"),
+      ]),
+    ),
   },
   { additionalProperties: false },
 );

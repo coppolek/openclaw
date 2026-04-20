@@ -16,6 +16,30 @@ import {
 import { definePluginEntry, type OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
 
+// New features: Statistics & Analytics, Scheduler
+export {
+  recordMemoryRecall,
+  getOverallMemoryStats,
+  getMemoryStatsForAgent,
+  formatMemoryStatsReport,
+  type MemoryStats,
+  type MemoryAnalytics,
+} from "./stats.js";
+
+export {
+  MemoryScheduler,
+  formatScheduleSummary,
+  formatSchedulerStats,
+  type ScheduledRecall,
+  type ScheduleConfig,
+} from "./scheduler.js";
+
+// Simple logger helper for error logging in catch blocks
+const logError = (message: string, error: unknown): void => {
+  // eslint-disable-next-line no-console
+  console.error(`[active-memory] ${message}:`, error instanceof Error ? error.message : String(error));
+};
+
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_AGENT_ID = "main";
 const DEFAULT_MAX_SUMMARY_CHARS = 220;
@@ -353,7 +377,8 @@ function resolveCanonicalSessionKeyFromSessionId(params: {
       }
     }
     return bestMatch?.sessionKey?.trim() || undefined;
-  } catch {
+  } catch (error) {
+    logError("Failed to resolve latest session file", error);
     return undefined;
   }
 }
@@ -432,7 +457,8 @@ function resolveRecallRunChannelContext(params: {
           ? "weak"
           : undefined,
     });
-  } catch {
+  } catch (error) {
+    logError("Failed to update toggle store", error);
     return resolveReturnValue({});
   }
 }
@@ -1205,7 +1231,8 @@ async function readActiveMemorySearchDebug(
   let raw: string;
   try {
     raw = await fs.readFile(sessionFile, "utf8");
-  } catch {
+  } catch (error) {
+    logError(`Failed to read session file: ${sessionFile}`, error);
     return undefined;
   }
   const lines = raw
@@ -1252,7 +1279,8 @@ async function readActiveMemorySearchDebug(
         action,
         error,
       };
-    } catch {
+    } catch (error) {
+      logError(`Failed to parse debug entry at line ${index}`, error);
       continue;
     }
   }
