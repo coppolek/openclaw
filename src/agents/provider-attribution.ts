@@ -1,5 +1,6 @@
 import { loadPluginManifestRegistry } from "../plugins/manifest-registry.js";
 import {
+  normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
 } from "../shared/string-coerce.js";
@@ -522,6 +523,46 @@ export function resolveProviderAttributionHeaders(
     return undefined;
   }
   return policy.headers;
+}
+
+export function applyProviderAttributionHeadersToModel<
+  T extends {
+    provider?: string | null;
+    baseUrl?: string | null;
+    headers?: Record<string, string> | undefined;
+  },
+>(model: T, env: RuntimeVersionEnv = process.env as RuntimeVersionEnv): T {
+  const normalizedProvider = normalizeProviderId(model.provider ?? "");
+  // Only OpenRouter attribution is applied via direct-completion model headers.
+  // OpenAI / OpenAI-Codex attribution stays on the stream-wrapper path for now.
+  if (normalizedProvider !== "openrouter") {
+    return model;
+  }
+  const endpointClass = resolveProviderEndpoint(model.baseUrl).endpointClass;
+  if (endpointClass !== "default" && endpointClass !== "openrouter") {
+    return model;
+  }
+  const attributionHeaders = resolveProviderAttributionHeaders(normalizedProvider, env);
+  if (!attributionHeaders || Object.keys(attributionHeaders).length === 0) {
+    return model;
+  }
+  const protectedAttributionKeys = new Set(
+    Object.keys(attributionHeaders).map((key) => normalizeLowercaseStringOrEmpty(key)),
+  );
+  const unprotectedModelHeaders = model.headers
+    ? Object.fromEntries(
+        Object.entries(model.headers).filter(
+          ([key]) => !protectedAttributionKeys.has(normalizeLowercaseStringOrEmpty(key)),
+        ),
+      )
+    : undefined;
+  return {
+    ...model,
+    headers: {
+      ...unprotectedModelHeaders,
+      ...attributionHeaders,
+    },
+  };
 }
 
 export function resolveProviderRequestPolicy(

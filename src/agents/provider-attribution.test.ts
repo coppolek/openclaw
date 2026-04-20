@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyProviderAttributionHeadersToModel,
   listProviderAttributionPolicies,
   resolveProviderAttributionHeaders,
   resolveProviderAttributionIdentity,
@@ -988,5 +989,72 @@ describe("provider attribution", () => {
         testCase.expected,
       );
     }
+  });
+
+  it("applies provider attribution headers to direct-completion models without clobbering existing headers", () => {
+    expect(
+      applyProviderAttributionHeadersToModel(
+        {
+          provider: "openrouter",
+          headers: {
+            "X-Custom": "1",
+          },
+        },
+        { OPENCLAW_VERSION: "2026.3.22" },
+      ),
+    ).toEqual({
+      provider: "openrouter",
+      headers: {
+        "HTTP-Referer": "https://openclaw.ai",
+        "X-OpenRouter-Title": "OpenClaw",
+        "X-OpenRouter-Categories": "cli-agent",
+        "X-Custom": "1",
+      },
+    });
+  });
+
+  it("does not let model headers override protected OpenRouter attribution keys", () => {
+    expect(
+      applyProviderAttributionHeadersToModel(
+        {
+          provider: "openrouter",
+          headers: {
+            "http-referer": "https://example.com",
+            "X-OpenRouter-Title": "Custom Title",
+            "X-Custom": "1",
+          },
+        },
+        { OPENCLAW_VERSION: "2026.3.22" },
+      ),
+    ).toEqual({
+      provider: "openrouter",
+      headers: {
+        "X-Custom": "1",
+        "HTTP-Referer": "https://openclaw.ai",
+        "X-OpenRouter-Title": "OpenClaw",
+        "X-OpenRouter-Categories": "cli-agent",
+      },
+    });
+  });
+
+  it("skips direct-completion OpenRouter attribution for custom proxy baseUrls", () => {
+    expect(
+      applyProviderAttributionHeadersToModel(
+        {
+          provider: "openrouter",
+          baseUrl: "https://proxy.example.com/v1",
+          headers: {
+            "X-Custom": "1",
+          },
+        },
+        { OPENCLAW_VERSION: "2026.3.22" },
+      ),
+    ).toEqual({
+      provider: "openrouter",
+      baseUrl: "https://proxy.example.com/v1",
+      headers: {
+        "X-Custom": "1",
+      },
+    });
   });
 });
