@@ -1,4 +1,46 @@
 import type { Api, Context, Model } from "@mariozechner/pi-ai";
+import { sanitizeForPromptLiteral } from "./sanitize-for-prompt.js";
+
+// Tool names that fetch external network content. Their text results are wrapped
+// in <tool_result trusted="false"> delimiters so the model treats them as data,
+// not as instructions. Lowercase, matching normalizeToolName output.
+// MCP tools are intentionally excluded: bundled and external MCP both set
+// details.mcpServer / details.mcpTool, so they cannot be reliably distinguished here.
+const OPEN_WORLD_TOOL_NAMES = new Set(["web_fetch", "web_search", "x_search"]);
+
+function isOpenWorldToolResult(msg: { toolName: string; isError: boolean }): boolean {
+  // Error payloads are framework-generated text, not external content.
+  if (msg.isError) {
+    return false;
+  }
+  return OPEN_WORLD_TOOL_NAMES.has(msg.toolName.trim().toLowerCase());
+}
+
+type ToolResultContent = Extract<Context["messages"][number], { role: "toolResult" }>["content"];
+
+function wrapToolResultContentForTrust(
+  toolName: string,
+  content: ToolResultContent,
+): ToolResultContent {
+  const source = toolName.trim().toLowerCase();
+  return content.map((block) => {
+    if (block.type !== "text") {
+      return block;
+    }
+    if (!block.text.trim()) {
+      return block;
+    }
+    // Strip control chars then HTML-encode angle brackets so an attacker
+    // cannot escape the trust boundary with </tool_result>.
+    const sanitized = sanitizeForPromptLiteral(block.text)
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    return {
+      ...block,
+      text: `<tool_result source="${source}" trusted="false">\n${sanitized}\n</tool_result>`,
+    };
+  });
+}
 
 type PendingToolCall = { id: string; name: string };
 
@@ -37,9 +79,17 @@ export function transformTransportMessages(
     }
     if (msg.role === "toolResult") {
       const normalizedId = toolCallIdMap.get(msg.toolCallId);
-      return normalizedId && normalizedId !== msg.toolCallId
-        ? { ...msg, toolCallId: normalizedId }
-        : msg;
+      const idNormalized =
+        normalizedId && normalizedId !== msg.toolCallId
+          ? { ...msg, toolCallId: normalizedId }
+          : msg;
+      if (isOpenWorldToolResult(idNormalized)) {
+        return {
+          ...idNormalized,
+          content: wrapToolResultContentForTrust(idNormalized.toolName, idNormalized.content),
+        };
+      }
+      return idNormalized;
     }
     if (msg.role !== "assistant") {
       return msg;
