@@ -1,5 +1,6 @@
 package ai.openclaw.app
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,7 +8,9 @@ import android.app.Service
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,10 +20,12 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
-class NodeForegroundService : Service() {
+open class NodeForegroundService : Service() {
   private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
   private var notificationJob: Job? = null
   private var didStartForeground = false
+  private var currentForegroundServiceType: Int? = null
+  private var latestNotification: Notification? = null
 
   override fun onCreate() {
     super.onCreate()
@@ -67,6 +72,7 @@ class NodeForegroundService : Service() {
         stopSelf()
         return START_NOT_STICKY
       }
+      ACTION_REFRESH_FOREGROUND -> refreshForegroundServiceType()
     }
     // Keep running; connection is managed by NodeRuntime (auto-reconnect + manual).
     return START_STICKY
@@ -133,12 +139,56 @@ class NodeForegroundService : Service() {
   }
 
   private fun startForegroundWithTypes(notification: Notification) {
-    if (didStartForeground) {
+    latestNotification = notification
+    val serviceType = foregroundServiceType(includeLocationType = canUseLocationForegroundServiceType())
+    if (!shouldRestartForeground(serviceType)) {
       updateNotification(notification)
       return
     }
-    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+    startForeground(
+      NOTIFICATION_ID,
+      notification,
+      serviceType,
+    )
     didStartForeground = true
+    currentForegroundServiceType = serviceType
+  }
+
+  private fun refreshForegroundServiceType() {
+    startForegroundWithTypes(
+      notification = latestNotification ?: buildNotification(title = "OpenClaw Node", text = "Starting…"),
+    )
+  }
+
+  internal open fun hasAnyLocationPermission(): Boolean {
+    return ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+      PackageManager.PERMISSION_GRANTED ||
+      ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+      PackageManager.PERMISSION_GRANTED
+  }
+
+  internal open fun isAppForeground(): Boolean {
+    return (application as? NodeApp)?.peekRuntime()?.isForeground?.value == true
+  }
+
+  internal open fun canUseBackgroundLocation(): Boolean {
+    val prefs = (application as? NodeApp)?.prefs ?: return false
+    return prefs.effectiveLocationMode() == LocationMode.Always &&
+      ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) ==
+      PackageManager.PERMISSION_GRANTED
+  }
+
+  internal open fun canUseLocationForegroundServiceType(): Boolean {
+    return hasAnyLocationPermission() && (isAppForeground() || canUseBackgroundLocation())
+  }
+
+  private fun foregroundServiceType(includeLocationType: Boolean): Int {
+    return ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
+      if (includeLocationType) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0
+  }
+
+  private fun shouldRestartForeground(serviceType: Int): Boolean {
+    return !didStartForeground || currentForegroundServiceType != serviceType
   }
 
   companion object {
@@ -146,6 +196,7 @@ class NodeForegroundService : Service() {
     private const val NOTIFICATION_ID = 1
 
     private const val ACTION_STOP = "ai.openclaw.app.action.STOP"
+    private const val ACTION_REFRESH_FOREGROUND = "ai.openclaw.app.action.REFRESH_FOREGROUND"
 
     fun start(context: Context) {
       val intent = Intent(context, NodeForegroundService::class.java)
@@ -155,6 +206,11 @@ class NodeForegroundService : Service() {
     fun stop(context: Context) {
       val intent = Intent(context, NodeForegroundService::class.java).setAction(ACTION_STOP)
       context.startService(intent)
+    }
+
+    fun refresh(context: Context) {
+      val intent = Intent(context, NodeForegroundService::class.java).setAction(ACTION_REFRESH_FOREGROUND)
+      context.startForegroundService(intent)
     }
   }
 }

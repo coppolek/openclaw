@@ -52,6 +52,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -69,6 +70,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import ai.openclaw.app.BuildConfig
 import ai.openclaw.app.LocationMode
 import ai.openclaw.app.MainViewModel
+import ai.openclaw.app.NodeForegroundService
 import ai.openclaw.app.normalizeLocalHourMinute
 import ai.openclaw.app.NotificationPackageFilterMode
 import ai.openclaw.app.node.DeviceNotificationListenerService
@@ -168,13 +170,24 @@ fun SettingsSheet(viewModel: MainViewModel) {
       viewModel.setCameraEnabled(cameraOk)
     }
 
-  var pendingLocationRequest by remember { mutableStateOf(false) }
+  var pendingLocationSelection by rememberSaveable { mutableStateOf<LocationMode?>(null) }
   var pendingPreciseToggle by remember { mutableStateOf(false) }
+  val backgroundLocationOptionLabel =
+    remember(context) {
+      context.packageManager.backgroundPermissionOptionLabel?.toString()?.trim().orEmpty()
+        .ifEmpty { "Allow all the time" }
+    }
 
   val locationPermissionLauncher =
     rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { perms ->
-      val fineOk = perms[Manifest.permission.ACCESS_FINE_LOCATION] == true
-      val coarseOk = perms[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+      val fineOk =
+        perms[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+          ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+          PackageManager.PERMISSION_GRANTED
+      val coarseOk =
+        perms[Manifest.permission.ACCESS_COARSE_LOCATION] == true ||
+          ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+          PackageManager.PERMISSION_GRANTED
       val granted = fineOk || coarseOk
 
       if (pendingPreciseToggle) {
@@ -183,9 +196,41 @@ fun SettingsSheet(viewModel: MainViewModel) {
         return@rememberLauncherForActivityResult
       }
 
-      if (pendingLocationRequest) {
-        pendingLocationRequest = false
-        viewModel.setLocationMode(if (granted) LocationMode.WhileUsing else LocationMode.Off)
+      when (pendingLocationSelection) {
+        LocationMode.WhileUsing -> {
+          pendingLocationSelection = null
+          if (granted) {
+            setLocationModeAndRefreshService(
+              context = context,
+              viewModel = viewModel,
+              mode = LocationMode.WhileUsing,
+            )
+          }
+        }
+        LocationMode.Always -> {
+          if (!granted) {
+            pendingLocationSelection = null
+            viewModel.clearPendingAlwaysLocationUpgrade()
+            return@rememberLauncherForActivityResult
+          }
+          if (hasBackgroundLocationPermission(context)) {
+            pendingLocationSelection = null
+            viewModel.clearPendingAlwaysLocationUpgrade()
+            setLocationModeAndRefreshService(
+              context = context,
+              viewModel = viewModel,
+              mode = LocationMode.Always,
+            )
+          } else {
+            setLocationModeAndRefreshService(
+              context = context,
+              viewModel = viewModel,
+              mode = LocationMode.WhileUsing,
+            )
+            openAppSettings(context)
+          }
+        }
+        else -> Unit
       }
     }
 
@@ -207,6 +252,7 @@ fun SettingsSheet(viewModel: MainViewModel) {
         context.packageManager?.hasSystemFeature(PackageManager.FEATURE_TELEPHONY) == true
     }
   val callLogPermissionAvailable = remember { BuildConfig.OPENCLAW_ENABLE_CALL_LOG }
+  val backgroundLocationAvailable = remember { BuildConfig.OPENCLAW_ENABLE_BACKGROUND_LOCATION }
   val photosPermission =
     if (Build.VERSION.SDK_INT >= 33) {
       Manifest.permission.READ_MEDIA_IMAGES
@@ -335,10 +381,36 @@ fun SettingsSheet(viewModel: MainViewModel) {
       assistantRoleHeld = isAssistantRoleHeld(context)
     }
 
-  DisposableEffect(lifecycleOwner, context) {
+  DisposableEffect(lifecycleOwner, context, locationMode, backgroundLocationAvailable) {
     val observer =
       LifecycleEventObserver { _, event ->
         if (event == Lifecycle.Event.ON_RESUME) {
+          val locationGranted = hasAnyLocationPermission(context)
+          val backgroundGranted = hasBackgroundLocationPermission(context)
+          when {
+            viewModel.hasPendingAlwaysLocationUpgrade() -> {
+              pendingLocationSelection = null
+              val reconciledMode = viewModel.reconcilePendingAlwaysLocationUpgrade()
+              if (reconciledMode != null) {
+                NodeForegroundService.refresh(context)
+              }
+            }
+            locationMode == LocationMode.Always &&
+              (!backgroundLocationAvailable || !locationGranted || !backgroundGranted) -> {
+              setLocationModeAndRefreshService(
+                context = context,
+                viewModel = viewModel,
+                mode = if (locationGranted) LocationMode.WhileUsing else LocationMode.Off,
+              )
+            }
+            locationMode == LocationMode.WhileUsing && !locationGranted -> {
+              setLocationModeAndRefreshService(
+                context = context,
+                viewModel = viewModel,
+                mode = LocationMode.Off,
+              )
+            }
+          }
           micPermissionGranted =
             ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
               PackageManager.PERMISSION_GRANTED
@@ -396,20 +468,51 @@ fun SettingsSheet(viewModel: MainViewModel) {
   }
 
   fun requestLocationPermissions() {
-    val fineOk =
-      ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
-        PackageManager.PERMISSION_GRANTED
-    val coarseOk =
-      ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
-        PackageManager.PERMISSION_GRANTED
-    if (fineOk || coarseOk) {
-      viewModel.setLocationMode(LocationMode.WhileUsing)
+    if (hasAnyLocationPermission(context)) {
+      setLocationModeAndRefreshService(
+        context = context,
+        viewModel = viewModel,
+        mode = LocationMode.WhileUsing,
+      )
     } else {
-      pendingLocationRequest = true
+      pendingLocationSelection = LocationMode.WhileUsing
       locationPermissionLauncher.launch(
         arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
       )
     }
+  }
+
+  fun requestAlwaysLocationPermissions() {
+    if (!backgroundLocationAvailable) {
+      requestLocationPermissions()
+      return
+    }
+    if (!hasAnyLocationPermission(context)) {
+      viewModel.beginPendingAlwaysLocationUpgrade(locationMode)
+      pendingLocationSelection = LocationMode.Always
+      locationPermissionLauncher.launch(
+        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+      )
+      return
+    }
+    if (hasBackgroundLocationPermission(context)) {
+      pendingLocationSelection = null
+      viewModel.clearPendingAlwaysLocationUpgrade()
+      setLocationModeAndRefreshService(
+        context = context,
+        viewModel = viewModel,
+        mode = LocationMode.Always,
+      )
+      return
+    }
+    viewModel.beginPendingAlwaysLocationUpgrade(locationMode)
+    pendingLocationSelection = LocationMode.Always
+    setLocationModeAndRefreshService(
+      context = context,
+      viewModel = viewModel,
+      mode = LocationMode.WhileUsing,
+    )
+    openAppSettings(context)
   }
 
   fun setPreciseLocationChecked(checked: Boolean) {
@@ -1127,7 +1230,13 @@ fun SettingsSheet(viewModel: MainViewModel) {
             trailingContent = {
               RadioButton(
                 selected = locationMode == LocationMode.Off,
-                onClick = { viewModel.setLocationMode(LocationMode.Off) },
+                onClick = {
+                  setLocationModeAndRefreshService(
+                    context = context,
+                    viewModel = viewModel,
+                    mode = LocationMode.Off,
+                  )
+                },
               )
             },
           )
@@ -1145,6 +1254,26 @@ fun SettingsSheet(viewModel: MainViewModel) {
             },
           )
           HorizontalDivider(color = mobileBorder)
+          if (backgroundLocationAvailable) {
+            ListItem(
+              modifier = Modifier.fillMaxWidth(),
+              colors = listItemColors,
+              headlineContent = { Text("Always", style = mobileHeadline) },
+              supportingContent = {
+                Text(
+                  "Access even when OpenClaw is closed. Android opens system settings so you can choose $backgroundLocationOptionLabel.",
+                  style = mobileCallout,
+                )
+              },
+              trailingContent = {
+                RadioButton(
+                  selected = locationMode == LocationMode.Always,
+                  onClick = { requestAlwaysLocationPermissions() },
+                )
+              },
+            )
+            HorizontalDivider(color = mobileBorder)
+          }
           ListItem(
             modifier = Modifier.fillMaxWidth(),
             colors = listItemColors,
@@ -1270,6 +1399,14 @@ internal fun resolveNotificationCandidatePackages(
     .toSet()
 }
 
+private fun setLocationModeAndRefreshService(
+  context: Context,
+  viewModel: MainViewModel,
+  mode: LocationMode,
+) {
+  viewModel.setLocationMode(mode)
+  NodeForegroundService.refresh(context)
+}
 
 @Composable
 private fun settingsTextFieldColors() =
@@ -1330,6 +1467,18 @@ private fun hasNotificationsPermission(context: Context): Boolean {
   if (Build.VERSION.SDK_INT < 33) return true
   return ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
           PackageManager.PERMISSION_GRANTED
+}
+
+private fun hasAnyLocationPermission(context: Context): Boolean {
+  return ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+    PackageManager.PERMISSION_GRANTED ||
+    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+    PackageManager.PERMISSION_GRANTED
+}
+
+private fun hasBackgroundLocationPermission(context: Context): Boolean {
+  return ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_BACKGROUND_LOCATION) ==
+    PackageManager.PERMISSION_GRANTED
 }
 
 private fun isNotificationListenerEnabled(context: Context): Boolean {
