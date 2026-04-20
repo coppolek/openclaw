@@ -4,6 +4,7 @@ import { resolveImageCapableConfigProviderIds } from "./config-provider-models.j
 import { describeImageWithModel, describeImagesWithModel } from "./image-runtime.js";
 import { normalizeMediaProviderId } from "./provider-id.js";
 import type { MediaUnderstandingProvider } from "./types.js";
+import { describeImageWithModel, describeImagesWithModel } from "./image-runtime.js";
 
 function mergeProviderIntoRegistry(
   registry: Map<string, MediaUnderstandingProvider>,
@@ -52,6 +53,38 @@ export function buildMediaUnderstandingRegistry(
   if (overrides) {
     for (const [key, provider] of Object.entries(overrides)) {
       mergeProviderIntoRegistry(registry, provider, key);
+    }
+  }
+  // Auto-register custom providers that use a known API format (e.g.
+  // "anthropic-messages") and declare image input support.  This allows
+  // third-party or self-hosted providers to be used by the `image` tool
+  // without requiring a dedicated media-understanding plugin.
+  const configuredProviders = cfg?.models?.providers;
+  if (configuredProviders && typeof configuredProviders === "object") {
+    for (const [providerId, providerConfig] of Object.entries(configuredProviders)) {
+      const normalizedKey = normalizeMediaProviderId(providerId);
+      if (registry.has(normalizedKey)) {
+        continue;
+      }
+      const record = providerConfig as Record<string, unknown>;
+      const api = record?.api;
+      if (api === "anthropic-messages" || api === "openai-responses" || api === "openai-completions") {
+        const rawModels = record?.models;
+        const models: Array<Record<string, unknown>> = Array.isArray(rawModels)
+          ? rawModels
+          : [];
+        const hasImageModel = models.some(
+          (m) => Array.isArray(m?.input) && m.input.includes("image"),
+        );
+        if (hasImageModel) {
+          registry.set(normalizedKey, {
+            id: providerId,
+            capabilities: ["image"],
+            describeImage: describeImageWithModel,
+            describeImages: describeImagesWithModel,
+          });
+        }
+      }
     }
   }
   return registry;
