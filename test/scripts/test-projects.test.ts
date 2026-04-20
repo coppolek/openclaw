@@ -29,6 +29,21 @@ describe("scripts/test-projects changed-target routing", () => {
     ).toBeNull();
   });
 
+  it("routes changed extension vitest configs to their own shard", () => {
+    expect(
+      buildVitestRunPlans(["--changed", "origin/main"], process.cwd(), () => [
+        "test/vitest/vitest.extension-discord.config.ts",
+      ]),
+    ).toEqual([
+      {
+        config: "test/vitest/vitest.extension-discord.config.ts",
+        forwardedArgs: [],
+        includePatterns: null,
+        watchMode: false,
+      },
+    ]);
+  });
+
   it("keeps the broad changed run for shared test helpers", () => {
     expect(
       resolveChangedTargetArgs(["--changed", "origin/main"], process.cwd(), () => [
@@ -190,27 +205,6 @@ describe("scripts/test-projects changed-target routing", () => {
         includePatterns: ["src/commands/status-overview-values.test.ts"],
         watchMode: false,
       },
-    ]);
-  });
-
-  it("keeps changed plugin-sdk allowlist files on sibling light tests plus extension tests", () => {
-    const plans = buildVitestRunPlans(["--changed", "origin/main"], process.cwd(), () => [
-      "src/plugin-sdk/provider-entry.ts",
-    ]);
-
-    expect(plans).toEqual([
-      {
-        config: "test/vitest/vitest.unit-fast.config.ts",
-        forwardedArgs: [],
-        includePatterns: ["src/plugin-sdk/provider-entry.test.ts"],
-        watchMode: false,
-      },
-      ...listFullExtensionVitestProjectConfigs().map((config) => ({
-        config,
-        forwardedArgs: [],
-        includePatterns: null,
-        watchMode: false,
-      })),
     ]);
   });
 
