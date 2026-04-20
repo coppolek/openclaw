@@ -1831,7 +1831,7 @@ export async function cancelTaskById(params: {
 export function listTaskRecords(): TaskRecord[] {
   ensureTaskRegistryReady();
   return [...tasks.values()]
-    .map((task, insertionIndex) => ({ ...cloneTaskRecord(task), insertionIndex }))
+    .map((task, insertionIndex) => Object.assign({}, cloneTaskRecord(task), { insertionIndex }))
     .toSorted(compareTasksNewestFirst)
     .map(({ insertionIndex: _, ...task }) => task);
 }
@@ -1868,7 +1868,7 @@ function listTasksFromIndex(index: Map<string, Set<string>>, key: string): TaskR
   return [...ids]
     .map((taskId, insertionIndex) => {
       const task = tasks.get(taskId);
-      return task ? { ...cloneTaskRecord(task), insertionIndex } : null;
+      return task ? Object.assign({}, cloneTaskRecord(task), { insertionIndex }) : null;
     })
     .filter(
       (
