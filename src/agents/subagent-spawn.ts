@@ -8,6 +8,7 @@ import {
   normalizeOptionalString,
 } from "../shared/string-coerce.js";
 import type { DeliveryContext } from "../utils/delivery-context.types.js";
+import { resolveAgentDir } from "./agent-scope-config.js";
 import type { BootstrapContextMode } from "./bootstrap-files.js";
 import {
   mapToolContextToSpawnedRunMetadata,
@@ -521,6 +522,7 @@ export async function spawnSubagentDirect(
     depth: childDepth,
     maxSpawnDepth,
   });
+  const targetAgentDir = resolveAgentDir(cfg, targetAgentId);
   const targetAgentConfig = resolveAgentConfig(cfg, targetAgentId);
   const plan = resolveSubagentModelAndThinkingPlan({
     cfg,
@@ -840,6 +842,7 @@ export async function spawnSubagentDirect(
       cleanup,
       label: label || undefined,
       model: resolvedModel,
+      agentDir: targetAgentDir,
       workspaceDir: spawnedMetadata.workspaceDir,
       runTimeoutSeconds,
       expectsCompletionMessage: shouldAnnounceCompletion,

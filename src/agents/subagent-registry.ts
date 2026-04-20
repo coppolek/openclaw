@@ -319,6 +319,7 @@ function schedulePendingLifecycleError(params: { runId: string; endedAt: number;
 async function notifyContextEngineSubagentEnded(params: {
   childSessionKey: string;
   reason: SubagentEndReason;
+  agentDir?: string;
   workspaceDir?: string;
 }) {
   try {
@@ -329,7 +330,7 @@ async function notifyContextEngineSubagentEnded(params: {
       allowGatewaySubagentBinding: true,
     });
     const engine = await resolveSubagentRegistryContextEngine(cfg, {
-      agentDir: resolveOpenClawAgentDir(),
+      agentDir: params.agentDir,
       workspaceDir: params.workspaceDir,
     });
     if (!engine.onSubagentEnded) {
@@ -766,6 +767,7 @@ export function replaceSubagentRunAfterSteer(params: {
   return subagentRunManager.replaceSubagentRunAfterSteer(params);
 }
 
+export function registerSubagentRun(params: RegisterSubagentRunParams) {
 export function registerSubagentRun(params: RegisterSubagentRunParams) {
   subagentRunManager.registerSubagentRun(params);
 }
