@@ -174,6 +174,7 @@ export const __testing = {
     gatewayCallDeps.createGatewayClient =
       createGatewayClient ?? defaultGatewayCallDeps.createGatewayClient;
   },
+  ensureExplicitGatewayAuth,
   resetDepsForTests(): void {
     gatewayCallDeps.createGatewayClient = defaultGatewayCallDeps.createGatewayClient;
     gatewayCallDeps.loadConfig = defaultGatewayCallDeps.loadConfig;
@@ -241,7 +242,7 @@ export function ensureExplicitGatewayAuth(params: {
     return;
   }
   const message = [
-    "gateway url override requires explicit credentials",
+    "gateway url override requires explicit credentials (--token or --password)",
     params.errorHint,
     params.configPath ? `Config: ${params.configPath}` : undefined,
   ]
