@@ -29,6 +29,7 @@ import {
   __testing,
   clearPluginLoaderCache,
   loadOpenClawPlugins,
+  PluginLoadFailureError,
   PluginLoadReentryError,
   resolveRuntimePluginRegistry,
 } from "./loader.js";
@@ -2823,6 +2824,107 @@ module.exports = { id: "throws-after-import", register() {} };`,
         },
       }),
     ).toThrow("plugin load failed: configurable: invalid config: <root>: must be object");
+  });
+
+  it("does not throw when only non-allowlisted plugins fail under strict loading", () => {
+    useNoBundledPlugins();
+    const plugin = writePlugin({
+      id: "third-party",
+      filename: "third-party.cjs",
+      body: `module.exports = { id: "third-party", register() {} };`,
+    });
+
+    expect(() =>
+      loadOpenClawPlugins({
+        cache: false,
+        throwOnLoadError: true,
+        config: {
+          plugins: {
+            enabled: true,
+            load: { paths: [plugin.file] },
+            allow: ["trusted-only"],
+            entries: {
+              "third-party": {
+                enabled: true,
+                config: "invalid" as unknown as Record<string, unknown>,
+              },
+            },
+          },
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it("does not suppress strict failures for explicitly enabled plugins omitted from plugins.allow", () => {
+    setupBundledTelegramPlugin();
+    expect(() =>
+      loadOpenClawPlugins({
+        cache: false,
+        workspaceDir: cachedBundledTelegramDir,
+        throwOnLoadError: true,
+        config: {
+          channels: {
+            telegram: {
+              enabled: true,
+            },
+          },
+          plugins: {
+            allow: ["browser"],
+            entries: {
+              telegram: {
+                config: "nope" as unknown as Record<string, unknown>,
+              },
+            },
+          },
+        },
+      }),
+    ).toThrow("plugin load failed: telegram: invalid config: <root>: must be object");
+  });
+
+  it("fails fast for open allowlists even when other plugins are explicitly enabled", () => {
+    setupBundledTelegramPlugin();
+    const broken = writePlugin({
+      id: "broken",
+      filename: "broken.cjs",
+      body: `module.exports = { id: "broken", register() {} };`,
+    });
+
+    expect(() =>
+      loadOpenClawPlugins({
+        cache: false,
+        workspaceDir: cachedBundledTelegramDir,
+        throwOnLoadError: true,
+        config: {
+          channels: {
+            telegram: {
+              enabled: true,
+            },
+          },
+          plugins: {
+            load: { paths: [broken.file] },
+            entries: {
+              broken: {
+                enabled: true,
+                config: "nope" as unknown as Record<string, unknown>,
+              },
+            },
+          },
+        },
+      }),
+    ).toThrow("plugin load failed: broken: invalid config: <root>: must be object");
+  });
+
+  it("filters strict plugin load failures by plugins.allow", () => {
+    const registry = {
+      plugins: [
+        { id: "allowed", status: "error", error: "boom" },
+        { id: "blocked", status: "error", error: "nope" },
+      ],
+    } as unknown as PluginRegistry;
+
+    const error = new PluginLoadFailureError(registry, { onlyPluginIds: ["allowed"] });
+    expect(error.pluginIds).toEqual(["allowed"]);
+    expect(error.message).toBe("plugin load failed: allowed: boom");
   });
 
   it("fails when plugin export id mismatches manifest id", () => {

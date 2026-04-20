@@ -168,8 +168,19 @@ export class PluginLoadFailureError extends Error {
   readonly pluginIds: string[];
   readonly registry: PluginRegistry;
 
-  constructor(registry: PluginRegistry) {
-    const failedPlugins = registry.plugins.filter((entry) => entry.status === "error");
+  constructor(
+    registry: PluginRegistry,
+    options?: {
+      onlyPluginIds?: readonly string[];
+    },
+  ) {
+    const filterSet =
+      options?.onlyPluginIds && options.onlyPluginIds.length > 0
+        ? new Set(options.onlyPluginIds)
+        : null;
+    const failedPlugins = registry.plugins.filter(
+      (entry) => entry.status === "error" && (!filterSet || filterSet.has(entry.id)),
+    );
     const summary = failedPlugins
       .map((entry) => `${entry.id}: ${entry.error ?? "unknown plugin load error"}`)
       .join("; ");
@@ -1142,14 +1153,32 @@ function pushDiagnostics(diagnostics: PluginDiagnostic[], append: PluginDiagnost
 function maybeThrowOnPluginLoadError(
   registry: PluginRegistry,
   throwOnLoadError: boolean | undefined,
+  allowlist: readonly string[],
 ): void {
   if (!throwOnLoadError) {
     return;
   }
-  if (!registry.plugins.some((entry) => entry.status === "error")) {
+  const errored = registry.plugins.filter((entry) => entry.status === "error");
+  if (errored.length === 0) {
     return;
   }
-  throw new PluginLoadFailureError(registry);
+  const hasAllowlist = allowlist.length > 0;
+  const strictIds = hasAllowlist ? new Set<string>(allowlist) : null;
+  if (strictIds) {
+    for (const plugin of registry.plugins) {
+      if (plugin.explicitlyEnabled) {
+        strictIds.add(plugin.id);
+      }
+    }
+  }
+  // Restrict strict-error filtering to non-empty allowlists so the open-allowlist
+  // (plugins.allow is empty) semantics stay fail-fast for any plugin load error.
+  if (strictIds && !errored.some((entry) => strictIds.has(entry.id))) {
+    return;
+  }
+  throw new PluginLoadFailureError(registry, {
+    onlyPluginIds: strictIds && strictIds.size > 0 ? [...strictIds].toSorted() : undefined,
+  });
 }
 
 type PathMatcher = {
@@ -2294,7 +2323,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
       env,
     });
 
-    maybeThrowOnPluginLoadError(registry, options.throwOnLoadError);
+    maybeThrowOnPluginLoadError(registry, options.throwOnLoadError, normalized.allow);
 
     if (shouldActivate && options.mode !== "validate") {
       const failedPlugins = registry.plugins.filter((plugin) => plugin.failedAt != null);
