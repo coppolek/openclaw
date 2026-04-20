@@ -1,6 +1,10 @@
-import { resolveAgentConfig } from "../agents/agent-scope.js";
+import { resolveAgentConfig, resolveAgentWorkspaceDir } from "../agents/agent-scope.js";
 import { resolveSandboxConfigForAgent } from "../agents/sandbox.js";
+import { buildSandboxFsMounts } from "../agents/sandbox/fs-paths.js";
+import { resolveSandboxScopeKey, resolveSandboxWorkspaceDir } from "../agents/sandbox/shared.js";
 import { resolveSandboxToolPolicyForAgent } from "../agents/sandbox/tool-policy.js";
+import type { SandboxContext } from "../agents/sandbox/types.js";
+import { DEFAULT_AGENT_WORKSPACE_DIR } from "../agents/workspace.js";
 import { normalizeAnyChannelId } from "../channels/registry.js";
 import { loadConfig } from "../config/config.js";
 import {
@@ -24,6 +28,7 @@ import {
 } from "../shared/string-coerce.js";
 import { formatDocsLink } from "../terminal/links.js";
 import { colorize, isRich, theme } from "../terminal/theme.js";
+import { resolveUserPath } from "../utils.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../utils/message-channel.js";
 
 type SandboxExplainOptions = {
@@ -156,6 +161,7 @@ export async function sandboxExplainCommand(
 
   const sandboxCfg = resolveSandboxConfigForAgent(cfg, resolvedAgentId);
   const toolPolicy = resolveSandboxToolPolicyForAgent(cfg, resolvedAgentId);
+
   const mainSessionKey = resolveAgentMainSessionKey({
     cfg,
     agentId: resolvedAgentId,
@@ -166,6 +172,35 @@ export async function sandboxExplainCommand(
       : sandboxCfg.mode === "off"
         ? false
         : sessionKey.trim() !== mainSessionKey.trim();
+
+  const mounts = (() => {
+    if (!sessionIsSandboxed) {
+      return [];
+    }
+
+    const resolvedWorkspaceRoot = resolveUserPath(sandboxCfg.workspaceRoot);
+    const scopeKey = resolveSandboxScopeKey(sandboxCfg.scope, sessionKey);
+    const sandboxWorkspaceDir =
+      sandboxCfg.scope === "shared"
+        ? resolvedWorkspaceRoot
+        : resolveSandboxWorkspaceDir(resolvedWorkspaceRoot, scopeKey);
+    const agentWorkspaceDir =
+      resolveAgentWorkspaceDir(cfg, resolvedAgentId) ||
+      resolveUserPath(DEFAULT_AGENT_WORKSPACE_DIR);
+    const workspaceDir =
+      sandboxCfg.workspaceAccess === "rw" ? agentWorkspaceDir : sandboxWorkspaceDir;
+    const sandboxLikeContext = {
+      workspaceDir,
+      agentWorkspaceDir,
+      workspaceAccess: sandboxCfg.workspaceAccess,
+      containerWorkdir: sandboxCfg.docker.workdir,
+      docker: sandboxCfg.docker,
+    } satisfies Pick<
+      SandboxContext,
+      "workspaceDir" | "agentWorkspaceDir" | "workspaceAccess" | "containerWorkdir" | "docker"
+    >;
+    return buildSandboxFsMounts(sandboxLikeContext as unknown as SandboxContext);
+  })();
 
   const channel = resolveActiveChannel({
     cfg,
@@ -248,6 +283,7 @@ export async function sandboxExplainCommand(
       scope: sandboxCfg.scope,
       workspaceAccess: sandboxCfg.workspaceAccess,
       workspaceRoot: sandboxCfg.workspaceRoot,
+      mounts,
       sessionIsSandboxed,
       tools: {
         allow: toolPolicy.allow,
@@ -301,6 +337,17 @@ export async function sandboxExplainCommand(
       payload.sandbox.workspaceAccess,
     )} ${key("workspaceRoot:")} ${value(payload.sandbox.workspaceRoot)}`,
   );
+  lines.push("");
+  lines.push(heading("Effective mounts:"));
+  if (payload.sandbox.mounts.length === 0) {
+    lines.push(`  ${key("(none)")} ${value("runtime is direct (not sandboxed)")}`);
+  }
+  for (const mount of payload.sandbox.mounts) {
+    lines.push(`  - ${key("source:")} ${value(mount.source)}`);
+    lines.push(`    ${key("hostRoot:")} ${value(mount.hostRoot)}`);
+    lines.push(`    ${key("containerRoot:")} ${value(mount.containerRoot)}`);
+    lines.push(`    ${key("writable:")} ${bool(mount.writable)}`);
+  }
   lines.push("");
   lines.push(heading("Sandbox tool policy:"));
   lines.push(
