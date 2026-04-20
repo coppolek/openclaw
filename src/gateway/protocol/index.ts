@@ -1,4 +1,11 @@
-import AjvPkg, { type ErrorObject } from "ajv";
+import { createRequire } from "node:module";
+import AjvPkg from "ajv/dist/2020.js";
+import type { ErrorObject } from "ajv";
+
+const requireDraft07 = createRequire(import.meta.url);
+const draft07MetaSchema = requireDraft07(
+  "ajv/dist/refs/json-schema-draft-07.json",
+) as Record<string, unknown>;
 import type { SessionsPatchResult } from "../session-utils.types.js";
 import {
   type AgentEvent,
@@ -303,6 +310,11 @@ const ajv = new (AjvPkg as unknown as new (opts?: object) => import("ajv").defau
   strict: false,
   removeAdditional: false,
 });
+// Gateway protocol schemas are repo-internal, unlabeled (no `$schema`), and
+// grep-confirmed free of tuple-form `items: [...]` / `additionalItems`. Ajv2020
+// compiles them cleanly; draft-07 meta-schema is registered defensively in case
+// a future contributor attaches `$schema: draft-07` to a protocol schema.
+ajv.addMetaSchema(draft07MetaSchema);
 
 export const validateCommandsListParams = ajv.compile<CommandsListParams>(CommandsListParamsSchema);
 export const validateConnectParams = ajv.compile<ConnectParams>(ConnectParamsSchema);
