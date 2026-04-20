@@ -44,6 +44,7 @@ const TELEGRAM_MESSAGE_ACTION_MAP = {
   poll: "poll",
   react: "react",
   send: "sendMessage",
+  sendPhoto: "sendPhoto",
   sticker: "sendSticker",
   "sticker-search": "searchSticker",
   "topic-create": "createForumTopic",
@@ -145,6 +146,7 @@ function describeTelegramMessageTool({
   if (discovery.isEnabled("editForumTopic")) {
     actions.add("topic-edit");
   }
+  // sendPhoto is always available when send is enabled (uses same infrastructure)
   const schema: ChannelMessageToolSchemaContribution[] = [];
   if (discovery.buttonsEnabled) {
     schema.push({
