@@ -157,11 +157,11 @@ export function formatChatModelDisplay(value: string): string {
   if (!trimmed) {
     return "";
   }
-  const separator = trimmed.indexOf("/");
-  if (separator <= 0) {
+  const parts = trimmed.split("/").filter(Boolean);
+  if (parts.length < 2) {
     return trimmed;
   }
-  return `${trimmed.slice(separator + 1)} · ${trimmed.slice(0, separator)}`;
+  return `${parts.slice(1).join("/")} · ${parts[0]}`;
 }
 
 function formatRawCatalogLabel(entry: ModelCatalogEntry): string {
