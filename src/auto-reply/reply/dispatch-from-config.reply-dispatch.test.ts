@@ -19,12 +19,13 @@ import {
 } from "./dispatch-from-config.shared.test-harness.js";
 
 let dispatchReplyFromConfig: typeof import("./dispatch-from-config.js").dispatchReplyFromConfig;
+let claimInboundDedupe: typeof import("./inbound-dedupe.js").claimInboundDedupe;
 let resetInboundDedupe: typeof import("./inbound-dedupe.js").resetInboundDedupe;
 
 describe("dispatchReplyFromConfig reply_dispatch hook", () => {
   beforeAll(async () => {
     ({ dispatchReplyFromConfig } = await import("./dispatch-from-config.js"));
-    ({ resetInboundDedupe } = await import("./inbound-dedupe.js"));
+    ({ claimInboundDedupe, resetInboundDedupe } = await import("./inbound-dedupe.js"));
   });
 
   beforeEach(() => {
@@ -92,9 +93,10 @@ describe("dispatchReplyFromConfig reply_dispatch hook", () => {
       queuedFinal: true,
       counts: { tool: 1, block: 2, final: 3 },
     });
+    const ctx = { ...createHookCtx(), MessageSid: "reply-dispatch-handled-1" };
 
     const result = await dispatchReplyFromConfig({
-      ctx: createHookCtx(),
+      ctx,
       cfg: emptyConfig,
       dispatcher: createDispatcher(),
       fastAbortResolver: async () => ({ handled: false, aborted: false }),
@@ -116,6 +118,49 @@ describe("dispatchReplyFromConfig reply_dispatch hook", () => {
       queuedFinal: true,
       counts: { tool: 1, block: 2, final: 3 },
     });
+    expect(claimInboundDedupe(ctx)).toMatchObject({ status: "duplicate" });
+  });
+
+  it("does not double-record diagnostics when a handled reply_dispatch hook records completion", async () => {
+    const cfg = { diagnostics: { enabled: true } };
+    hookMocks.runner.runReplyDispatch.mockImplementation(async (_event: unknown, ctx: unknown) => {
+      const hookCtx = ctx as {
+        recordProcessed: (
+          outcome: "completed" | "skipped" | "error",
+          opts?: { reason?: string; error?: string },
+        ) => void;
+        markIdle: (reason: string) => void;
+      };
+      hookCtx.recordProcessed("completed", { reason: "hook-handled" });
+      hookCtx.markIdle("message_completed");
+      return {
+        handled: true,
+        queuedFinal: false,
+        counts: { tool: 0, block: 0, final: 0 },
+      };
+    });
+    const ctx = { ...createHookCtx(), MessageSid: "reply-dispatch-diagnostics-1" };
+
+    await dispatchReplyFromConfig({
+      ctx,
+      cfg,
+      dispatcher: createDispatcher(),
+      fastAbortResolver: async () => ({ handled: false, aborted: false }),
+      formatAbortReplyTextResolver: () => "⚙️ Agent was aborted.",
+      replyResolver: async () => ({ text: "model reply" }),
+    });
+
+    expect(
+      diagnosticMocks.logMessageProcessed.mock.calls.filter(
+        ([event]) => (event as { outcome?: string }).outcome === "completed",
+      ),
+    ).toHaveLength(1);
+    expect(diagnosticMocks.logMessageProcessed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "completed",
+        reason: "hook-handled",
+      }),
+    );
   });
   it("still applies send-policy deny after an unhandled plugin dispatch", async () => {
     hookMocks.runner.runReplyDispatch.mockResolvedValue({

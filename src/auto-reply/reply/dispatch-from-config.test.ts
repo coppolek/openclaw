@@ -359,6 +359,7 @@ vi.mock("../../tts/tts-config.js", () => ({
 const noAbortResult = { handled: false, aborted: false } as const;
 const emptyConfig = {} as OpenClawConfig;
 let dispatchReplyFromConfig: typeof import("./dispatch-from-config.js").dispatchReplyFromConfig;
+let claimInboundDedupe: typeof import("./inbound-dedupe.js").claimInboundDedupe;
 let resetInboundDedupe: typeof import("./inbound-dedupe.js").resetInboundDedupe;
 let tryDispatchAcpReplyHook: typeof import("../../plugin-sdk/acp-runtime.js").tryDispatchAcpReplyHook;
 type DispatchReplyArgs = Parameters<
@@ -371,7 +372,7 @@ beforeAll(async () => {
   await import("./dispatch-acp-command-bypass.js");
   await import("./dispatch-acp-tts.runtime.js");
   await import("./dispatch-acp-session.runtime.js");
-  ({ resetInboundDedupe } = await import("./inbound-dedupe.js"));
+  ({ claimInboundDedupe, resetInboundDedupe } = await import("./inbound-dedupe.js"));
   ({ tryDispatchAcpReplyHook } = await import("../../plugin-sdk/acp-runtime.js"));
 });
 
@@ -1418,6 +1419,7 @@ describe("dispatchReplyFromConfig", () => {
     const ctx = buildTestCtx({
       Provider: "telegram",
       Body: "/stop",
+      MessageSid: "fast-abort-handled-1",
     });
     const replyResolver = vi.fn(async () => ({ text: "hi" }) as ReplyPayload);
 
@@ -1427,6 +1429,7 @@ describe("dispatchReplyFromConfig", () => {
     expect(dispatcher.sendFinalReply).toHaveBeenCalledWith({
       text: "⚙️ Agent was aborted.",
     });
+    expect(claimInboundDedupe(ctx)).toMatchObject({ status: "duplicate" });
   });
 
   it("fast-abort reply includes stopped subagent count when provided", async () => {
@@ -2391,6 +2394,7 @@ describe("dispatchReplyFromConfig", () => {
     );
     expect(hookMocks.runner.runInboundClaim).not.toHaveBeenCalled();
     expect(replyResolver).not.toHaveBeenCalled();
+    expect(claimInboundDedupe(ctx)).toMatchObject({ status: "duplicate" });
   });
 
   it("routes plugin-owned Discord DM bindings to the owning plugin before generic inbound claim broadcast", async () => {
@@ -2969,6 +2973,7 @@ describe("before_dispatch hook", () => {
       From: "user1",
       Surface: "telegram",
       ChatType: "private",
+      MessageSid: "before-dispatch-hook-message",
       ...overrides,
     });
 
@@ -2993,13 +2998,15 @@ describe("before_dispatch hook", () => {
   it("skips model dispatch when hook returns handled", async () => {
     hookMocks.runner.runBeforeDispatch.mockResolvedValue({ handled: true, text: "Blocked" });
     const dispatcher = createDispatcher();
+    const ctx = createHookCtx();
     const result = await dispatchReplyFromConfig({
-      ctx: createHookCtx(),
+      ctx,
       cfg: emptyConfig,
       dispatcher,
     });
     expect(dispatcher.sendFinalReply).toHaveBeenCalledWith({ text: "Blocked" });
     expect(result.queuedFinal).toBe(true);
+    expect(claimInboundDedupe(ctx)).toMatchObject({ status: "duplicate" });
   });
 
   it("silently short-circuits when hook returns handled without text", async () => {
@@ -3153,6 +3160,7 @@ describe("sendPolicy deny — suppress delivery, not processing (#53328)", () =>
     const ctx = buildTestCtx({
       SessionKey: "test:session",
       AcpDispatchTailAfterReset: true,
+      MessageSid: "tail-reply-dispatch-1",
     });
 
     await dispatchReplyFromConfig({
@@ -3170,6 +3178,7 @@ describe("sendPolicy deny — suppress delivery, not processing (#53328)", () =>
       }),
       expect.any(Object),
     );
+    expect(claimInboundDedupe(ctx)).toMatchObject({ status: "duplicate" });
   });
 
   it("suppresses final reply delivery when sendPolicy is deny", async () => {
