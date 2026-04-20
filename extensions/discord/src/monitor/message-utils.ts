@@ -9,6 +9,7 @@ import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
   normalizeOptionalStringifiedId,
+  withTimeout,
 } from "openclaw/plugin-sdk/text-runtime";
 import { resolveDiscordChannelInfoSafe } from "./channel-access.js";
 import { mergeAbortSignals } from "./timeouts.js";
@@ -112,6 +113,7 @@ type DiscordMessageSnapshot = {
 
 const DISCORD_CHANNEL_INFO_CACHE_TTL_MS = 5 * 60 * 1000;
 const DISCORD_CHANNEL_INFO_NEGATIVE_CACHE_TTL_MS = 30 * 1000;
+const DISCORD_CHANNEL_INFO_FETCH_TIMEOUT_MS = 1_500;
 const DISCORD_CHANNEL_INFO_CACHE = new Map<
   string,
   { value: DiscordChannelInfo | null; expiresAt: number }
@@ -120,6 +122,18 @@ const DISCORD_STICKER_ASSET_BASE_URL = "https://media.discordapp.net/stickers";
 
 export function __resetDiscordChannelInfoCacheForTest() {
   DISCORD_CHANNEL_INFO_CACHE.clear();
+}
+
+async function fetchDiscordChannelWithTimeout(
+  client: Client,
+  channelId: string,
+): Promise<Awaited<ReturnType<Client["fetchChannel"]>> | null> {
+  return withTimeout(client.fetchChannel(channelId), DISCORD_CHANNEL_INFO_FETCH_TIMEOUT_MS).catch(
+    (err) => {
+      logVerbose(`discord: timed out fetching channel ${channelId}: ${String(err)}`);
+      return null;
+    },
+  );
 }
 
 function normalizeDiscordChannelId(value: unknown): string {
@@ -151,7 +165,7 @@ export async function resolveDiscordChannelInfo(
     DISCORD_CHANNEL_INFO_CACHE.delete(channelId);
   }
   try {
-    const channel = await client.fetchChannel(channelId);
+    const channel = await fetchDiscordChannelWithTimeout(client, channelId);
     if (!channel) {
       DISCORD_CHANNEL_INFO_CACHE.set(channelId, {
         value: null,
