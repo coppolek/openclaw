@@ -632,8 +632,97 @@ export function resolveTelegramFetch(
 /**
  * Resolve the Telegram Bot API base URL from an optional `apiRoot` config value.
  * Returns a trimmed URL without trailing slash, or the standard default.
+ *
+ * Security: validates URL structure and rejects embedded credentials,
+ * since callers append `/bot<TOKEN>/...` to this base (CWE-918 defense-in-depth).
+ *
+ * Both https: and http: are accepted because self-hosted Telegram Bot API
+ * servers commonly run over HTTP on local/private networks.
  */
 export function resolveTelegramApiBase(apiRoot?: string): string {
   const trimmed = apiRoot?.trim();
-  return trimmed ? trimmed.replace(/\/+$/, "") : `https://${TELEGRAM_API_HOSTNAME}`;
+  if (!trimmed) {
+    return `https://${TELEGRAM_API_HOSTNAME}`;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error(
+      `Invalid Telegram apiRoot: not a valid URL (${trimmed}). ` +
+        "Custom Bot API servers must use a full http:// or https:// URL.",
+    );
+  }
+
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error(
+      `Invalid Telegram apiRoot: protocol must be http or https (got ${parsed.protocol}).`,
+    );
+  }
+
+  if (parsed.username || parsed.password) {
+    throw new Error(
+      "Invalid Telegram apiRoot: URL must not contain embedded credentials (userinfo).",
+    );
+  }
+
+  return parsed.origin + parsed.pathname.replace(/\/+$/, "");
+}
+
+function isIpv4LoopbackOrPrivate(hostname: string): boolean {
+  const lower = hostname.toLowerCase();
+  if (lower === "localhost") {
+    return true;
+  }
+  const ipv4Match = lower.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!ipv4Match) {
+    return false;
+  }
+  const octets = ipv4Match.slice(1).map((part) => Number.parseInt(part, 10));
+  if (octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false;
+  }
+  const [a, b] = octets;
+  return (
+    a === 10 ||
+    a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168)
+  );
+}
+
+function isIpv6LoopbackOrPrivate(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/^\[(.*)\]$/, "$1");
+  return (
+    normalized === "::1" ||
+    normalized === "0:0:0:0:0:0:0:1" ||
+    normalized.startsWith("fc") ||
+    normalized.startsWith("fd")
+  );
+}
+
+function isLoopbackOrPrivateTelegramApiHost(hostname: string): boolean {
+  return isIpv4LoopbackOrPrivate(hostname) || isIpv6LoopbackOrPrivate(hostname);
+}
+
+export function resolveTelegramHeartbeatApiBase(apiRoot?: string): string {
+  const apiBase = resolveTelegramApiBase(apiRoot);
+  const parsed = new URL(apiBase);
+  const hostname = parsed.hostname.toLowerCase();
+
+  if (hostname === TELEGRAM_API_HOSTNAME) {
+    return apiBase;
+  }
+
+  if (isLoopbackOrPrivateTelegramApiHost(hostname)) {
+    return apiBase;
+  }
+
+  throw new Error(
+    `Invalid Telegram apiRoot for heartbeat probing: ${apiBase}. ` +
+      "Heartbeat probes only support api.telegram.org or loopback/private-network custom Bot API hosts to avoid sending bot tokens to arbitrary endpoints.",
+  );
 }

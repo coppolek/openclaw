@@ -11,7 +11,7 @@ import { formatErrorMessage } from "openclaw/plugin-sdk/ssrf-runtime";
 import { resolveTelegramAccount } from "./accounts.js";
 import { resolveTelegramAllowedUpdates } from "./allowed-updates.js";
 import { isTelegramExecApprovalHandlerConfigured } from "./exec-approvals.js";
-import { resolveTelegramTransport } from "./fetch.js";
+import { resolveTelegramHeartbeatApiBase, resolveTelegramTransport } from "./fetch.js";
 import type { MonitorTelegramOpts } from "./monitor.types.js";
 import {
   isRecoverableTelegramNetworkError,
@@ -214,6 +214,12 @@ export async function monitorTelegramProvider(opts: MonitorTelegramOpts = {}) {
       });
     const telegramTransport = createTelegramTransportForPolling();
 
+    const timeoutSeconds =
+      typeof account.config.timeoutSeconds === "number" &&
+      Number.isFinite(account.config.timeoutSeconds)
+        ? Math.max(1, Math.floor(account.config.timeoutSeconds))
+        : undefined;
+
     pollingSession = new TelegramPollingSession({
       token,
       config: cfg,
@@ -227,6 +233,8 @@ export async function monitorTelegramProvider(opts: MonitorTelegramOpts = {}) {
       log,
       telegramTransport,
       createTelegramTransport: createTelegramTransportForPolling,
+      apiBase: resolveTelegramHeartbeatApiBase(account.config.apiRoot?.trim() || undefined),
+      timeoutSeconds,
     });
     await pollingSession.runUntilAbort();
   } finally {
