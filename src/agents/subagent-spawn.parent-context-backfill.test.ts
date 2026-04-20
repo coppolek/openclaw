@@ -274,13 +274,15 @@ describe("spawnSubagentDirect parent-context backfill", () => {
   });
 
   it("child session entry is seeded with parent deliveryContext after spawn", async () => {
-    // End-to-end assertion on the *persisted* child entry (not just the
-    // gateway `agent` call params). The spawn path carries the parent's
-    // delivery hint to the gateway `agent` call; the gateway then merges it
-    // onto the child's session entry (see gateway/server-methods/agent.ts
-    // seeding block). This test simulates that seeding so a regression in
-    // either half of the chain — ctx backfill on spawn, or gateway-side
-    // merge — fails loudly.
+    // Asserts on the *persisted* child entry (not just the gateway `agent`
+    // call params). The simulated `agent` handler below mirrors the real
+    // gateway's mergeDeliveryContext(primary=existing, fallback=hint) seeding
+    // at gateway/server-methods/agent.ts so this test locks the expected
+    // child-entry shape. It catches regressions in the spawn path (ctx
+    // backfill, delivery-hint handoff to the gateway `agent` call) and pins
+    // the gateway-seeding contract this test mirrors; it does not re-verify
+    // the real gateway seeding code — a regression there needs a gateway-
+    // level test.
     ({ spawnSubagentDirect, resetSubagentRegistryForTests } = await loadSubagentSpawnModuleForTest({
       callGatewayMock: hoisted.callGatewayMock,
       loadConfig: () => hoisted.configOverride,

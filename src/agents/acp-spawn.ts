@@ -672,9 +672,22 @@ function resolveAcpSpawnRequesterState(params: {
       : false;
   const requesterAgentId = requesterParsedSession?.agentId;
 
-  // Backfill missing ctx delivery fields from the parent session's stored
-  // deliveryContext so sessions_spawn children inherit the originating thread
-  // when the tool-wiring layer did not populate ctx.agent{To,ThreadId}.
+  // Backfill missing delivery routing fields from the parent session's stored
+  // deliveryContext. The tool-wiring layer (pi-tools / tool-resolution) sources
+  // ctx.agent{Channel,To,ThreadId,AccountId} from the current invocation's
+  // request, which can be empty for top-level-agent runs not driven by a direct
+  // inbound (e.g. a router awakened by an internal trigger). Without backfill
+  // the spawned child loses thread context and replies leak to the channel
+  // root. mergeDeliveryContext owns the channel-mismatch guard so we never
+  // cross to/threadId between unrelated channels. Mirrors spawnSubagentDirect.
+  const ctxDeliveryHint = normalizeDeliveryContext({
+    channel: params.ctx.agentChannel,
+    to: params.ctx.agentTo,
+    accountId: params.ctx.agentAccountId,
+    threadId: params.ctx.agentThreadId,
+  });
+  // Best-effort parent lookup; defensive against test harnesses or future
+  // callers that don't provide a writable session store.
   let parentDelivery: ReturnType<typeof deliveryContextFromSession> = undefined;
   if (params.parentSessionKey && requesterAgentId) {
     try {
@@ -694,27 +707,22 @@ function resolveAcpSpawnRequesterState(params: {
       parentDelivery = undefined;
     }
   }
-  const ctxDeliveryHint = normalizeDeliveryContext({
-    channel: params.ctx.agentChannel,
-    to: params.ctx.agentTo,
-    accountId: params.ctx.agentAccountId,
-    threadId: params.ctx.agentThreadId,
-  });
-  // Mirror of spawnSubagentDirect's guard: prevent inheriting parent's
-  // threadId when the current request targets a different `to` in the same
-  // channel.
+  // Don't inherit parent's threadId when the current request targets a
+  // different `to` in the same channel. mergeDeliveryContext's channels-match
+  // path would otherwise fold parent's threadId into an unrelated conversation
+  // (e.g. root-level spawn explicitly targeting a different channel member).
   const toMismatch =
     Boolean(ctxDeliveryHint?.to) &&
     Boolean(parentDelivery?.to) &&
     ctxDeliveryHint?.to !== parentDelivery?.to;
   const effectiveParentDelivery = toMismatch ? undefined : parentDelivery;
-  const effectiveDelivery =
+  const effectiveRequesterDelivery =
     mergeDeliveryContext(ctxDeliveryHint, effectiveParentDelivery) ?? ctxDeliveryHint;
   // Derive thread-context from merged delivery so callers that backfill
   // threadId from the parent session (e.g. top-level-agent spawns where the
   // tool-wiring layer left ctx.agentThreadId empty) don't get misclassified
   // as non-threaded by downstream consumers like resolveAcpSpawnStreamPlan.
-  const hasThreadContext = effectiveDelivery?.threadId != null;
+  const hasThreadContext = effectiveRequesterDelivery?.threadId != null;
 
   return {
     parentSessionKey: params.parentSessionKey,
@@ -737,10 +745,10 @@ function resolveAcpSpawnRequesterState(params: {
       cfg: params.cfg,
       targetAgentId: params.targetAgentId,
       requesterAgentId: normalizeAgentId(requesterAgentId),
-      requesterChannel: effectiveDelivery?.channel ?? params.ctx.agentChannel,
-      requesterAccountId: effectiveDelivery?.accountId ?? params.ctx.agentAccountId,
-      requesterTo: effectiveDelivery?.to ?? params.ctx.agentTo,
-      requesterThreadId: effectiveDelivery?.threadId ?? params.ctx.agentThreadId,
+      requesterChannel: effectiveRequesterDelivery?.channel ?? params.ctx.agentChannel,
+      requesterAccountId: effectiveRequesterDelivery?.accountId ?? params.ctx.agentAccountId,
+      requesterTo: effectiveRequesterDelivery?.to ?? params.ctx.agentTo,
+      requesterThreadId: effectiveRequesterDelivery?.threadId ?? params.ctx.agentThreadId,
       requesterGroupSpace: params.ctx.agentGroupSpace,
       requesterMemberRoleIds: params.ctx.agentMemberRoleIds,
     }),
