@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import { loadSessionStore } from "../../config/sessions.js";
@@ -315,6 +315,67 @@ describe("updateSessionStoreAfterAgentRun", () => {
       const persisted = loadSessionStore(storePath);
       expect(persisted[sessionKey]?.totalTokens).toBe(21225);
       expect(persisted[sessionKey]?.totalTokensFresh).toBe(false);
+    });
+  });
+
+  it("keeps lastInteractionAt monotonic across overlapping CLI runs", async () => {
+    await withTempSessionStore(async ({ storePath }) => {
+      const cfg = {} as OpenClawConfig;
+      const sessionKey = "agent:main:explicit:test-overlapping-cli-runs";
+      const sessionId = "test-session-overlap";
+      const newerLastInteractionAt = 2_000;
+
+      await fs.writeFile(
+        storePath,
+        JSON.stringify(
+          {
+            [sessionKey]: {
+              sessionId,
+              updatedAt: newerLastInteractionAt,
+              lastInteractionAt: newerLastInteractionAt,
+            },
+          },
+          null,
+          2,
+        ),
+      );
+
+      const staleSessionStore: Record<string, SessionEntry> = {
+        [sessionKey]: {
+          sessionId,
+          updatedAt: 1_000,
+          lastInteractionAt: 1_000,
+        },
+      };
+
+      const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(1_000);
+      try {
+        await updateSessionStoreAfterAgentRun({
+          cfg,
+          sessionId,
+          sessionKey,
+          storePath,
+          sessionStore: staleSessionStore,
+          defaultProvider: "claude-cli",
+          defaultModel: "claude-sonnet-4-6",
+          result: {
+            meta: {
+              durationMs: 1,
+              agentMeta: {
+                sessionId: "cli-session-overlap",
+                provider: "claude-cli",
+                model: "claude-sonnet-4-6",
+              },
+            },
+          } as EmbeddedPiRunResult,
+        });
+      } finally {
+        dateNowSpy.mockRestore();
+      }
+
+      expect(staleSessionStore[sessionKey]?.lastInteractionAt).toBe(newerLastInteractionAt);
+      const persisted = loadSessionStore(storePath, { skipCache: true });
+      expect(persisted[sessionKey]?.lastInteractionAt).toBe(newerLastInteractionAt);
     });
   });
 });
