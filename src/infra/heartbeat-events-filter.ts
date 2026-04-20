@@ -47,9 +47,12 @@ export function buildExecEventPrompt(opts?: { deliverToUser?: boolean }): string
     );
   }
   return (
-    "An async command you ran earlier has completed. The result is shown in the system messages above. " +
-    "Please relay the command output to the user in a helpful way. If the command succeeded, share the relevant output. " +
-    "If it failed, explain what went wrong."
+    "An async command you ran earlier has completed. The result may appear in the system messages above. " +
+    "If explicit command output is not present in this turn, reply HEARTBEAT_OK and do not message the user, " +
+    "unless completion metadata indicates failure (for example, an Exec failed status with code/signal); " +
+    "in that case, send a concise failure alert with the available status details. " +
+    "If output is present, relay the command output to the user in a helpful way. " +
+    "If the command succeeded, share the relevant output. If it failed, explain what went wrong."
   );
 }
 

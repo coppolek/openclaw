@@ -48,7 +48,12 @@ describe("heartbeat event prompts", () => {
     {
       name: "builds user-relay exec prompt by default",
       opts: undefined,
-      expected: ["Please relay the command output to the user", "If it failed"],
+      expected: [
+        "If explicit command output is not present in this turn, reply HEARTBEAT_OK and do not message the user",
+        "unless completion metadata indicates failure",
+        "If output is present, relay the command output to the user",
+        "If it failed",
+      ],
       unexpected: ["Handle the result internally"],
     },
     {
