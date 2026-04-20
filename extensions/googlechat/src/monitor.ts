@@ -235,6 +235,9 @@ async function processMessageWithPipeline(params: {
     from: fromLabel,
     timestamp: event.eventTime ? Date.parse(event.eventTime) : undefined,
     body: rawBody,
+    // Use the thread-partitioned sessionKey so elapsed metadata doesn't leak
+    // across threads in the same space when sessionThread is enabled.
+    sessionKey,
   });
 
   const ctxPayload = core.channel.reply.finalizeInboundContext({
