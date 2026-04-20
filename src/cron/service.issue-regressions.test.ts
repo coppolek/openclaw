@@ -263,7 +263,7 @@ describe("Cron issue regressions", () => {
     cron.stop();
   });
 
-  it("keeps telegram delivery target writeback after manual cron.run", async () => {
+  it("preserves original delivery config despite in-flight mutation during cron.run", async () => {
     const store = cronIssueRegressionFixtures.makeStorePath();
     const originalTarget = "https://t.me/obviyus";
     const rewrittenTarget = "-10012345/6789";
@@ -304,7 +304,7 @@ describe("Cron issue regressions", () => {
       jobs: CronJob[];
     };
     const persistedJob = persisted.jobs.find((entry) => entry.id === job.id);
-    expect(persistedJob?.delivery?.to).toBe(rewrittenTarget);
+    expect(persistedJob?.delivery?.to).toBe(originalTarget);
     expect(persistedJob?.state.lastStatus).toBe("ok");
     expect(persistedJob?.state.lastDelivered).toBe(true);
 
