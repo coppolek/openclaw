@@ -24,3 +24,14 @@ export { registerLegacyContextEngine } from "./legacy.registration.js";
 export { delegateCompactionToRuntime } from "./delegate.js";
 
 export { ensureContextEnginesInitialized } from "./init.js";
+
+// Context Archive for LLM-initiated compression
+export {
+  ContextArchive,
+  createContextArchive,
+  type ContextArchiveConfig,
+  type ArchiveMetadata,
+  type CompressContextRequest,
+  type CompressContextResponse,
+  type ArchiveItem,
+} from "./archive.js";
