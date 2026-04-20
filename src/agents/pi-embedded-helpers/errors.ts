@@ -261,6 +261,7 @@ export type ProviderRuntimeFailureKind =
   | "callback_timeout"
   | "callback_validation"
   | "auth_html_403"
+  | "cloudflare_challenge"
   | "upstream_html"
   | "proxy"
   | "rate_limit"
@@ -329,6 +330,8 @@ const REPLAY_INVALID_RE =
   /\bprevious_response_id\b.*\b(?:invalid|unknown|not found|does not exist|expired|mismatch)\b|\btool_(?:use|call)\.(?:input|arguments)\b.*\b(?:missing|required)\b|\bincorrect role information\b|\broles must alternate\b|\binput item id does not belong to this connection\b/i;
 const SANDBOX_BLOCKED_RE =
   /\bapproval is required\b|\bapproval timed out\b|\bapproval was denied\b|\bblocked by sandbox\b|\bsandbox\b.*\b(?:blocked|denied|forbidden|disabled|not allowed)\b/i;
+const CLOUDFLARE_CHALLENGE_RE =
+  /\bcf-browser-verification\b|challenges\.cloudflare\.com|\b_cf_chl_|\bjust a moment\b|\bray id:/i;
 
 function stripErrorPrefix(raw: string): string {
   return raw.replace(/^error:\s*/i, "").trim();
@@ -420,6 +423,16 @@ function isReplayInvalidErrorMessage(raw: string): boolean {
 
 function isSandboxBlockedErrorMessage(raw: string): boolean {
   return Boolean(formatExecDeniedUserMessage(raw)) || SANDBOX_BLOCKED_RE.test(raw);
+}
+
+function isCloudflareChallengePage(raw: string, status?: number): boolean {
+  if (status !== 403) {
+    return false;
+  }
+  if (!isHtmlErrorResponse(raw, status)) {
+    return false;
+  }
+  return CLOUDFLARE_CHALLENGE_RE.test(raw);
 }
 
 function isSchemaErrorMessage(raw: string): boolean {
@@ -887,6 +900,9 @@ export function classifyProviderRuntimeFailureKind(
   if (message && isProxyErrorMessage(message, status)) {
     return "proxy";
   }
+  if (message && isCloudflareChallengePage(message, status)) {
+    return "cloudflare_challenge";
+  }
   if (message && isHtmlErrorResponse(message, status)) {
     return status === 403 ? "auth_html_403" : "upstream_html";
   }
@@ -996,6 +1012,15 @@ export function formatAssistantErrorText(
     return (
       "Authentication is missing the required OpenAI Codex scopes. " +
       "Re-run OpenAI/Codex login and try again."
+    );
+  }
+
+  if (providerRuntimeFailureKind === "cloudflare_challenge") {
+    return (
+      "Cloudflare blocked the request with a browser challenge (HTTP 403). " +
+      "Node.js TLS fingerprint was detected as non-browser traffic. " +
+      "Set up a local reverse proxy using a browser-compatible HTTP client " +
+      "(e.g. Python cloudscraper) and point the provider's baseUrl to it."
     );
   }
 
