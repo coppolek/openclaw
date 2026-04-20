@@ -136,6 +136,7 @@ export async function runGatewayLoop(params: {
     shuttingDown = true;
     const isRestart = action === "restart";
     const restartDrainTimeoutMs = isRestart ? resolveRestartDrainTimeoutMs() : 0;
+    const restartDrainDeadlineAt = isRestart ? Date.now() + restartDrainTimeoutMs : 0;
     gatewayLog.info(`received ${signal}; ${isRestart ? "restarting" : "shutting down"}`);
 
     // Allow extra time for draining active turns on restart.
@@ -193,6 +194,9 @@ export async function runGatewayLoop(params: {
         await server?.close({
           reason: isRestart ? "gateway restarting" : "gateway stopping",
           restartExpectedMs: isRestart ? 1500 : null,
+          ...(isRestart
+            ? { drainTimeoutMs: Math.max(0, restartDrainDeadlineAt - Date.now()) }
+            : {}),
         });
       } catch (err) {
         gatewayLog.error(`shutdown error: ${String(err)}`);

@@ -145,7 +145,11 @@ function createGatewayAuthRateLimiters(rateLimitConfig: AuthRateLimitConfig | un
 }
 
 export type GatewayServer = {
-  close: (opts?: { reason?: string; restartExpectedMs?: number | null }) => Promise<void>;
+  close: (opts?: {
+    reason?: string;
+    restartExpectedMs?: number | null;
+    drainTimeoutMs?: number;
+  }) => Promise<void>;
 };
 
 export type GatewayServerOptions = {
@@ -542,6 +546,13 @@ export async function startGatewayServer(
       transcriptUnsub: runtimeState.transcriptUnsub,
       lifecycleUnsub: runtimeState.lifecycleUnsub,
       chatRunState,
+      chatRunBuffers,
+      chatDeltaSentAt,
+      chatDeltaLastBroadcastLen,
+      removeChatRun,
+      agentRunSeq,
+      nodeSendToSession,
+      chatAbortControllers,
       clients,
       configReloader: runtimeState.configReloader,
       wss,
@@ -840,6 +851,13 @@ export async function startGatewayServer(
     transcriptUnsub: runtimeState.transcriptUnsub,
     lifecycleUnsub: runtimeState.lifecycleUnsub,
     chatRunState,
+    chatRunBuffers,
+    chatDeltaSentAt,
+    chatDeltaLastBroadcastLen,
+    removeChatRun,
+    agentRunSeq,
+    nodeSendToSession,
+    chatAbortControllers,
     clients,
     configReloader: runtimeState.configReloader,
     wss,
