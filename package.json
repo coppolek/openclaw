@@ -44,6 +44,7 @@
     "!dist/qa-runtime-*.js",
     "docs/reference/templates/",
     "skills/",
+    "qa/scenarios/",
     "scripts/npm-runner.mjs",
     "scripts/preinstall-package-manager-warning.mjs",
     "scripts/postinstall-bundled-plugins.mjs",
