@@ -108,9 +108,11 @@ export function shouldRunPreflightCompaction(params: {
 export function hasAlreadyFlushedForCurrentCompaction(
   entry: Pick<SessionEntry, "compactionCount" | "memoryFlushCompactionCount">,
 ): boolean {
-  const compactionCount = entry.compactionCount ?? 0;
   const lastFlushAt = entry.memoryFlushCompactionCount;
-  return typeof lastFlushAt === "number" && lastFlushAt === compactionCount;
+  if (typeof lastFlushAt !== "number") {
+    return false;
+  }
+  return lastFlushAt === (entry.compactionCount ?? 0);
 }
 
 /**

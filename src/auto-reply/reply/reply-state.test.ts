@@ -356,12 +356,34 @@ describe("hasAlreadyFlushedForCurrentCompaction", () => {
     ).toBe(false);
   });
 
-  it("treats missing compactionCount as 0", () => {
+  it("treats missing compactionCount as 0 for backward compat", () => {
     expect(
       hasAlreadyFlushedForCurrentCompaction({
         memoryFlushCompactionCount: 0,
       }),
     ).toBe(true);
+  });
+
+  it("returns true when both compactionCount and memoryFlushCompactionCount are explicitly 0", () => {
+    expect(
+      hasAlreadyFlushedForCurrentCompaction({
+        compactionCount: 0,
+        memoryFlushCompactionCount: 0,
+      }),
+    ).toBe(true);
+  });
+
+  it("returns false when both fields are undefined (fresh session)", () => {
+    expect(hasAlreadyFlushedForCurrentCompaction({})).toBe(false);
+  });
+
+  it("returns false after compaction advances past last flush", () => {
+    expect(
+      hasAlreadyFlushedForCurrentCompaction({
+        compactionCount: 1,
+        memoryFlushCompactionCount: 0,
+      }),
+    ).toBe(false);
   });
 });
 
