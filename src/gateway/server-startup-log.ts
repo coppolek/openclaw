@@ -1,9 +1,22 @@
 import chalk from "chalk";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../agents/defaults.js";
 import { resolveConfiguredModelRef } from "../agents/model-selection.js";
+import type { ModelApi } from "../config/types.models.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { hasEnvHttpProxyConfigured } from "../infra/net/proxy-env.js";
 import { getResolvedLoggerSettings } from "../logging.js";
 import { collectEnabledInsecureOrDangerousFlags } from "../security/dangerous-config-flags.js";
+
+// APIs that support request.proxy/request.tls transport overrides.
+// Must stay in sync with SUPPORTED_TRANSPORT_APIS in provider-transport-stream.ts.
+const PROXY_CAPABLE_APIS = new Set<ModelApi>([
+  "openai-responses",
+  "openai-codex-responses",
+  "openai-completions",
+  "azure-openai-responses",
+  "anthropic-messages",
+  "google-generative-ai",
+]);
 
 export function logGatewayStartup(params: {
   cfg: OpenClawConfig;
@@ -42,6 +55,74 @@ export function logGatewayStartup(params: {
       "Run `openclaw security audit`.";
     params.log.warn(warning);
   }
+
+  const proxyWarning = collectProxyEnvMismatch(params.cfg);
+  if (proxyWarning) {
+    params.log.warn(proxyWarning);
+  }
+}
+
+function isLocalOrPrivateProviderUrl(baseUrl: string): boolean {
+  try {
+    const host = new URL(baseUrl).hostname.toLowerCase();
+    if (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "[::1]" ||
+      host === "::1" ||
+      host.endsWith(".local")
+    ) {
+      return true;
+    }
+    // RFC 1918 private networks — proxying LAN providers is typically undesired
+    if (
+      host.startsWith("10.") ||
+      host.startsWith("192.168.") ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+    ) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export function collectProxyEnvMismatch(cfg: OpenClawConfig): string | null {
+  // Use hasEnvHttpProxyConfigured (not hasProxyEnvConfigured) because the
+  // env-proxy transport path follows resolveEnvHttpProxyUrl semantics which
+  // intentionally ignores ALL_PROXY. Checking hasProxyEnvConfigured would
+  // fire when only ALL_PROXY is set, but the suggested env-proxy fix would
+  // not actually pick up that variable — creating a persistent false-positive.
+  if (!hasEnvHttpProxyConfigured("https") && !hasEnvHttpProxyConfigured("http")) {
+    return null;
+  }
+
+  const providers = cfg.models?.providers ?? {};
+  const unconfigured: string[] = [];
+
+  for (const [name, provider] of Object.entries(providers)) {
+    if (isLocalOrPrivateProviderUrl(provider.baseUrl)) {
+      continue;
+    }
+    // Skip providers whose API does not support transport overrides —
+    // recommending env-proxy for them would cause a runtime error.
+    if (provider.api && !PROXY_CAPABLE_APIS.has(provider.api)) {
+      continue;
+    }
+    if (!provider.request?.proxy) {
+      unconfigured.push(name);
+    }
+  }
+
+  if (unconfigured.length === 0) {
+    return null;
+  }
+
+  return (
+    `proxy env detected (HTTP_PROXY/HTTPS_PROXY) but not used by providers: ${unconfigured.join(", ")}. ` +
+    `Consider setting models.providers.<name>.request.proxy.mode = "env-proxy"`
+  );
 }
 
 function formatReadyDetails(
