@@ -414,6 +414,47 @@ describe("sanitizeChatSendMessageInput", () => {
   ])("$name", ({ input, expected }) => {
     expect(sanitizeChatSendMessageInput(input)).toEqual(expected);
   });
+
+  it("extracts text from object with .text property", () => {
+    expect(sanitizeChatSendMessageInput({ text: "hello", entities: [] })).toEqual({
+      ok: true,
+      message: "hello",
+    });
+  });
+
+  it("extracts caption from object with .caption property", () => {
+    expect(sanitizeChatSendMessageInput({ caption: "photo caption" })).toEqual({
+      ok: true,
+      message: "photo caption",
+    });
+  });
+
+  it("extracts body from WhatsApp/Baileys object", () => {
+    expect(sanitizeChatSendMessageInput({ body: "whatsapp msg" })).toEqual({
+      ok: true,
+      message: "whatsapp msg",
+    });
+  });
+
+  it("extracts conversation from Baileys raw message", () => {
+    expect(
+      sanitizeChatSendMessageInput({ conversation: "baileys text" }),
+    ).toEqual({ ok: true, message: "baileys text" });
+  });
+
+  it("rejects object with no extractable text fields", () => {
+    expect(sanitizeChatSendMessageInput({ foo: "bar" })).toEqual({
+      ok: false,
+      error: "message must be a string (received unsupported object)",
+    });
+  });
+
+  it("rejects non-string non-object values", () => {
+    expect(sanitizeChatSendMessageInput(42)).toEqual({
+      ok: false,
+      error: "message must be a string",
+    });
+  });
 });
 
 describe("gateway chat transcript writes (guardrail)", () => {
