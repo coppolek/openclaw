@@ -11,6 +11,7 @@ Docs: https://docs.openclaw.ai
 ### Fixes
 
 - Cron/delivery: treat explicit `delivery.mode: "none"` runs as not requested even if the runner reports `delivered: false`, so no-delivery cron jobs no longer persist false delivery failures or errors. (#69285) Thanks @matsuri1987.
+- Agents/compaction: preflight-compaction and memory-flush gates now respect `agents.defaults.compaction.reserveTokens`, not just `reserveTokensFloor`. Previously, setting `reserveTokens` above the floor had no effect on when those gates fired; the effective reserve is now `max(reserveTokens, reserveTokensFloor)`, matching the documented help text for `reserveTokensFloor` ("Minimum floor enforced for reserveTokens in Pi compaction paths") and the existing behavior of `applyPiCompactionSettingsFromConfig` in `src/agents/pi-settings.ts`. Fixes #66830.
 
 ## 2026.4.20
 

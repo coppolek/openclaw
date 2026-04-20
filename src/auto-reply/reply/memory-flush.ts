@@ -33,7 +33,15 @@ function resolveMemoryFlushGateState<
   entry?: TEntry;
   tokenCount?: number;
   contextWindowTokens: number;
-  reserveTokensFloor: number;
+  /**
+   * Effective reserve tokens for this gate check. Callers are expected to pass
+   * `max(compaction.reserveTokens, compaction.reserveTokensFloor)` — see
+   * `resolveEffectiveCompactionReserveTokens` in `src/agents/pi-settings.ts`.
+   * Named without the `Floor` suffix because the floor is only one input to
+   * this value; using just the floor ignores a user-configured `reserveTokens`
+   * above the floor and is the bug fixed in this commit.
+   */
+  reserveTokens: number;
   softThresholdTokens: number;
 }): { entry: TEntry; totalTokens: number; threshold: number } | null {
   if (!params.entry) {
@@ -47,7 +55,7 @@ function resolveMemoryFlushGateState<
   }
 
   const contextWindow = Math.max(1, Math.floor(params.contextWindowTokens));
-  const reserveTokens = Math.max(0, Math.floor(params.reserveTokensFloor));
+  const reserveTokens = Math.max(0, Math.floor(params.reserveTokens));
   const softThreshold = Math.max(0, Math.floor(params.softThresholdTokens));
   const threshold = Math.max(0, contextWindow - reserveTokens - softThreshold);
   if (threshold <= 0) {
@@ -69,7 +77,8 @@ export function shouldRunMemoryFlush(params: {
    */
   tokenCount?: number;
   contextWindowTokens: number;
-  reserveTokensFloor: number;
+  /** Effective reserve tokens — see `resolveMemoryFlushGateState` for semantics. */
+  reserveTokens: number;
   softThresholdTokens: number;
 }): boolean {
   const state = resolveMemoryFlushGateState(params);
@@ -93,7 +102,8 @@ export function shouldRunPreflightCompaction(params: {
    */
   tokenCount?: number;
   contextWindowTokens: number;
-  reserveTokensFloor: number;
+  /** Effective reserve tokens — see `resolveMemoryFlushGateState` for semantics. */
+  reserveTokens: number;
   softThresholdTokens: number;
 }): boolean {
   const state = resolveMemoryFlushGateState(params);
