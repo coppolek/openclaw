@@ -176,6 +176,29 @@ export type SessionPatchHookEvent = InternalHookEvent & {
   context: SessionPatchHookContext;
 };
 
+export interface InternalHookEvent {
+  /** The type of event (command, session, agent, gateway, etc.) */
+  type: InternalHookEventType;
+  /** The specific action within the type (e.g., 'new', 'reset', 'stop') */
+  action: string;
+  /** The session key this event relates to */
+  sessionKey: string;
+  /** Additional context specific to the event */
+  context: Record<string, unknown>;
+  /** Timestamp when the event occurred */
+  timestamp: Date;
+  /** Messages to send back to the user (hooks can push to this array) */
+  messages: string[];
+  /** Deferred actions to run after all handlers complete.
+   *  Handlers push async callbacks here; triggerInternalHook drains them
+   *  sequentially after the main handler loop. This eliminates FIFO
+   *  registration-order dependencies: a handler that runs early can defer
+   *  work that depends on context set by later handlers. */
+  postHookActions: Array<() => Promise<void> | void>;
+}
+
+export type InternalHookHandler = (event: InternalHookEvent) => Promise<void> | void;
+
 /**
  * Registry of hook handlers by event key.
  *
@@ -288,6 +311,19 @@ export async function triggerInternalHook(event: InternalHookEvent): Promise<voi
     return;
   }
   if (!hasInternalHookListeners(event.type, event.action)) {
+    // No handlers, but still drain any pre-populated postHookActions.
+    if (event.postHookActions?.length) {
+      const pending = [...event.postHookActions];
+      event.postHookActions.length = 0;
+      for (const action of pending) {
+        try {
+          await action();
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.error(`Post-hook action error [${event.type}:${event.action}]: ${message}`);
+        }
+      }
+    }
     return;
   }
 
@@ -301,6 +337,22 @@ export async function triggerInternalHook(event: InternalHookEvent): Promise<voi
     } catch (err) {
       const message = formatErrorMessage(err);
       log.error(`Hook error [${event.type}:${event.action}]: ${message}`);
+    }
+  }
+
+  // Drain post-hook actions — these run after all handlers have had
+  // a chance to mutate event.context, eliminating FIFO ordering issues.
+  // Actions execute in push order; errors are caught per-action so one
+  // failure doesn't block others.
+  // Guard against manually constructed events that omit postHookActions.
+  // createInternalHookEvent always initializes it, but callers building
+  // events by hand (tests, JS integrations) may not.
+  for (const action of event.postHookActions ?? []) {
+    try {
+      await action();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.error(`Post-hook action error [${event.type}:${event.action}]: ${message}`);
     }
   }
 }
@@ -326,6 +378,7 @@ export function createInternalHookEvent(
     context,
     timestamp: new Date(),
     messages: [],
+    postHookActions: [],
   };
 }
 
