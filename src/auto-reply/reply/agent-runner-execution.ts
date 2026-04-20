@@ -28,7 +28,6 @@ import { sanitizeUserFacingText } from "../../agents/pi-embedded-helpers/sanitiz
 import { isLikelyExecutionAckPrompt } from "../../agents/pi-embedded-runner/run/incomplete-turn.js";
 import { runEmbeddedPiAgent } from "../../agents/pi-embedded.js";
 import {
-  resolveGroupSessionKey,
   resolveSessionTranscriptPath,
   type SessionEntry,
   updateSessionStore,
@@ -1006,13 +1005,39 @@ export async function runAgentTurnWithFallback(params: {
                 ...embeddedContext,
                 allowGatewaySubagentBinding: true,
                 trigger: params.isHeartbeat ? "heartbeat" : "user",
-                groupId: resolveGroupSessionKey(params.sessionCtx)?.id,
-                groupChannel:
-                  normalizeOptionalString(params.sessionCtx.GroupChannel) ??
-                  normalizeOptionalString(params.sessionCtx.GroupSubject),
-                groupSpace: normalizeOptionalString(params.sessionCtx.GroupSpace),
                 ...senderContext,
                 ...runBaseParams,
+                // Override live senderContext and runBaseParams with stored run
+                // values to prevent trust-context drift (matches
+                // agent-runner-memory.ts pattern). Must come AFTER the spreads
+                // so explicit values win over the spread properties.
+                groupId: params.followupRun.run.groupId,
+                groupChannel: params.followupRun.run.groupChannel,
+                groupSpace: params.followupRun.run.groupSpace,
+                // Only override with non-null stored values. Null stored identity
+                // (sessions pre-dating the identity pipeline) must not clobber live
+                // senderContext — provenance would classify every turn as untrusted
+                // since null matches no trustedSenderIds.
+                ...(params.followupRun.run.senderId != null && { senderId: params.followupRun.run.senderId }),
+                ...(params.followupRun.run.senderName != null && { senderName: params.followupRun.run.senderName }),
+                ...(params.followupRun.run.senderUsername != null && { senderUsername: params.followupRun.run.senderUsername }),
+                ...(params.followupRun.run.senderE164 != null && { senderE164: params.followupRun.run.senderE164 }),
+                ...(params.followupRun.run.senderIsOwner != null && { senderIsOwner: params.followupRun.run.senderIsOwner }),
+                ...(params.followupRun.run.sourceProvider != null && { sourceProvider: params.followupRun.run.sourceProvider }),
+                ...(params.followupRun.run.spawnedBy != null && { spawnedBy: params.followupRun.run.spawnedBy }),
+                // Pin delivery routing to stored run values so queued runs
+                // always use the original channel and account credentials,
+                // not whatever the live session template reflects at execution
+                // time. Without this, agentAccountId (used for message-tool
+                // account selection and capability resolution) and
+                // messageProvider could drift if the session switches
+                // channels/accounts between queue capture and dispatch.
+                ...(params.followupRun.run.messageProvider != null && {
+                  messageProvider: params.followupRun.run.messageProvider,
+                }),
+                ...(params.followupRun.run.agentAccountId != null && {
+                  agentAccountId: params.followupRun.run.agentAccountId,
+                }),
                 prompt: params.commandBody,
                 extraSystemPrompt: params.followupRun.run.extraSystemPrompt,
                 toolResultFormat: (() => {
