@@ -686,7 +686,14 @@ function resolveAcpSpawnRequesterState(params: {
         agentId: requesterAgentId,
       });
       const parentStore = loadSessionStore(parentStorePath);
-      parentDelivery = deliveryContextFromSession(parentStore[params.parentSessionKey]);
+      // Resolve main-alias → internal key before indexing the store, matching
+      // spawnSubagentDirect's lookup path; callers pass the display key (e.g.
+      // `main`) via ctx.agentSessionKey.
+      const parentInternalKey = resolveRequesterInternalSessionKey({
+        cfg: params.cfg,
+        requesterSessionKey: params.parentSessionKey,
+      });
+      parentDelivery = deliveryContextFromSession(parentStore[parentInternalKey]);
     } catch {
       parentDelivery = undefined;
     }
@@ -697,8 +704,16 @@ function resolveAcpSpawnRequesterState(params: {
     accountId: params.ctx.agentAccountId,
     threadId: params.ctx.agentThreadId,
   });
+  // Mirror of spawnSubagentDirect's guard: prevent inheriting parent's
+  // threadId when the current request targets a different `to` in the same
+  // channel.
+  const toMismatch =
+    Boolean(ctxDeliveryHint?.to) &&
+    Boolean(parentDelivery?.to) &&
+    ctxDeliveryHint?.to !== parentDelivery?.to;
+  const effectiveParentDelivery = toMismatch ? undefined : parentDelivery;
   const effectiveDelivery =
-    mergeDeliveryContext(ctxDeliveryHint, parentDelivery) ?? ctxDeliveryHint;
+    mergeDeliveryContext(ctxDeliveryHint, effectiveParentDelivery) ?? ctxDeliveryHint;
 
   return {
     parentSessionKey: params.parentSessionKey,

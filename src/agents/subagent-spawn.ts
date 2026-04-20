@@ -487,8 +487,17 @@ export async function spawnSubagentDirect(
       parentDelivery = undefined;
     }
   }
+  // Don't inherit parent's threadId when the current request targets a
+  // different `to` in the same channel. mergeDeliveryContext's channels-match
+  // path would otherwise fold parent's threadId into an unrelated conversation
+  // (e.g. root-level spawn explicitly targeting a different channel member).
+  const toMismatch =
+    Boolean(ctxDeliveryHint?.to) &&
+    Boolean(parentDelivery?.to) &&
+    ctxDeliveryHint?.to !== parentDelivery?.to;
+  const effectiveParentDelivery = toMismatch ? undefined : parentDelivery;
   const effectiveRequesterDelivery =
-    mergeDeliveryContext(ctxDeliveryHint, parentDelivery) ?? ctxDeliveryHint;
+    mergeDeliveryContext(ctxDeliveryHint, effectiveParentDelivery) ?? ctxDeliveryHint;
   const requesterOrigin = resolveRequesterOriginForChild({
     cfg,
     targetAgentId,
