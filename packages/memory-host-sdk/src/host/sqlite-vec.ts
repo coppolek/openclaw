@@ -23,6 +23,12 @@ export async function loadSqliteVecExtension(params: {
     const extensionPath = resolvedPath ?? sqliteVec.getLoadablePath();
 
     params.db.enableLoadExtension(true);
+    // loadedPath tracks the effective path used so we can return it to callers.
+    // Callers (e.g. manager-sync-ops) persist the returned extensionPath and
+    // pass it back as params.extensionPath on subsequent loads, routing through
+    // the resolvedPath branch. Returning the suffixless path here ensures that
+    // branch also works on Windows environments that need the suffix stripped.
+    let loadedPath = extensionPath;
     if (resolvedPath) {
       params.db.loadExtension(extensionPath);
     } else {
@@ -35,14 +41,24 @@ export async function loadSqliteVecExtension(params: {
         // If the bundled load() call fails and the resolved path ends with
         // .dll, retry by passing the path directly without the suffix.
         if (process.platform === "win32" && extensionPath.toLowerCase().endsWith(".dll")) {
-          params.db.loadExtension(extensionPath.slice(0, -4));
+          const suffixlessPath = extensionPath.slice(0, -4);
+          try {
+            params.db.loadExtension(suffixlessPath);
+            loadedPath = suffixlessPath;
+          } catch (retryErr) {
+            const combined = new Error(
+              `sqlite-vec: both load attempts failed on Windows. Retry error: ${formatErrorMessage(retryErr)}`,
+              { cause: firstErr },
+            );
+            throw combined;
+          }
         } else {
           throw firstErr;
         }
       }
     }
 
-    return { ok: true, extensionPath };
+    return { ok: true, extensionPath: loadedPath };
   } catch (err) {
     const message = formatErrorMessage(err);
     return { ok: false, error: message };
