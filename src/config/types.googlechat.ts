@@ -111,6 +111,15 @@ export type GoogleChatAccountConfig = {
    *   If configured, falls back to message mode with a warning.
    */
   typingIndicator?: "none" | "message" | "reaction";
+  /**
+   * When true, partition the OpenClaw session per Google Chat thread by
+   * appending a `:thread:<threadId>` suffix to the session key derived from
+   * the space. Agent route matching still keys on the space id, so existing
+   * bindings keep working; only session history is thread-scoped. Falls back
+   * to the space-level session key when the inbound message has no thread.
+   * Default: false (space-scoped session, prior behavior).
+   */
+  sessionThread?: boolean;
   /** Outbound response prefix override for this channel/account. */
   responsePrefix?: string;
 };

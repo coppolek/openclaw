@@ -9,6 +9,7 @@ Docs: https://docs.openclaw.ai
 - Plugins/tasks: add a detached runtime registration contract so plugin executors can own detached task lifecycle and cancellation without reaching into core task internals. (#68915) Thanks @mbelinky.
 - Terminal/logging: optimize `sanitizeForLog()` by replacing the iterative control-character stripping loop with a single regex pass while preserving the existing ANSI-first sanitization behavior. (#67205) Thanks @bulutmuf.
 - QA/CI: make `openclaw qa suite` and `openclaw qa telegram` fail by default when scenarios fail, add `--allow-failures` for artifact-only runs, and tighten live-lane defaults for CI automation. (#69122) Thanks @joshavant.
+- Google Chat: add `sessionThread` channel option that binds each OpenClaw session to a single Google Chat thread, so starting a new thread starts a fresh conversation with no context bleed from prior threads in the same space. Default is `false` (space-scoped, prior behavior).
 
 ### Fixes
 
@@ -29,6 +30,7 @@ Docs: https://docs.openclaw.ai
 - Agents/subagents: include requested role and runtime timing on subagent failure payloads so parent agents can correlate failed or timed-out child work. (#68726) Thanks @BKF-Gitty.
 - Gateway/sessions: reject stale agent-scoped sessions after an agent is removed from config while preserving legacy default-agent main-session aliases. (#65986) Thanks @bittoby.
 - Cron/isolated-agent: preserve explicit `delivery.mode: "none"` message targets for isolated runs without inheriting implicit `last` routing, so agent-initiated Telegram sends keep their authored destination while bare `mode:none` jobs stay targetless. (#69153) Thanks @obviyus.
+- Google Chat: always pass the inbound `thread.name` and `messageReplyOption=REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD` when sending replies, so bot responses stay in the user's thread (both in DMs and spaces) instead of creating a new thread per reply. Fixes #41788. Addresses the threaded-reply half of #44347.
 
 ## 2026.4.19-beta.2
 
