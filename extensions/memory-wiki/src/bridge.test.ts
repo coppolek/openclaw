@@ -300,6 +300,151 @@ describe("syncMemoryWikiBridgeSources", () => {
     });
   });
 
+  it("does not prune bridge pages when capability is lost but source files still exist (#67658)", async () => {
+    const workspaceDir = await createBridgeWorkspace("capability-lost-workspace");
+    const { rootDir: vaultDir, config } = await createVault({
+      rootDir: nextCaseRoot("capability-lost-vault"),
+      config: {
+        vaultMode: "bridge",
+        bridge: {
+          enabled: true,
+          readMemoryArtifacts: true,
+          indexMemoryRoot: true,
+        },
+      },
+    });
+
+    await fs.writeFile(path.join(workspaceDir, "MEMORY.md"), "# Durable Memory\n", "utf8");
+    registerBridgeArtifacts([
+      {
+        kind: "memory-root",
+        workspaceDir,
+        relativePath: "MEMORY.md",
+        absolutePath: path.join(workspaceDir, "MEMORY.md"),
+        agentIds: ["main"],
+        contentType: "markdown",
+      },
+    ]);
+    const appConfig: OpenClawConfig = {
+      agents: { list: [{ id: "main", default: true, workspace: workspaceDir }] },
+    };
+
+    const first = await syncMemoryWikiBridgeSources({ config, appConfig });
+    const firstPagePath = first.pagePaths[0] ?? "";
+    expect(first.importedCount).toBe(1);
+    await expect(fs.stat(path.join(vaultDir, firstPagePath))).resolves.toBeTruthy();
+
+    // Simulate capability becoming temporarily unavailable (plugin unregistered).
+    // Source file is still on disk.
+    clearMemoryPluginState();
+    const second = await syncMemoryWikiBridgeSources({ config, appConfig });
+
+    expect(second.artifactCount).toBe(0);
+    expect(second.removedCount).toBe(0);
+    await expect(fs.stat(path.join(vaultDir, firstPagePath))).resolves.toBeTruthy();
+  });
+
+  it("still prunes bridge pages when capability is lost and source files are also deleted (#67658)", async () => {
+    const workspaceDir = await createBridgeWorkspace("capability-and-file-lost-workspace");
+    const { rootDir: vaultDir, config } = await createVault({
+      rootDir: nextCaseRoot("capability-and-file-lost-vault"),
+      config: {
+        vaultMode: "bridge",
+        bridge: {
+          enabled: true,
+          readMemoryArtifacts: true,
+          indexMemoryRoot: true,
+        },
+      },
+    });
+
+    await fs.writeFile(path.join(workspaceDir, "MEMORY.md"), "# Durable Memory\n", "utf8");
+    registerBridgeArtifacts([
+      {
+        kind: "memory-root",
+        workspaceDir,
+        relativePath: "MEMORY.md",
+        absolutePath: path.join(workspaceDir, "MEMORY.md"),
+        agentIds: ["main"],
+        contentType: "markdown",
+      },
+    ]);
+    const appConfig: OpenClawConfig = {
+      agents: { list: [{ id: "main", default: true, workspace: workspaceDir }] },
+    };
+
+    const first = await syncMemoryWikiBridgeSources({ config, appConfig });
+    const firstPagePath = first.pagePaths[0] ?? "";
+    expect(first.importedCount).toBe(1);
+
+    // Both capability and source file are gone — prune should proceed normally.
+    await fs.rm(path.join(workspaceDir, "MEMORY.md"));
+    clearMemoryPluginState();
+    const second = await syncMemoryWikiBridgeSources({ config, appConfig });
+
+    expect(second.artifactCount).toBe(0);
+    expect(second.removedCount).toBe(1);
+    await expect(fs.stat(path.join(vaultDir, firstPagePath))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("prunes bridge pages when config filters out all artifact kinds but capability is healthy", async () => {
+    const workspaceDir = await createBridgeWorkspace("config-filter-workspace");
+    const { rootDir: vaultDir, config: firstConfig } = await createVault({
+      rootDir: nextCaseRoot("config-filter-vault"),
+      config: {
+        vaultMode: "bridge",
+        bridge: {
+          enabled: true,
+          readMemoryArtifacts: true,
+          indexMemoryRoot: true,
+        },
+      },
+    });
+
+    await fs.writeFile(path.join(workspaceDir, "MEMORY.md"), "# Durable Memory\n", "utf8");
+    registerBridgeArtifacts([
+      {
+        kind: "memory-root",
+        workspaceDir,
+        relativePath: "MEMORY.md",
+        absolutePath: path.join(workspaceDir, "MEMORY.md"),
+        agentIds: ["main"],
+        contentType: "markdown",
+      },
+    ]);
+    const appConfig: OpenClawConfig = {
+      agents: { list: [{ id: "main", default: true, workspace: workspaceDir }] },
+    };
+
+    const first = await syncMemoryWikiBridgeSources({ config: firstConfig, appConfig });
+    expect(first.importedCount).toBe(1);
+    const firstPagePath = first.pagePaths[0] ?? "";
+    await expect(fs.stat(path.join(vaultDir, firstPagePath))).resolves.toBeTruthy();
+
+    // Now disable indexMemoryRoot — capability still returns artifacts, but
+    // config filters them all out. This is NOT an outage; prune should proceed.
+    const { config: secondConfig } = await createVault({
+      rootDir: vaultDir,
+      config: {
+        vaultMode: "bridge",
+        bridge: {
+          enabled: true,
+          readMemoryArtifacts: true,
+          indexMemoryRoot: false,
+        },
+      },
+    });
+    const second = await syncMemoryWikiBridgeSources({ config: secondConfig, appConfig });
+
+    expect(second.artifactCount).toBe(0);
+    expect(second.removedCount).toBe(1);
+    await expect(fs.stat(path.join(vaultDir, firstPagePath))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it("caps composed bridge source filenames to the filesystem component limit", async () => {
     const workspaceDir = await createBridgeWorkspace(`${"漢".repeat(50)}-workspace`);
     const { rootDir: vaultDir, config } = await createVault({

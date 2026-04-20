@@ -248,12 +248,34 @@ export async function syncMemoryWikiBridgeSources(params: {
   }
   const workspaceCount = new Set(publicArtifacts.map((artifact) => artifact.workspaceDir)).size;
 
-  const removedCount = await pruneImportedSourceEntries({
-    vaultRoot: params.config.vault.path,
-    group: "bridge",
-    activeKeys,
-    state,
-  });
+  // Guard: when the capability returned zero artifacts (unfiltered) but existing
+  // bridge entries still have source files on disk, the memory capability is likely
+  // temporarily unavailable rather than all sources being genuinely deleted. Skip
+  // pruning in that case to avoid wiping all bridge pages on a transient outage.
+  // Note: we check publicArtifacts (pre-filter), not artifacts (post-filter), so
+  // config-driven filtering (e.g. disabling all bridge index flags) correctly
+  // triggers pruning rather than being misread as an outage. (#67658)
+  const existingBridgeSourcePaths = Object.values(state.entries)
+    .filter((entry) => entry.group === "bridge")
+    .map((entry) => entry.sourcePath);
+
+  const shouldSkipPrune =
+    publicArtifacts.length === 0 &&
+    existingBridgeSourcePaths.length > 0 &&
+    (await Promise.any(
+      existingBridgeSourcePaths.map((sourcePath) =>
+        fs.access(sourcePath).then(() => true),
+      ),
+    ).catch(() => false));
+
+  const removedCount = shouldSkipPrune
+    ? 0
+    : await pruneImportedSourceEntries({
+        vaultRoot: params.config.vault.path,
+        group: "bridge",
+        activeKeys,
+        state,
+      });
   await writeMemoryWikiSourceSyncState(params.config.vault.path, state);
   const importedCount = results.filter((result) => result.changed && result.created).length;
   const updatedCount = results.filter((result) => result.changed && !result.created).length;
