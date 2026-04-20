@@ -30,6 +30,7 @@ const optionNamesAdd = [
   "httpHost",
   "httpPort",
   "webhookPath",
+  "webhookSecret",
   "webhookUrl",
   "audienceType",
   "audience",
@@ -189,6 +190,7 @@ export function registerChannelsCli(program: Command) {
     .option("--http-host <host>", "Signal HTTP host")
     .option("--http-port <port>", "Signal HTTP port")
     .option("--webhook-path <path>", "Webhook path (Google Chat/BlueBubbles)")
+    .option("--webhook-secret <secret>", "Webhook shared secret")
     .option("--webhook-url <url>", "Google Chat webhook URL")
     .option("--audience-type <type>", "Google Chat audience type (app-url|project-number)")
     .option("--audience <value>", "Google Chat audience value (app URL or project number)")

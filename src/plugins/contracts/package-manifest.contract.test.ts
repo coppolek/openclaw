@@ -4,6 +4,7 @@ type PackageManifestContractParams = Parameters<typeof describePackageManifestCo
 
 const packageManifestContractTests: PackageManifestContractParams[] = [
   { pluginId: "bluebubbles", minHostVersionBaseline: "2026.3.22" },
+  { pluginId: "campfire", minHostVersionBaseline: "2026.3.22" },
   {
     pluginId: "discord",
     pluginLocalRuntimeDeps: [

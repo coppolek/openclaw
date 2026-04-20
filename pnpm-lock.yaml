@@ -361,6 +361,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
+  extensions/campfire:
+    dependencies:
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+
   extensions/chutes:
     devDependencies:
       '@openclaw/plugin-sdk':

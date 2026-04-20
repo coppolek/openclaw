@@ -66,6 +66,18 @@ describe("fetchWithRuntimeDispatcher", () => {
       return new Response("ok", { status: 200 });
     });
 
+    function MockAgent() {
+      return;
+    }
+
+    function MockEnvHttpProxyAgent() {
+      return;
+    }
+
+    function MockProxyAgent() {
+      return;
+    }
+
     (globalThis as Record<string, unknown>)[TEST_UNDICI_RUNTIME_DEPS_KEY] = {
       Agent: MockAgent,
       EnvHttpProxyAgent: MockEnvHttpProxyAgent,
