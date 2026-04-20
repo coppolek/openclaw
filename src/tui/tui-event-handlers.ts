@@ -189,7 +189,7 @@ export function createEventHandlers(context: EventHandlerContext) {
     noteFinalizedRun(params.runId);
     clearActiveRunIfMatch(params.runId);
     flushPendingHistoryRefreshIfIdle();
-    if (params.wasActiveRun) {
+    if (params.wasActiveRun || state.activeChatRunId == null) {
       setActivityStatus(params.status);
       clearStreamingWatchdog();
     } else if (streamingWatchdogRunId === params.runId) {
@@ -207,7 +207,7 @@ export function createEventHandlers(context: EventHandlerContext) {
     sessionRuns.delete(params.runId);
     clearActiveRunIfMatch(params.runId);
     flushPendingHistoryRefreshIfIdle();
-    if (params.wasActiveRun) {
+    if (params.wasActiveRun || state.activeChatRunId == null) {
       setActivityStatus(params.status);
       clearStreamingWatchdog();
     } else if (streamingWatchdogRunId === params.runId) {
