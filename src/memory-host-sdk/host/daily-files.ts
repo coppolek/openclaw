@@ -1,19 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createAsyncLock, writeJsonAtomic } from "../../infra/json-files.js";
+import { parseDailyMemoryFileName, type ParsedDailyMemoryFileName } from "./daily-paths.js";
 
-export const DAILY_MEMORY_FILE_NAME_RE = /^(\d{4}-\d{2}-\d{2})(?:-([a-z0-9][a-z0-9._-]*))?\.md$/i;
 const DAILY_MEMORY_RECENT_INDEX_FILE_NAME = ".recent-daily-files.json";
 const DAILY_MEMORY_RECENT_INDEX_VERSION = 1;
 const DAILY_MEMORY_RECENT_INDEX_MAX_ENTRIES = 512;
 const withDailyMemoryRecentIndexLock = createAsyncLock();
-
-export type ParsedDailyMemoryFileName = {
-  day: string;
-  slug?: string;
-  fileName: string;
-  canonical: boolean;
-};
 
 export type DailyMemoryFileEntry = ParsedDailyMemoryFileName & {
   absolutePath: string;
@@ -28,34 +21,6 @@ type DailyMemoryRecentIndexPayload = {
     mtimeMs: number;
   }>;
 };
-
-export function parseDailyMemoryFileName(fileName: string): ParsedDailyMemoryFileName | null {
-  const normalized = path.posix.basename(fileName.replace(/\\/g, "/").trim());
-  const match = normalized.match(DAILY_MEMORY_FILE_NAME_RE);
-  if (!match || !match[1]) {
-    return null;
-  }
-  const slug = match[2]?.trim() || undefined;
-  return {
-    day: match[1],
-    slug,
-    fileName: normalized,
-    canonical: slug == null,
-  };
-}
-
-export function isDailyMemoryFileName(fileName: string): boolean {
-  return parseDailyMemoryFileName(fileName) !== null;
-}
-
-export function isSessionSummaryDailyMemory(raw: string): boolean {
-  return (
-    /^# Session:\s+/m.test(raw) &&
-    /^-\s+\*\*Session Key\*\*:/m.test(raw) &&
-    /^-\s+\*\*Session ID\*\*:/m.test(raw) &&
-    /^-\s+\*\*Source\*\*:/m.test(raw)
-  );
-}
 
 function isBenignDailyMemoryDirError(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException | undefined)?.code;
@@ -244,23 +209,6 @@ async function persistDailyMemoryRecentIndex(
     trailingNewline: true,
     ensureDirMode: 0o700,
   });
-}
-
-export async function filterSessionSummaryDailyMemoryFiles(filePaths: string[]): Promise<string[]> {
-  const keptPaths: string[] = [];
-  for (const filePath of filePaths) {
-    const raw = await fs.readFile(filePath, "utf-8").catch((error: unknown) => {
-      if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
-        return null;
-      }
-      throw error;
-    });
-    if (raw === null || isSessionSummaryDailyMemory(raw)) {
-      continue;
-    }
-    keptPaths.push(filePath);
-  }
-  return keptPaths;
 }
 
 export async function listDailyMemoryFiles(
