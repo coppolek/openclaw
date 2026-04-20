@@ -97,6 +97,7 @@ Built-in commands available today:
 - `/session idle <duration|off>` and `/session max-age <duration|off>` manage thread-binding expiry.
 - `/think <level>` sets the thinking level. Options come from the active model's provider profile; common levels are `off`, `minimal`, `low`, `medium`, and `high`, with custom levels such as `xhigh`, `adaptive`, `max`, or binary `on` only where supported. Aliases: `/thinking`, `/t`.
 - `/verbose on|off|full` toggles verbose output. Alias: `/v`.
+- `/emotions on|off|full` toggles personality-mode emotion tags.
 - `/trace on|off` toggles plugin trace output for the current session.
 - `/fast [status|on|off]` shows or sets fast mode.
 - `/reasoning [on|off|stream]` toggles reasoning visibility. Alias: `/reason`.
