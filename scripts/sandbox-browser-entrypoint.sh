@@ -107,21 +107,34 @@ CHROME_ARGS=(
   "--no-default-browser-check"
   "--disable-dev-shm-usage"
   "--disable-background-networking"
+  "--disable-features=AutomationControlled,BackForwardCache,TranslateUI"
+  "--enable-features=NetworkService,NetworkServiceInProcess"
+  "--disable-blink-features=AutomationControlled"
   "--disable-breakpad"
   "--disable-crash-reporter"
   "--no-zygote"
+  "--no-sandbox"
+  "--disable-setuid-sandbox"
   "--metrics-recording-only"
   "--password-store=basic"
   "--use-mock-keychain"
+  "--window-size=1280,800"
 )
 
 if [[ "${HEADLESS}" == "1" ]]; then
   CHROME_ARGS+=("--headless=new")
 fi
 
+# Add extra args if provided (e.g. --remote-allow-origins=*)
+if [[ -n "${OPENCLAW_BROWSER_EXTRA_ARGS:-}" ]]; then
+  read -ra EXTRA_ARGS <<< "${OPENCLAW_BROWSER_EXTRA_ARGS}"
+  CHROME_ARGS+=("${EXTRA_ARGS[@]}")
+fi
+
 if [[ "${ALLOW_NO_SANDBOX}" == "1" ]]; then
   CHROME_ARGS+=("--no-sandbox" "--disable-setuid-sandbox")
 fi
+
 
 DISABLE_GRAPHICS_FLAGS_LOWER="${DISABLE_GRAPHICS_FLAGS,,}"
 if [[ "${DISABLE_GRAPHICS_FLAGS_LOWER}" =~ ^(1|true|yes|on)$ ]]; then
@@ -142,7 +155,7 @@ if [[ "${RENDERER_PROCESS_LIMIT}" =~ ^[0-9]+$ && "${RENDERER_PROCESS_LIMIT}" -gt
 fi
 
 echo "[sandbox] Starting Chromium..."
-chromium "${CHROME_ARGS[@]}" about:blank &
+google-chrome-stable "${CHROME_ARGS[@]}" about:blank &
 CHROME_PID=$!
 echo "[sandbox] Chromium started (PID: ${CHROME_PID})"
 
@@ -193,6 +206,7 @@ if [[ "${ENABLE_NOVNC}" == "1" && "${HEADLESS}" != "1" ]]; then
   fi
 
   mkdir -p "${HOME}/.vnc"
+  echo "[sandbox] noVNC password: ${NOVNC_PASSWORD}"
   x11vnc -storepasswd "${NOVNC_PASSWORD}" "${HOME}/.vnc/passwd" >/dev/null
   chmod 600 "${HOME}/.vnc/passwd"
 
@@ -200,7 +214,17 @@ if [[ "${ENABLE_NOVNC}" == "1" && "${HEADLESS}" != "1" ]]; then
   X11VNC_PID=$!
   echo "[sandbox] x11vnc started (PID: ${X11VNC_PID})"
 
-  websockify --web /usr/share/novnc/ "${NOVNC_PORT}" "localhost:${VNC_PORT}" &
+  # Generate a self-signed cert so websockify can accept HTTPS/WSS connections
+  # (e.g. when accessed via Tailscale HTTPS). The browser will show a one-time
+  # security warning; accept it to proceed.
+  if [[ ! -f "${HOME}/self.pem" ]]; then
+    openssl req -new -x509 -days 3650 -nodes \
+      -subj "/CN=openclaw-browser" \
+      -keyout "${HOME}/self.pem" \
+      -out "${HOME}/self.pem" 2>/dev/null
+  fi
+
+  websockify --web /usr/share/novnc/ --cert "${HOME}/self.pem" "${NOVNC_PORT}" "localhost:${VNC_PORT}" &
   WEBSOCKIFY_PID=$!
   echo "[sandbox] websockify started (PID: ${WEBSOCKIFY_PID})"
 fi

@@ -1,0 +1,298 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.4.11",
+    "lastTouchedAt": "2026-04-12T08:31:21.712Z"
+  },
+  "wizard": {
+    "lastRunAt": "2026-02-07T16:02:46.036Z",
+    "lastRunVersion": "2026.2.6-3",
+    "lastRunCommand": "onboard",
+    "lastRunMode": "local"
+  },
+  "browser": {
+    "enabled": true,
+    "defaultProfile": "docker",
+    "profiles": {
+      "docker": {
+        "cdpUrl": "http://172.20.0.10:9222",
+        "color": "#00AA00"
+      }
+    },
+    "ssrfPolicy": {
+      "dangerouslyAllowPrivateNetwork": true
+    }
+  },
+  "auth": {
+    "profiles": {
+      "openrouter:default": {
+        "provider": "openrouter",
+        "mode": "api_key"
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "openrouter/minimax/minimax-m2.7"
+      },
+      "thinkingDefault": "minimal",
+      "models": {
+        "openrouter/auto": {
+          "alias": "OpenRouter"
+        },
+        "openrouter/minimax/minimax-m2.7": {},
+        "openrouter/xiaomi/mimo-v2-pro": {},
+        "openrouter/z-ai/glm-5.1": {}
+      },
+      "workspace": "/home/node/.openclaw/workspace",
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "maxConcurrent": 4,
+      "subagents": {
+        "maxConcurrent": 8
+      },
+      "sandbox": {
+        "mode": "non-main",
+        "workspaceAccess": "rw",
+        "scope": "session",
+        "browser": {
+          "enabled": true,
+          "cdpPort": 9222,
+          "headless": true,
+          "enableNoVnc": false,
+          "autoStart": true
+        }
+      }
+    },
+    "list": [
+      {
+        "id": "main",
+        "default": true,
+        "workspace": "/home/node/.openclaw/workspace",
+        "tools": {
+          "allow": [
+            "sessions_send",
+            "sessions_spawn",
+            "sessions_list",
+            "sessions_history",
+            "agents_list",
+            "browser",
+            "message",
+            "tts",
+            "canvas",
+            "web_fetch",
+            "memory_search",
+            "memory_get",
+            "group:runtime",
+            "group:fs"
+          ]
+        }
+      },
+      {
+        "id": "vision",
+        "name": "vision",
+        "workspace": "/home/node/.openclaw/workspace-vision",
+        "agentDir": "/home/node/.openclaw/agents/vision/agent",
+        "model": "openrouter/z-ai/glm-4.6v"
+      },
+      {
+        "id": "life-coach",
+        "name": "life-coach",
+        "workspace": "/home/node/.openclaw/workspace-life-coach",
+        "agentDir": "/home/node/.openclaw/agents/life-coach/agent",
+        "model": "openrouter/minimax/minimax-m2.7",
+        "tools": {
+          "allow": [
+            "sessions_send",
+            "sessions_spawn",
+            "sessions_list",
+            "sessions_history",
+            "agents_list",
+            "browser",
+            "message",
+            "tts",
+            "canvas",
+            "web_fetch",
+            "memory_search",
+            "memory_get",
+            "group:runtime",
+            "group:fs"
+          ]
+        }
+      },
+      {
+        "id": "linux-coach",
+        "name": "linux-coach",
+        "workspace": "/home/node/.openclaw/workspace-linux-coach",
+        "agentDir": "/home/node/.openclaw/agents/linux-coach/agent",
+        "model": "openrouter/minimax/minimax-m2.7",
+        "tools": {
+          "allow": [
+            "sessions_send",
+            "sessions_spawn",
+            "sessions_list",
+            "sessions_history",
+            "agents_list",
+            "browser",
+            "message",
+            "tts",
+            "canvas",
+            "web_fetch",
+            "memory_search",
+            "memory_get",
+            "group:runtime",
+            "group:fs"
+          ]
+        }
+      },
+      {
+        "id": "coder",
+        "name": "Coder Agent",
+        "workspace": "/home/node/.openclaw/workspace-coder",
+        "model": "openrouter/minimax/minimax-m2.7",
+        "tools": {
+          "allow": [
+            "sessions_send",
+            "sessions_spawn",
+            "sessions_list",
+            "sessions_history",
+            "agents_list",
+            "browser",
+            "message",
+            "tts",
+            "canvas",
+            "web_fetch",
+            "memory_search",
+            "memory_get",
+            "group:runtime",
+            "group:fs"
+          ]
+        }
+      }
+    ]
+  },
+  "tools": {
+    "deny": []
+  },
+  "bindings": [
+    {
+      "agentId": "main",
+      "match": {
+        "channel": "telegram",
+        "accountId": "default"
+      }
+    },
+    {
+      "agentId": "vision",
+      "match": {
+        "channel": "telegram",
+        "accountId": "vision"
+      }
+    },
+    {
+      "agentId": "life-coach",
+      "match": {
+        "channel": "telegram",
+        "accountId": "life-coach"
+      }
+    },
+    {
+      "agentId": "linux-coach",
+      "match": {
+        "channel": "telegram",
+        "accountId": "linux-coach"
+      }
+    }
+  ],
+  "messages": {
+    "ackReactionScope": "group-mentions"
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto"
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "dmPolicy": "pairing",
+      "groupPolicy": "allowlist",
+      "accounts": {
+        "default": {
+          "dmPolicy": "pairing",
+          "botToken": "${TELEGRAM_BOT_TOKEN}",
+          "groupPolicy": "allowlist",
+          "streaming": {
+            "mode": "partial"
+          }
+        },
+        "vision": {
+          "dmPolicy": "pairing",
+          "botToken": "${TELEGRAM_BOT_TOKEN_VISION}",
+          "groupPolicy": "allowlist",
+          "streaming": {
+            "mode": "block"
+          }
+        },
+        "life-coach": {
+          "enabled": true,
+          "dmPolicy": "pairing",
+          "botToken": "${TELEGRAM_BOT_TOKEN_LIFE_COACH}",
+          "groupPolicy": "allowlist",
+          "streaming": {
+            "mode": "block"
+          }
+        },
+        "linux-coach": {
+          "enabled": true,
+          "dmPolicy": "pairing",
+          "botToken": "${TELEGRAM_BOT_TOKEN_LINUX}",
+          "groupPolicy": "allowlist",
+          "streaming": {
+            "mode": "block"
+          }
+        }
+      },
+      "streaming": {
+        "mode": "block"
+      }
+    }
+  },
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "bind": "lan",
+    "auth": {
+      "mode": "token"
+    },
+    "tailscale": {
+      "mode": "off",
+      "resetOnExit": true
+    },
+    "controlUi": {
+      "allowedOrigins": [
+        "http://localhost:18789",
+        "http://127.0.0.1:18789"
+      ]
+    }
+  },
+  "skills": {
+    "install": {
+      "nodeManager": "npm"
+    },
+    "entries": {}
+  },
+  "plugins": {
+    "entries": {
+      "telegram": {
+        "enabled": true
+      },
+      "openrouter": {
+        "enabled": true
+      },
+      "browser": {
+        "enabled": true
+      }
+    }
+  }
+}
