@@ -502,9 +502,20 @@ export async function spawnSubagentDirect(
   // (channel, accountId) so other fields still backfill normally.
   const threadOnlyParentMismatch =
     Boolean(ctxDeliveryHint?.to) && !parentDelivery?.to && parentDelivery?.threadId != null;
+  // Caller explicitly targeted a `to` but did not supply a threadId → treat as
+  // an intentional root-level send. Parent's threadId (even for a matching
+  // `to`) would otherwise fold in via mergeDeliveryContext and turn the
+  // root-level request into a threaded reply in a stale prior thread. The
+  // channel-mismatch guard in mergeDeliveryContext cannot catch this because
+  // channels match; the above `toMismatch` gate cannot catch it because `to`s
+  // match too.
+  const ctxRootLevelOverridesParentThread =
+    Boolean(ctxDeliveryHint?.to) &&
+    ctxDeliveryHint?.threadId == null &&
+    parentDelivery?.threadId != null;
   const effectiveParentDelivery = toMismatch
     ? undefined
-    : threadOnlyParentMismatch
+    : threadOnlyParentMismatch || ctxRootLevelOverridesParentThread
       ? { ...parentDelivery, threadId: undefined }
       : parentDelivery;
   const effectiveRequesterDelivery =

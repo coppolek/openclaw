@@ -275,6 +275,56 @@ describe("spawnSubagentDirect parent-context backfill", () => {
     expect(agentCall?.threadId).toBeUndefined();
   });
 
+  it("does not inherit parent threadId when ctx explicitly targets matching `to` at root level", async () => {
+    // Caller specified `agentTo` but intentionally omitted `agentThreadId` —
+    // e.g. inbound was a root-level message to the same channel target that
+    // parent last threaded in. Folding parent's threadId in would turn a
+    // root-level spawn into a reply in a stale prior thread. Neither
+    // toMismatch (to's match) nor threadOnlyParentMismatch (parent has a
+    // `to`) catches this; the explicit-root-level guard does.
+    ({ spawnSubagentDirect, resetSubagentRegistryForTests } = await loadSubagentSpawnModuleForTest({
+      callGatewayMock: hoisted.callGatewayMock,
+      loadConfig: () => hoisted.configOverride,
+      updateSessionStoreMock: hoisted.updateSessionStoreMock,
+      resolveAgentConfig: () => undefined,
+      resolveSubagentSpawnModelSelection: () => "openai-codex/gpt-5.4",
+      resolveSandboxRuntimeStatus: () => ({ sandboxed: false }),
+      sessionStorePath: "/tmp/subagent-spawn-backfill.json",
+      resetModules: true,
+      parentSessionEntry: {
+        deliveryContext: {
+          channel: "slack",
+          to: "channel:C1",
+          threadId: "1700000000.000000",
+        },
+      },
+    }));
+
+    const agentCalls = captureAgentCallsForChild(/^agent:main:subagent:/);
+
+    const result = await spawnSubagentDirect(
+      {
+        task: "do thing",
+        runTimeoutSeconds: 1,
+        cleanup: "keep",
+      },
+      {
+        agentSessionKey: "main",
+        agentChannel: "slack",
+        agentTo: "channel:C1",
+        // No agentThreadId; caller wants a root-level send to the same `to`.
+      },
+    );
+
+    expect(result.status).toBe("accepted");
+
+    const agentCall = agentCalls[0];
+    expect(agentCall).toBeDefined();
+    expect(agentCall?.channel).toBe("slack");
+    expect(agentCall?.to).toBe("channel:C1");
+    expect(agentCall?.threadId).toBeUndefined();
+  });
+
   it("ctx values win over parent deliveryContext when both are present", async () => {
     ({ spawnSubagentDirect, resetSubagentRegistryForTests } = await loadSubagentSpawnModuleForTest({
       callGatewayMock: hoisted.callGatewayMock,
