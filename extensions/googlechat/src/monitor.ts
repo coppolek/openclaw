@@ -456,7 +456,7 @@ async function deliverGoogleChatReply(params: {
             account,
             space: spaceId,
             text: chunk,
-            thread: forcedThreadName ?? payload.replyToId,
+            thread: payload.replyToId ?? forcedThreadName,
           });
         }
         firstTextChunk = false;
@@ -485,7 +485,7 @@ async function deliverGoogleChatReply(params: {
           account,
           space: spaceId,
           text: caption,
-          thread: forcedThreadName ?? payload.replyToId,
+          thread: payload.replyToId ?? forcedThreadName,
           attachments: [
             { attachmentUploadToken: upload.attachmentUploadToken, contentName: loaded.fileName },
           ],
