@@ -1,8 +1,13 @@
 import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { sleep } from "openclaw/plugin-sdk/text-runtime";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadWebMedia } from "../media.js";
 import type { WebInboundMsg } from "./types.js";
+
+const hoisted = vi.hoisted(() => ({
+  maybeShoarchiveOutboundPdf: vi.fn(async () => {}),
+  looksLikePdfArchiveCandidate: vi.fn(),
+}));
 
 vi.mock("openclaw/plugin-sdk/runtime-env", async () => {
   const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/runtime-env")>(
@@ -27,6 +32,11 @@ vi.mock("openclaw/plugin-sdk/text-runtime", async () => {
 
 vi.mock("../media.js", () => ({
   loadWebMedia: vi.fn(),
+}));
+
+vi.mock("../pdf-shoarchive.js", () => ({
+  looksLikePdfArchiveCandidate: hoisted.looksLikePdfArchiveCandidate,
+  maybeShoarchiveOutboundPdf: hoisted.maybeShoarchiveOutboundPdf,
 }));
 
 let deliverWebReply: typeof import("./deliver-reply.js").deliverWebReply;
@@ -91,6 +101,24 @@ async function expectReplySuppressed(replyResult: { text: string; isReasoning?: 
 describe("deliverWebReply", () => {
   beforeAll(async () => {
     ({ deliverWebReply } = await import("./deliver-reply.js"));
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    hoisted.looksLikePdfArchiveCandidate.mockImplementation(
+      ({
+        contentType,
+        fileName,
+        mediaUrl,
+      }: {
+        contentType?: string;
+        fileName?: string;
+        mediaUrl: string;
+      }) =>
+        contentType === "application/pdf" ||
+        fileName?.toLowerCase().endsWith(".pdf") === true ||
+        mediaUrl.toLowerCase().endsWith(".pdf"),
+    );
   });
 
   it("suppresses payloads flagged as reasoning", async () => {
@@ -320,5 +348,69 @@ describe("deliverWebReply", () => {
         mimetype: "application/octet-stream",
       }),
     );
+    expect(hoisted.maybeShoarchiveOutboundPdf).not.toHaveBeenCalled();
+  });
+
+  it("shoarchives outbound pdf documents after sending", async () => {
+    const msg = makeMsg();
+    (
+      loadWebMedia as unknown as { mockResolvedValueOnce: (v: unknown) => void }
+    ).mockResolvedValueOnce({
+      buffer: Buffer.from("pdf"),
+      contentType: "application/pdf",
+      kind: "document",
+      fileName: "agreement.pdf",
+    });
+
+    await deliverWebReply({
+      replyResult: { text: "cap", mediaUrl: "/tmp/agreement.pdf" },
+      msg,
+      maxMediaBytes: 1024 * 1024,
+      textLimit: 200,
+      replyLogger,
+      skipLog: true,
+    });
+
+    expect(hoisted.maybeShoarchiveOutboundPdf).toHaveBeenCalledWith({
+      mediaUrl: "/tmp/agreement.pdf",
+      contentType: "application/pdf",
+      fileName: "agreement.pdf",
+      recipient: "+10000000000",
+      via: "WhatsApp",
+    });
+  });
+
+  it("shoarchives outbound pdf documents when mime is generic but filename is pdf", async () => {
+    const msg = makeMsg();
+    (
+      loadWebMedia as unknown as { mockResolvedValueOnce: (v: unknown) => void }
+    ).mockResolvedValueOnce({
+      buffer: Buffer.from("pdf"),
+      contentType: "application/octet-stream",
+      kind: "document",
+      fileName: "agreement.pdf",
+    });
+
+    await deliverWebReply({
+      replyResult: { text: "cap", mediaUrl: "/tmp/agreement.pdf" },
+      msg,
+      maxMediaBytes: 1024 * 1024,
+      textLimit: 200,
+      replyLogger,
+      skipLog: true,
+    });
+
+    expect(hoisted.looksLikePdfArchiveCandidate).toHaveBeenCalledWith({
+      mediaUrl: "/tmp/agreement.pdf",
+      contentType: "application/octet-stream",
+      fileName: "agreement.pdf",
+    });
+    expect(hoisted.maybeShoarchiveOutboundPdf).toHaveBeenCalledWith({
+      mediaUrl: "/tmp/agreement.pdf",
+      contentType: "application/octet-stream",
+      fileName: "agreement.pdf",
+      recipient: "+10000000000",
+      via: "WhatsApp",
+    });
   });
 });

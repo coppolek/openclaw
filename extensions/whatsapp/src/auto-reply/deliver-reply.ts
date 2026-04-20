@@ -8,6 +8,7 @@ import {
 import { logVerbose, shouldLogVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 import { loadWebMedia } from "../media.js";
+import { looksLikePdfArchiveCandidate, maybeShoarchiveOutboundPdf } from "../pdf-shoarchive.js";
 import { newConnectionId } from "../reconnect.js";
 import { formatError } from "../session.js";
 import { convertMarkdownTables, sleep } from "../text-runtime.js";
@@ -173,6 +174,21 @@ export async function deliverWebReply(params: {
             }),
           "media:document",
         );
+        if (
+          looksLikePdfArchiveCandidate({
+            mediaUrl,
+            contentType: mimetype,
+            fileName,
+          })
+        ) {
+          await maybeShoarchiveOutboundPdf({
+            mediaUrl,
+            contentType: mimetype,
+            fileName,
+            recipient: msg.from,
+            via: "WhatsApp",
+          });
+        }
       }
       whatsappOutboundLog.info(
         `Sent media reply to ${msg.from} (${(media.buffer.length / (1024 * 1024)).toFixed(2)}MB)`,
