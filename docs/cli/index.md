@@ -969,7 +969,7 @@ Subcommands:
 - `message emoji <list|upload>`
 - `message sticker <send|upload>`
 - `message role <info|add|remove>`
-- `message channel <info|list>`
+- `message channel <info|list|create|edit|delete|move>`
 - `message member info`
 - `message voice status`
 - `message event <list|create>`
