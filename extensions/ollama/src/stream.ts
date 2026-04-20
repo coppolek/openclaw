@@ -635,7 +635,7 @@ export function createOllamaStreamFn(
         }
 
         const body = buildOllamaChatRequest({
-          modelId: model.id,
+          modelId: model.id.startsWith("ollama/") ? model.id.slice("ollama/".length) : model.id,
           messages: ollamaMessages,
           stream: true,
           tools: ollamaTools,
