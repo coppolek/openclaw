@@ -1162,6 +1162,7 @@
                 "pages": [
                   "tools/skills",
                   "tools/creating-skills",
+                  "tools/community-skills",
                   "tools/skills-config",
                   "tools/slash-commands",
                   "tools/clawhub",
