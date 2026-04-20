@@ -5,7 +5,6 @@ import type { AgentMessage, StreamFn } from "@mariozechner/pi-agent-core";
 import {
   calculateCost,
   createAssistantMessageEventStream,
-  getEnvApiKey,
   streamSimple,
   type AssistantMessage,
   type AssistantMessageEventStream,
@@ -16,6 +15,7 @@ import {
   type Usage,
 } from "@mariozechner/pi-ai";
 import { convertMessages } from "@mariozechner/pi-ai/openai-completions";
+import { resolveEnvApiKey } from "openclaw/plugin-sdk/provider-auth-runtime";
 import {
   buildGuardedModelFetch,
   resolveModelRequestAuthMode,
@@ -767,7 +767,7 @@ function resolvePlamoApiKey(model: RuntimeModel, options: RuntimeOptions): strin
   if (requestAuthMode === "authorization-bearer" || requestAuthMode === "header") {
     return undefined;
   }
-  return options?.apiKey || getEnvApiKey(model.provider) || undefined;
+  return options?.apiKey || resolveEnvApiKey(model.provider)?.apiKey || undefined;
 }
 
 function hasAuthorizationHeader(headers: Record<string, string>): boolean {
