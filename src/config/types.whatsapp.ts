@@ -25,6 +25,7 @@ export type WhatsAppGroupConfig = {
   requireMention?: boolean;
   tools?: GroupToolPolicyConfig;
   toolsBySender?: GroupToolPolicyBySenderConfig;
+  admin?: string; // WhatsApp number (E.164 format) of the group admin
 };
 
 export type WhatsAppAckReactionConfig = {
