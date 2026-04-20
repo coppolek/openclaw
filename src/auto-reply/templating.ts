@@ -105,6 +105,13 @@ export type MsgContext = {
   MediaPaths?: string[];
   MediaUrls?: string[];
   MediaTypes?: string[];
+  MediaWorkspaceDir?: string;
+  /**
+   * Marker: skip downstream stageSandboxMedia. chat.send RPC sets this so
+   * staging runs synchronously before respond() and surfaces 5xx to the
+   * client; any later failure only reaches the broadcast channel.
+   */
+  MediaStaged?: boolean;
   /** Telegram sticker metadata (emoji, set name, file IDs, cached description). */
   Sticker?: StickerContextMetadata;
   /** True when current-turn sticker media is present in MediaPaths (false for cached-description path). */
