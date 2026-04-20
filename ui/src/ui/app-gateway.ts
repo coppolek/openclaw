@@ -51,6 +51,7 @@ import {
 import { GatewayBrowserClient } from "./gateway.ts";
 import type { Tab } from "./navigation.ts";
 import type { UiSettings } from "./storage.ts";
+import { getSafeSessionStorage } from "../local-storage.ts";
 import type {
   AgentsListResult,
   PresenceEntry,
@@ -305,6 +306,54 @@ export function connectGateway(host: GatewayHost, options?: ConnectGatewayOption
       host.lastErrorCode =
         resolveGatewayErrorDetailCode(error) ??
         (typeof error?.code === "string" ? error.code : null);
+
+      // Recover from stale permission state on code 1000. Limit reloads to prevent infinite loops (max 3 reloads in 5 minutes)
+      if (code === 1000) {
+        const MAX_RELOADS = 3;
+        const WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+        const now = Date.now();
+        const RELOAD_COUNT_KEY = "openclaw.control.gatewayReloadCount.v1";
+
+        let shouldReload = false;
+        try {
+          const storage = getSafeSessionStorage();
+          if (storage) {
+            let count = 0;
+            let firstTime = 0;
+            try {
+              const raw = storage.getItem(RELOAD_COUNT_KEY);
+              if (raw) {
+                const parsed = JSON.parse(raw);
+                if (typeof parsed.count === "number") {
+                  count = parsed.count;
+                }
+                if (typeof parsed.firstTime === "number") {
+                  firstTime = parsed.firstTime;
+                }
+              }
+            } catch {
+            }
+            if (now - firstTime > WINDOW_MS) {
+              count = 0;
+              firstTime = now;
+            }
+            if (count < MAX_RELOADS) {
+              count++;
+              storage.setItem(RELOAD_COUNT_KEY, JSON.stringify({ count, firstTime }));
+              shouldReload = true;
+            }
+          }
+        } catch {
+        }
+
+        if (shouldReload) {
+          window.location.reload();
+        } else {
+          host.lastError = `Connection lost (code 1000). Reload limit reached. Please refresh manually if browser control is unavailable.`;
+        }
+        return;
+      }
+
       if (code !== 1012) {
         if (error?.message) {
           host.lastError =
