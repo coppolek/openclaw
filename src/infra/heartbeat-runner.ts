@@ -1012,6 +1012,9 @@ export async function runHeartbeatOnce(opts: {
       heartbeat?.lightContext === true ? "lightweight" : undefined;
     const replyOpts = {
       isHeartbeat: true,
+      // Isolated heartbeat turns force fresh session ids, so retire any eager bundle MCP
+      // runtime as soon as the one-shot run ends.
+      ...(useIsolatedSession ? { cleanupBundleMcpOnRunEnd: true } : {}),
       ...(heartbeatModelOverride ? { heartbeatModelOverride } : {}),
       suppressToolErrorWarnings,
       // Heartbeat timeout is a per-run override so user turns keep the global default.

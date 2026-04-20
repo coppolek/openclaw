@@ -2,6 +2,8 @@ import type { SkillSnapshot } from "../../agents/skills.js";
 import type { ThinkLevel, VerboseLevel } from "../../auto-reply/thinking.js";
 import type { AgentDefaultsConfig } from "../../config/types.agent-defaults.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { formatErrorMessage } from "../../infra/errors.js";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import type { CronJob } from "../types.js";
 import { resolveCronPayloadOutcome } from "./helpers.js";
 import {
@@ -29,9 +31,11 @@ type AgentTurnPayload = Extract<CronJob["payload"], { kind: "agentTurn" }> | nul
 type CronPromptRunResult = Awaited<ReturnType<typeof runCliAgent>>;
 type CronEmbeddedRuntime = typeof import("./run-embedded.runtime.js");
 type CronSubagentRegistryRuntime = typeof import("./run-subagent-registry.runtime.js");
+type BundleMcpToolsRuntime = typeof import("../../agents/pi-bundle-mcp-tools.js");
 
 let cronEmbeddedRuntimePromise: Promise<CronEmbeddedRuntime> | undefined;
 let cronSubagentRegistryRuntimePromise: Promise<CronSubagentRegistryRuntime> | undefined;
+let bundleMcpToolsRuntimePromise: Promise<BundleMcpToolsRuntime> | undefined;
 
 function resolveCurrentChannelTarget(params: {
   channel?: string;
@@ -55,6 +59,11 @@ async function loadCronEmbeddedRuntime() {
 async function loadCronSubagentRegistryRuntime() {
   cronSubagentRegistryRuntimePromise ??= import("./run-subagent-registry.runtime.js");
   return await cronSubagentRegistryRuntimePromise;
+}
+
+async function loadBundleMcpToolsRuntime() {
+  bundleMcpToolsRuntimePromise ??= import("../../agents/pi-bundle-mcp-tools.js");
+  return await bundleMcpToolsRuntimePromise;
 }
 
 export type CronExecutionResult = {
@@ -272,130 +281,162 @@ export async function executeCronRun(params: {
     normalizeVerboseLevel(params.cronSession.sessionEntry.verboseLevel) ??
     normalizeVerboseLevel(params.agentVerboseDefault) ??
     "off";
+  const cleanupSessionIds = new Set<string>();
+  const rememberCleanupSessionId = (sessionId: string | undefined) => {
+    const normalized = normalizeOptionalString(sessionId);
+    if (normalized) {
+      cleanupSessionIds.add(normalized);
+    }
+    return normalized;
+  };
+  rememberCleanupSessionId(params.cronSession.sessionEntry.sessionId);
   registerAgentRunContext(params.cronSession.sessionEntry.sessionId, {
     sessionKey: params.agentSessionKey,
     verboseLevel: resolvedVerboseLevel,
   });
-  const executor = createCronPromptExecutor({
-    cfg: params.cfg,
-    cfgWithAgentDefaults: params.cfgWithAgentDefaults,
-    job: params.job,
-    agentId: params.agentId,
-    agentDir: params.agentDir,
-    agentSessionKey: params.agentSessionKey,
-    workspaceDir: params.workspaceDir,
-    lane: params.lane,
-    resolvedVerboseLevel,
-    thinkLevel: params.thinkLevel,
-    timeoutMs: params.timeoutMs,
-    messageChannel: params.resolvedDelivery.channel,
-    resolvedDelivery: params.resolvedDelivery,
-    toolPolicy: params.toolPolicy,
-    skillsSnapshot: params.skillsSnapshot,
-    agentPayload: params.agentPayload,
-    liveSelection: params.liveSelection,
-    cronSession: params.cronSession,
-    abortSignal: params.abortSignal,
-    abortReason: params.abortReason,
-  });
-
-  const runStartedAt = params.runStartedAt ?? Date.now();
-  const MAX_MODEL_SWITCH_RETRIES = 2;
-  let modelSwitchRetries = 0;
-  while (true) {
-    try {
-      await executor.runPrompt(params.commandBody);
-      break;
-    } catch (err) {
-      if (!(err instanceof LiveSessionModelSwitchError)) {
-        throw err;
-      }
-      modelSwitchRetries += 1;
-      if (modelSwitchRetries > MAX_MODEL_SWITCH_RETRIES) {
-        logWarn(
-          `[cron:${params.job.id}] LiveSessionModelSwitchError retry limit reached (${MAX_MODEL_SWITCH_RETRIES}); aborting`,
-        );
-        throw err;
-      }
-      params.liveSelection.provider = err.provider;
-      params.liveSelection.model = err.model;
-      params.liveSelection.authProfileId = err.authProfileId;
-      params.liveSelection.authProfileIdSource = err.authProfileId
-        ? err.authProfileIdSource
-        : undefined;
-      syncCronSessionLiveSelection({
-        entry: params.cronSession.sessionEntry,
-        liveSelection: params.liveSelection,
-      });
-      try {
-        await params.persistSessionEntry();
-      } catch (persistErr) {
-        logWarn(
-          `[cron:${params.job.id}] Failed to persist model switch session entry: ${String(persistErr)}`,
-        );
-      }
-      continue;
-    }
-  }
-
-  let { runResult, fallbackProvider, fallbackModel, runEndedAt } = executor.getState();
-  if (!runResult) {
-    throw new Error("cron isolated run returned no result");
-  }
-
-  if (!params.isAborted()) {
-    const interimPayloads = runResult.payloads ?? [];
-    const {
-      deliveryPayloadHasStructuredContent: interimPayloadHasStructuredContent,
-      outputText: interimOutputText,
-    } = resolveCronPayloadOutcome({
-      payloads: interimPayloads,
-      runLevelError: runResult.meta?.error,
-      finalAssistantVisibleText: runResult.meta?.finalAssistantVisibleText,
-      preferFinalAssistantVisibleText: params.resolvedDelivery.channel === "telegram",
+  try {
+    const executor = createCronPromptExecutor({
+      cfg: params.cfg,
+      cfgWithAgentDefaults: params.cfgWithAgentDefaults,
+      job: params.job,
+      agentId: params.agentId,
+      agentDir: params.agentDir,
+      agentSessionKey: params.agentSessionKey,
+      workspaceDir: params.workspaceDir,
+      lane: params.lane,
+      resolvedVerboseLevel,
+      thinkLevel: params.thinkLevel,
+      timeoutMs: params.timeoutMs,
+      messageChannel: params.resolvedDelivery.channel,
+      resolvedDelivery: params.resolvedDelivery,
+      toolPolicy: params.toolPolicy,
+      skillsSnapshot: params.skillsSnapshot,
+      agentPayload: params.agentPayload,
+      liveSelection: params.liveSelection,
+      cronSession: params.cronSession,
+      abortSignal: params.abortSignal,
+      abortReason: params.abortReason,
     });
-    const interimText = interimOutputText?.trim() ?? "";
-    const shouldRetryInterimAck =
-      !runResult.meta?.error &&
-      !runResult.didSendViaMessagingTool &&
-      !interimPayloadHasStructuredContent &&
-      !interimPayloads.some((payload) => payload?.isError === true) &&
-      isLikelyInterimCronMessage(interimText);
 
-    let hasFreshDescendants = false;
-    let hasActiveDescendants = false;
-    if (shouldRetryInterimAck) {
-      const { countActiveDescendantRuns, listDescendantRunsForRequester } =
-        await loadCronSubagentRegistryRuntime();
-      hasFreshDescendants = listDescendantRunsForRequester(params.agentSessionKey).some((entry) => {
-        const descendantStartedAt =
-          typeof entry.startedAt === "number" ? entry.startedAt : entry.createdAt;
-        return typeof descendantStartedAt === "number" && descendantStartedAt >= runStartedAt;
+    const runStartedAt = params.runStartedAt ?? Date.now();
+    const MAX_MODEL_SWITCH_RETRIES = 2;
+    let modelSwitchRetries = 0;
+    while (true) {
+      try {
+        await executor.runPrompt(params.commandBody);
+        break;
+      } catch (err) {
+        if (!(err instanceof LiveSessionModelSwitchError)) {
+          throw err;
+        }
+        modelSwitchRetries += 1;
+        if (modelSwitchRetries > MAX_MODEL_SWITCH_RETRIES) {
+          logWarn(
+            `[cron:${params.job.id}] LiveSessionModelSwitchError retry limit reached (${MAX_MODEL_SWITCH_RETRIES}); aborting`,
+          );
+          throw err;
+        }
+        params.liveSelection.provider = err.provider;
+        params.liveSelection.model = err.model;
+        params.liveSelection.authProfileId = err.authProfileId;
+        params.liveSelection.authProfileIdSource = err.authProfileId
+          ? err.authProfileIdSource
+          : undefined;
+        syncCronSessionLiveSelection({
+          entry: params.cronSession.sessionEntry,
+          liveSelection: params.liveSelection,
+        });
+        try {
+          await params.persistSessionEntry();
+        } catch (persistErr) {
+          logWarn(
+            `[cron:${params.job.id}] Failed to persist model switch session entry: ${String(persistErr)}`,
+          );
+        }
+        continue;
+      }
+    }
+
+    let { runResult, fallbackProvider, fallbackModel, runEndedAt } = executor.getState();
+    if (!runResult) {
+      throw new Error("cron isolated run returned no result");
+    }
+    rememberCleanupSessionId(runResult.meta?.agentMeta?.sessionId);
+
+    if (!params.isAborted()) {
+      const interimPayloads = runResult.payloads ?? [];
+      const {
+        deliveryPayloadHasStructuredContent: interimPayloadHasStructuredContent,
+        outputText: interimOutputText,
+      } = resolveCronPayloadOutcome({
+        payloads: interimPayloads,
+        runLevelError: runResult.meta?.error,
+        finalAssistantVisibleText: runResult.meta?.finalAssistantVisibleText,
+        preferFinalAssistantVisibleText: params.resolvedDelivery.channel === "telegram",
       });
-      hasActiveDescendants = countActiveDescendantRuns(params.agentSessionKey) > 0;
+      const interimText = interimOutputText?.trim() ?? "";
+      const shouldRetryInterimAck =
+        !runResult.meta?.error &&
+        !runResult.didSendViaMessagingTool &&
+        !interimPayloadHasStructuredContent &&
+        !interimPayloads.some((payload) => payload?.isError === true) &&
+        isLikelyInterimCronMessage(interimText);
+
+      let hasFreshDescendants = false;
+      let hasActiveDescendants = false;
+      if (shouldRetryInterimAck) {
+        const { countActiveDescendantRuns, listDescendantRunsForRequester } =
+          await loadCronSubagentRegistryRuntime();
+        hasFreshDescendants = listDescendantRunsForRequester(params.agentSessionKey).some(
+          (entry) => {
+            const descendantStartedAt =
+              typeof entry.startedAt === "number" ? entry.startedAt : entry.createdAt;
+            return typeof descendantStartedAt === "number" && descendantStartedAt >= runStartedAt;
+          },
+        );
+        hasActiveDescendants = countActiveDescendantRuns(params.agentSessionKey) > 0;
+      }
+
+      if (shouldRetryInterimAck && !hasFreshDescendants && !hasActiveDescendants) {
+        const continuationPrompt = [
+          "Your previous response was only an acknowledgement and did not complete this cron task.",
+          "Complete the original task now.",
+          "Do not send a status update like 'on it'.",
+          "Use tools when needed, including sessions_spawn for parallel subtasks, wait for spawned subagents to finish, then return only the final summary.",
+        ].join(" ");
+        await executor.runPrompt(continuationPrompt);
+        ({ runResult, fallbackProvider, fallbackModel, runEndedAt } = executor.getState());
+        rememberCleanupSessionId(runResult?.meta?.agentMeta?.sessionId);
+      }
     }
 
-    if (shouldRetryInterimAck && !hasFreshDescendants && !hasActiveDescendants) {
-      const continuationPrompt = [
-        "Your previous response was only an acknowledgement and did not complete this cron task.",
-        "Complete the original task now.",
-        "Do not send a status update like 'on it'.",
-        "Use tools when needed, including sessions_spawn for parallel subtasks, wait for spawned subagents to finish, then return only the final summary.",
-      ].join(" ");
-      await executor.runPrompt(continuationPrompt);
-      ({ runResult, fallbackProvider, fallbackModel, runEndedAt } = executor.getState());
+    if (!runResult) {
+      throw new Error("cron isolated run returned no result");
+    }
+    return {
+      runResult,
+      fallbackProvider,
+      fallbackModel,
+      runStartedAt,
+      runEndedAt,
+      liveSelection: params.liveSelection,
+    };
+  } finally {
+    if (params.job.sessionTarget === "isolated") {
+      try {
+        const { disposeSessionMcpRuntime } = await loadBundleMcpToolsRuntime();
+        for (const sessionId of cleanupSessionIds) {
+          await disposeSessionMcpRuntime(sessionId).catch((error) => {
+            logWarn(
+              `failed to dispose bundle MCP runtime for isolated cron session ${sessionId}: ${formatErrorMessage(error)}`,
+            );
+          });
+        }
+      } catch (error) {
+        logWarn(
+          `failed to finalize bundle MCP cleanup for isolated cron run (non-fatal): ${formatErrorMessage(error)}`,
+        );
+      }
     }
   }
-
-  if (!runResult) {
-    throw new Error("cron isolated run returned no result");
-  }
-  return {
-    runResult,
-    fallbackProvider,
-    fallbackModel,
-    runStartedAt,
-    runEndedAt,
-    liveSelection: params.liveSelection,
-  };
 }

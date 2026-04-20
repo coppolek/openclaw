@@ -16,6 +16,7 @@ import { logVerbose } from "../../globals.js";
 import { registerAgentRunContext } from "../../infra/agent-events.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { defaultRuntime } from "../../runtime.js";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { isInternalMessageChannel } from "../../utils/message-channel.js";
 import { stripHeartbeatToken } from "../heartbeat.js";
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../tokens.js";
@@ -34,6 +35,15 @@ import { isRoutableChannel, routeReply } from "./route-reply.js";
 import { incrementRunCompactionCount, persistRunSessionUsage } from "./session-run-accounting.js";
 import { createTypingSignaler } from "./typing-mode.js";
 import type { TypingController } from "./typing.js";
+
+type BundleMcpToolsRuntime = typeof import("../../agents/pi-bundle-mcp-tools.js");
+
+let bundleMcpToolsRuntimePromise: Promise<BundleMcpToolsRuntime> | undefined;
+
+async function loadBundleMcpToolsRuntime() {
+  bundleMcpToolsRuntimePromise ??= import("../../agents/pi-bundle-mcp-tools.js");
+  return await bundleMcpToolsRuntimePromise;
+}
 
 export function createFollowupRunner(params: {
   opts?: GetReplyOptions;
@@ -148,6 +158,16 @@ export function createFollowupRunner(params: {
         ? queued
         : { ...queued, run: { ...queued.run, config: runtimeConfig } };
     const run = effectiveQueued.run;
+    const cleanupSessionIds = new Set<string>();
+    const rememberCleanupSessionId = (sessionId: string | undefined) => {
+      const normalized = normalizeOptionalString(sessionId);
+      if (normalized) {
+        cleanupSessionIds.add(normalized);
+      }
+      return normalized;
+    };
+    rememberCleanupSessionId(run.sessionId);
+    rememberCleanupSessionId(queued.run.sessionId);
     const replyOperation = createReplyOperation({
       sessionId: run.sessionId,
       sessionKey: replySessionKey ?? "",
@@ -278,6 +298,7 @@ export function createFollowupRunner(params: {
                 0,
                 result.meta?.agentMeta?.compactionCount ?? 0,
               );
+              rememberCleanupSessionId(result.meta?.agentMeta?.sessionId);
               attemptCompactionCount = Math.max(attemptCompactionCount, resultCompactionCount);
               return result;
             } finally {
@@ -397,6 +418,22 @@ export function createFollowupRunner(params: {
 
       await sendFollowupPayloads(finalPayloads, effectiveQueued);
     } finally {
+      try {
+        if (run.cleanupBundleMcpOnRunEnd === true) {
+          const { disposeSessionMcpRuntime } = await loadBundleMcpToolsRuntime();
+          for (const sessionId of cleanupSessionIds) {
+            await disposeSessionMcpRuntime(sessionId).catch((error) => {
+              logVerbose(
+                `failed to dispose bundle MCP runtime for one-shot followup ${sessionId}: ${formatErrorMessage(error)}`,
+              );
+            });
+          }
+        }
+      } catch (cleanupErr) {
+        logVerbose(
+          `bundle MCP cleanup failed in followup runner (non-fatal): ${formatErrorMessage(cleanupErr)}`,
+        );
+      }
       replyOperation.complete();
       // Both signals are required for the typing controller to clean up.
       // The main inbound dispatch path calls markDispatchIdle() from the

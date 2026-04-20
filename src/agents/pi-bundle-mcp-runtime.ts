@@ -131,10 +131,72 @@ export function createSessionMcpRuntime(params: {
   let catalog: McpToolCatalog | null = null;
   let catalogInFlight: Promise<McpToolCatalog> | undefined;
   const sessions = new Map<string, BundleMcpSession>();
+  const connectInFlight = new Map<string, Promise<BundleMcpSession>>();
   const failIfDisposed = () => {
     if (disposed) {
       throw createDisposedError(params.sessionId);
     }
+  };
+
+  const ensureConnectedSession = async (params: {
+    serverName: string;
+    resolvedTransport?: NonNullable<ReturnType<typeof resolveMcpTransport>>;
+  }): Promise<BundleMcpSession> => {
+    failIfDisposed();
+    const pending = connectInFlight.get(params.serverName);
+    if (pending) {
+      return pending;
+    }
+    const existing = sessions.get(params.serverName);
+    if (existing) {
+      return existing;
+    }
+    const resolved =
+      params.resolvedTransport ??
+      resolveMcpTransport(params.serverName, loaded.mcpServers[params.serverName]);
+    if (!resolved) {
+      throw new Error(`bundle-mcp server "${params.serverName}" is not configured`);
+    }
+
+    const client = new Client(
+      {
+        name: "openclaw-bundle-mcp",
+        version: "0.0.0",
+      },
+      {},
+    );
+    const session: BundleMcpSession = {
+      serverName: params.serverName,
+      client,
+      transport: resolved.transport,
+      transportType: resolved.transportType,
+      detachStderr: resolved.detachStderr,
+    };
+    const sessionPromise = (async () => {
+      // Register the session before the first await so dispose() can still close
+      // it if startup fails or the runtime is torn down mid-connect.
+      sessions.set(params.serverName, session);
+      try {
+        failIfDisposed();
+        await connectWithTimeout(client, resolved.transport, resolved.connectionTimeoutMs);
+        failIfDisposed();
+        return session;
+      } catch (error) {
+        if (!disposed) {
+          logWarn(
+            `bundle-mcp: failed to start server "${params.serverName}" (${resolved.description}): ${redactErrorUrls(error)}`,
+          );
+        }
+        await disposeSession(session);
+        sessions.delete(params.serverName);
+        failIfDisposed();
+        throw error;
+      } finally {
+        connectInFlight.delete(params.serverName);
+      }
+    })();
+    connectInFlight.set(params.serverName, sessionPromise);
+    return await sessionPromise;
   };
 
   const getCatalog = async (): Promise<McpToolCatalog> => {
@@ -173,27 +235,13 @@ export function createSessionMcpRuntime(params: {
             );
           }
 
-          const client = new Client(
-            {
-              name: "openclaw-bundle-mcp",
-              version: "0.0.0",
-            },
-            {},
-          );
-          const session: BundleMcpSession = {
-            serverName,
-            client,
-            transport: resolved.transport,
-            transportType: resolved.transportType,
-            detachStderr: resolved.detachStderr,
-          };
-          sessions.set(serverName, session);
-
           try {
+            const session = await ensureConnectedSession({
+              serverName,
+              resolvedTransport: resolved,
+            });
             failIfDisposed();
-            await connectWithTimeout(client, resolved.transport, resolved.connectionTimeoutMs);
-            failIfDisposed();
-            const listedTools = await listAllTools(client);
+            const listedTools = await listAllTools(session.client);
             failIfDisposed();
             servers[serverName] = {
               serverName,
@@ -216,24 +264,28 @@ export function createSessionMcpRuntime(params: {
               });
             }
           } catch (error) {
-            if (!disposed) {
-              logWarn(
-                `bundle-mcp: failed to start server "${serverName}" (${resolved.description}): ${redactErrorUrls(error)}`,
-              );
+            const activeSession = sessions.get(serverName);
+            if (activeSession) {
+              if (!disposed) {
+                logWarn(
+                  `bundle-mcp: failed to start server "${serverName}" (${resolved.description}): ${redactErrorUrls(error)}`,
+                );
+              }
+              await disposeSession(activeSession);
+              sessions.delete(serverName);
             }
-            await disposeSession(session);
-            sessions.delete(serverName);
             failIfDisposed();
           }
         }
 
         failIfDisposed();
-        return {
+        const nextCatalog = {
           version: 1,
           generatedAt: Date.now(),
           servers,
           tools,
         };
+        return nextCatalog;
       } catch (error) {
         await Promise.allSettled(
           Array.from(sessions.values(), (session) => disposeSession(session)),
@@ -269,10 +321,9 @@ export function createSessionMcpRuntime(params: {
     async callTool(serverName, toolName, input) {
       failIfDisposed();
       await getCatalog();
-      const session = sessions.get(serverName);
-      if (!session) {
-        throw new Error(`bundle-mcp server "${serverName}" is not connected`);
-      }
+      // Catalog discovery may have disposed a failed startup session, so retry the
+      // connection here before surfacing a tool-call error.
+      const session = await ensureConnectedSession({ serverName });
       return (await session.client.callTool({
         name: toolName,
         arguments: isMcpConfigRecord(input) ? input : {},
@@ -285,6 +336,7 @@ export function createSessionMcpRuntime(params: {
       disposed = true;
       catalog = null;
       catalogInFlight = undefined;
+      connectInFlight.clear();
       const sessionsToClose = Array.from(sessions.values());
       sessions.clear();
       await Promise.allSettled(sessionsToClose.map((session) => disposeSession(session)));

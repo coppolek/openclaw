@@ -433,7 +433,7 @@ function buildMatrixNetworkFields(params: {
   proxy?: string;
   dispatcherPolicy?: PinnedDispatcherPolicy;
 }): Pick<MatrixResolvedConfig, "allowPrivateNetwork" | "ssrfPolicy" | "dispatcherPolicy"> {
-  const dispatcherPolicy: PinnedDispatcherPolicy | undefined =
+  const dispatcherPolicy =
     params.dispatcherPolicy ??
     (params.proxy ? { mode: "explicit-proxy", proxyUrl: params.proxy } : undefined);
   if (!params.allowPrivateNetwork && !dispatcherPolicy) {

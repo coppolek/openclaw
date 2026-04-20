@@ -6,6 +6,7 @@ import {
 } from "./run.suite-helpers.js";
 import {
   buildWorkspaceSkillSnapshotMock,
+  disposeSessionMcpRuntimeMock,
   getCliSessionIdMock,
   isCliProviderMock,
   lookupContextTokensMock,
@@ -13,11 +14,14 @@ import {
   logWarnMock,
   makeCronSession,
   makeCronSessionEntry,
+  mockRunCronFallbackPassthrough,
   resolveAgentConfigMock,
   resolveAgentSkillsFilterMock,
   resolveAllowedModelRefMock,
+  resolveCronPayloadOutcomeMock,
   resolveCronSessionMock,
   runCliAgentMock,
+  runEmbeddedPiAgentMock,
   runWithModelFallbackMock,
 } from "./run.test-harness.js";
 
@@ -126,6 +130,60 @@ describe("runCronIsolatedAgentTurn — skill filter", () => {
     expect(resolveCronSessionMock.mock.calls[0]?.[0]).toMatchObject({
       forceNew: true,
     });
+  });
+
+  it("cleans up bundle MCP runtimes after isolated cron runs", async () => {
+    mockRunCronFallbackPassthrough();
+    await runSkillFilterCase();
+
+    expect(runEmbeddedPiAgentMock).toHaveBeenCalledOnce();
+    expect(runEmbeddedPiAgentMock.mock.calls[0]?.[0]).not.toHaveProperty(
+      "cleanupBundleMcpOnRunEnd",
+    );
+    expect(disposeSessionMcpRuntimeMock).toHaveBeenCalledOnce();
+    expect(disposeSessionMcpRuntimeMock).toHaveBeenCalledWith("test-session-id");
+  });
+
+  it("cleans up every rotated bundle MCP runtime after isolated continuation runs", async () => {
+    mockRunCronFallbackPassthrough();
+    resolveCronPayloadOutcomeMock.mockImplementationOnce(() => ({
+      summary: "on it",
+      outputText: "on it",
+      synthesizedText: "on it",
+      deliveryPayload: undefined,
+      deliveryPayloads: [{ text: "on it" }],
+      deliveryPayloadHasStructuredContent: false,
+      hasFatalErrorPayload: false,
+      embeddedRunError: undefined,
+    }));
+    runEmbeddedPiAgentMock
+      .mockResolvedValueOnce({
+        payloads: [{ text: "on it" }],
+        meta: {
+          agentMeta: {
+            sessionId: "session-b",
+            usage: { input: 10, output: 20 },
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        payloads: [{ text: "done" }],
+        meta: {
+          agentMeta: {
+            sessionId: "session-c",
+            usage: { input: 10, output: 20 },
+          },
+        },
+      });
+
+    await runSkillFilterCase();
+
+    expect(runEmbeddedPiAgentMock).toHaveBeenCalledTimes(2);
+    expect(disposeSessionMcpRuntimeMock.mock.calls).toEqual([
+      ["test-session-id"],
+      ["session-b"],
+      ["session-c"],
+    ]);
   });
 
   it("reuses cached snapshot when version and normalized skillFilter are unchanged", async () => {

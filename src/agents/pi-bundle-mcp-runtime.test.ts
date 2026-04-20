@@ -178,6 +178,85 @@ describe("session MCP runtime", () => {
     expect(manager.listSessionIds()).not.toContain("session-a");
   });
 
+  it("recreates the process-backed session runtime after explicit disposal", async () => {
+    const workspaceDir = await makeTempDir("openclaw-bundle-mcp-tools-");
+    const startupCounterPath = path.join(workspaceDir, "bundle-starts.txt");
+    const pluginRoot = path.join(workspaceDir, ".openclaw", "extensions", "bundle-probe");
+    const serverScriptPath = path.join(pluginRoot, "servers", "bundle-probe.mjs");
+    await writeBundleProbeMcpServer(serverScriptPath, { startupCounterPath });
+    await writeClaudeBundle({ pluginRoot, serverScriptPath });
+
+    const cfg = {
+      plugins: {
+        entries: {
+          "bundle-probe": { enabled: true },
+        },
+      },
+    };
+
+    const runtimeA = await getOrCreateSessionMcpRuntime({
+      sessionId: "session-b",
+      sessionKey: "agent:test:session-b",
+      workspaceDir,
+      cfg,
+    });
+    await materializeBundleMcpToolsForRun({ runtime: runtimeA });
+    await disposeSessionMcpRuntime("session-b");
+
+    const runtimeB = await getOrCreateSessionMcpRuntime({
+      sessionId: "session-b",
+      sessionKey: "agent:test:session-b",
+      workspaceDir,
+      cfg,
+    });
+    const materializedB = await materializeBundleMcpToolsForRun({ runtime: runtimeB });
+    await materializedB.tools[0].execute("call-session-b", {}, undefined, undefined);
+
+    expect(runtimeA).not.toBe(runtimeB);
+    expect(await fs.readFile(startupCounterPath, "utf8")).toBe("2");
+  });
+
+  it("retries failed catalog discovery across fresh runtimes", async () => {
+    const workspaceDir = await makeTempDir("openclaw-bundle-mcp-tools-");
+    const startupCounterPath = path.join(workspaceDir, "bundle-starts.txt");
+    const serverScriptPath = path.join(workspaceDir, "servers", "configured-probe.mjs");
+
+    const cfg = {
+      mcp: {
+        servers: {
+          configuredProbe: {
+            command: "node",
+            args: [serverScriptPath],
+          },
+        },
+      },
+    };
+
+    const runtimeA = await getOrCreateSessionMcpRuntime({
+      sessionId: "session-catalog-failure-a",
+      sessionKey: "agent:test:session-catalog-failure-a",
+      workspaceDir,
+      cfg,
+    });
+    const materializedA = await materializeBundleMcpToolsForRun({ runtime: runtimeA });
+
+    expect(materializedA.tools).toEqual([]);
+
+    await writeBundleProbeMcpServer(serverScriptPath, { startupCounterPath });
+
+    const runtimeB = await getOrCreateSessionMcpRuntime({
+      sessionId: "session-catalog-failure-b",
+      sessionKey: "agent:test:session-catalog-failure-b",
+      workspaceDir,
+      cfg,
+    });
+    const materializedB = await materializeBundleMcpToolsForRun({ runtime: runtimeB });
+
+    expect(materializedB.tools.map((tool) => tool.name)).toEqual(["configuredProbe__bundle_probe"]);
+    await materializedB.tools[0].execute("call-configured-probe", {}, undefined, undefined);
+    expect(await fs.readFile(startupCounterPath, "utf8")).toBe("1");
+  });
+
   it("recreates the session runtime when MCP config changes", async () => {
     const createRuntime: RuntimeFactory = (params) => {
       const probeText = String(
@@ -297,5 +376,65 @@ describe("session MCP runtime", () => {
     expect(result.error).toBeInstanceOf(Error);
     expect((result.error as Error).message).toMatch(/disposed/);
     expect(manager.listSessionIds()).not.toContain("session-d");
+  });
+
+  it("materialized disposal recreates the next process-backed runtime lazily", async () => {
+    const workspaceDir = await makeTempDir("openclaw-bundle-mcp-tools-");
+    const startupCounterPath = path.join(workspaceDir, "bundle-starts.txt");
+    const pidPath = path.join(workspaceDir, "bundle.pid");
+    const exitMarkerPath = path.join(workspaceDir, "bundle.exit");
+    const pluginRoot = path.join(workspaceDir, ".openclaw", "extensions", "bundle-probe");
+    const serverScriptPath = path.join(pluginRoot, "servers", "bundle-probe.mjs");
+    await writeBundleProbeMcpServer(serverScriptPath, {
+      startupCounterPath,
+      pidPath,
+      exitMarkerPath,
+    });
+    await writeClaudeBundle({ pluginRoot, serverScriptPath });
+
+    const runtimeA = await getOrCreateSessionMcpRuntime({
+      sessionId: "session-f",
+      sessionKey: "agent:test:session-f",
+      workspaceDir,
+      cfg: {
+        plugins: {
+          entries: {
+            "bundle-probe": { enabled: true },
+          },
+        },
+      },
+    });
+    const materialized = await materializeBundleMcpToolsForRun({
+      runtime: runtimeA,
+      disposeRuntime: async () => {
+        await disposeSessionMcpRuntime("session-f");
+      },
+    });
+
+    expect(materialized.tools.map((tool) => tool.name)).toEqual(["bundleProbe__bundle_probe"]);
+    expect(await waitForFileText(pidPath)).toMatch(/^\d+$/);
+
+    await materialized.dispose();
+
+    expect(await waitForFileText(exitMarkerPath)).toBe("exited");
+    expect(__testing.getCachedSessionIds()).not.toContain("session-f");
+
+    const runtimeB = await getOrCreateSessionMcpRuntime({
+      sessionId: "session-f",
+      sessionKey: "agent:test:session-f",
+      workspaceDir,
+      cfg: {
+        plugins: {
+          entries: {
+            "bundle-probe": { enabled: true },
+          },
+        },
+      },
+    });
+
+    expect(runtimeB).not.toBe(runtimeA);
+    const materializedB = await materializeBundleMcpToolsForRun({ runtime: runtimeB });
+    await materializedB.tools[0].execute("call-session-f", {}, undefined, undefined);
+    expect(await fs.readFile(startupCounterPath, "utf8")).toBe("2");
   });
 });

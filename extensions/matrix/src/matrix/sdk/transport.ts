@@ -1,3 +1,4 @@
+import type { Dispatcher } from "undici";
 import { MatrixMediaSizeLimitError } from "../media-errors.js";
 import { readResponseWithLimit } from "./read-response-with-limit.js";
 import {
@@ -23,7 +24,7 @@ type QueryValue =
 export type QueryParams = Record<string, QueryValue> | null | undefined;
 
 type MatrixDispatcherRequestInit = RequestInit & {
-  dispatcher?: ReturnType<typeof createPinnedDispatcher>;
+  dispatcher?: Dispatcher;
 };
 
 function normalizeEndpoint(endpoint: string): string {
@@ -120,7 +121,7 @@ async function fetchWithMatrixGuardedRedirects(params: {
   });
 
   for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
-    let dispatcher: ReturnType<typeof createPinnedDispatcher> | undefined;
+    let dispatcher: Dispatcher | undefined;
     try {
       const pinned = await resolvePinnedHostnameWithPolicy(currentUrl.hostname, {
         policy: params.ssrfPolicy,
