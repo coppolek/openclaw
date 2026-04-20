@@ -3,8 +3,8 @@ import { resolveGoogleChatSessionKey } from "./monitor.js";
 
 describe("resolveGoogleChatSessionKey", () => {
   const baseSessionKey = "agent:main:googlechat:group:spaces/aaaa";
-  const threadA = "spaces/aaaa/threads/t-A";
-  const threadB = "spaces/aaaa/threads/t-B";
+  const threadA = "spaces/AAAA/threads/t-A";
+  const threadB = "spaces/AAAA/threads/t-B";
 
   it("returns the base session key when sessionThread is disabled", () => {
     expect(
@@ -26,14 +26,16 @@ describe("resolveGoogleChatSessionKey", () => {
     ).toBe(baseSessionKey);
   });
 
-  it("appends a :thread:<id> suffix when sessionThread is enabled and inbound has a thread", () => {
+  it("appends a hashed :gcthread:<hash> suffix when sessionThread is enabled and inbound has a thread", () => {
     const key = resolveGoogleChatSessionKey({
       baseSessionKey,
       threadName: threadA,
       sessionThread: true,
     });
-    expect(key.startsWith(baseSessionKey)).toBe(true);
-    expect(key).toContain(":thread:");
+    expect(key.startsWith(`${baseSessionKey}:gcthread:`)).toBe(true);
+    // Raw thread name bytes must not appear in the suffix; the case-sensitive
+    // name flows through ctx.MessageThreadId, not the session key.
+    expect(key).not.toContain(threadA);
     expect(key).not.toBe(baseSessionKey);
   });
 
@@ -68,12 +70,36 @@ describe("resolveGoogleChatSessionKey", () => {
     expect(a).not.toBe(b);
   });
 
-  it("keeps the base session key prefix so upstream routing tokens stay intact", () => {
+  it("is deterministic so the same thread resolves to the same session key across restarts", () => {
+    const a = resolveGoogleChatSessionKey({
+      baseSessionKey,
+      threadName: threadA,
+      sessionThread: true,
+    });
+    const b = resolveGoogleChatSessionKey({
+      baseSessionKey,
+      threadName: threadA,
+      sessionThread: true,
+    });
+    expect(a).toBe(b);
+  });
+
+  it("survives store canonicalization (lowercasing) so later key lookups still match", () => {
+    const key = resolveGoogleChatSessionKey({
+      baseSessionKey,
+      threadName: "spaces/AaAa/threads/MixedCaseID",
+      sessionThread: true,
+    });
+    // Hash is hex → lowercasing is a no-op on the suffix content.
+    expect(key).toBe(key.toLowerCase());
+  });
+
+  it("avoids the generic :thread: marker so parseSessionThreadInfo does not surface the hash as a routable thread id", () => {
     const key = resolveGoogleChatSessionKey({
       baseSessionKey,
       threadName: threadA,
       sessionThread: true,
     });
-    expect(key.startsWith(`${baseSessionKey}:thread:`)).toBe(true);
+    expect(key).not.toContain(":thread:");
   });
 });

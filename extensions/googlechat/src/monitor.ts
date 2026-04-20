@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   deliverTextOrMediaReply,
   resolveSendableOutboundReplyParts,
@@ -7,7 +8,6 @@ import type { OpenClawConfig } from "../runtime-api.js";
 import {
   createChannelReplyPipeline,
   resolveInboundRouteEnvelopeBuilderWithRuntime,
-  resolveThreadSessionKeys,
   resolveWebhookPath,
 } from "../runtime-api.js";
 import { type ResolvedGoogleChatAccount } from "./accounts.js";
@@ -56,10 +56,19 @@ export function resolveGoogleChatSessionKey(params: {
   if (!params.sessionThread || !params.threadName) {
     return params.baseSessionKey;
   }
-  return resolveThreadSessionKeys({
-    baseSessionKey: params.baseSessionKey,
-    threadId: params.threadName,
-  }).sessionKey;
+  // Hash the thread resource name for the session-key suffix instead of
+  // embedding it raw. Google Chat thread names are case-sensitive, but session
+  // store keys are canonicalized to lowercase, which would corrupt any raw
+  // name extracted back via parseSessionThreadInfo and cause outbound
+  // restart/update flows to target the wrong thread. A hex hash survives
+  // canonicalization, and the `:gcthread:` marker keeps the generic
+  // `:thread:` parser from surfacing the hash as a routable thread id — the
+  // case-sensitive thread name flows through ctx.MessageThreadId instead.
+  const threadHash = createHash("sha256")
+    .update(params.threadName.trim())
+    .digest("hex")
+    .slice(0, 16);
+  return `${params.baseSessionKey}:gcthread:${threadHash}`;
 }
 
 function normalizeAudienceType(value?: string | null): GoogleChatAudienceType | undefined {
@@ -248,6 +257,10 @@ async function processMessageWithPipeline(params: {
     Surface: "googlechat",
     MessageSid: message.name,
     MessageSidFull: message.name,
+    // Carry the original Google Chat thread resource name (case-sensitive)
+    // so session metadata and outbound restart/update flows can target the
+    // real thread without reparsing the lowercased store sessionKey.
+    MessageThreadId: message.thread?.name,
     ReplyToId: message.thread?.name,
     ReplyToIdFull: message.thread?.name,
     MediaPath: mediaPath,
