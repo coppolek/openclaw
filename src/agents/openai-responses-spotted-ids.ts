@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import type { ResponseInput } from "openai/resources/responses/responses.js";
 import { resolveGlobalDedupeCache } from "../infra/dedupe.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
@@ -41,18 +42,15 @@ function looksLikeConnectionBoundId(id: string): boolean {
   if (!/^[A-Za-z0-9+/_-]+=*$/.test(id)) {
     return false;
   }
-  try {
-    const decoded = Buffer.from(id, "base64");
-    return decoded.length >= 16;
-  } catch {
-    return false;
-  }
+  // Buffer.from(id, "base64") in Node silently ignores invalid characters
+  // rather than throwing, and the regex above has already validated the
+  // character set, so no try/catch is needed here.
+  return Buffer.from(id, "base64").length >= 16;
 }
 
 function generateReplacementId(type: string | undefined): string {
   const prefix = type === "reasoning" ? "rs" : type === "function_call" ? "fc" : "msg";
-  const rand = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
-  return `${prefix}_${rand.slice(0, 16)}`;
+  return `${prefix}_${randomBytes(8).toString("hex")}`;
 }
 
 type InputItem = Record<string, unknown> & { id?: unknown; type?: unknown };
