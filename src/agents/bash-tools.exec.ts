@@ -1000,7 +1000,7 @@ async function validateScriptFileForShellBleed(params: {
 
     // Common failure mode: shell env var syntax leaking into Python/JS.
     // We deliberately match all-caps/underscore vars to avoid false positives with `$` as a JS identifier.
-    const envVarRegex = /\$[A-Z_][A-Z0-9_]{1,}/g;
+    const envVarRegex = /\$[A-Z_][A-Z0-9_]{1,}(?!{)/g;
     const first = envVarRegex.exec(content);
     if (first) {
       const idx = first.index;
@@ -1694,6 +1694,13 @@ export function createExecTool(
 
       let yielded = false;
       let yieldTimer: NodeJS.Timeout | null = null;
+      const cleanup = () => {
+        if (yieldTimer) {
+          clearTimeout(yieldTimer);
+          yieldTimer = null;
+        }
+      };
+
 
       // Tool-call abort should not kill backgrounded sessions; timeouts still must.
       const onAbortSignal = () => {
@@ -1739,8 +1746,7 @@ export function createExecTool(
           });
 
         const onYieldNow = () => {
-          if (yieldTimer) {
-            clearTimeout(yieldTimer);
+          cleanup();
           }
           if (yielded) {
             return;
@@ -1767,8 +1773,7 @@ export function createExecTool(
 
         run.promise
           .then((outcome) => {
-            if (yieldTimer) {
-              clearTimeout(yieldTimer);
+            cleanup();
             }
             if (yielded || run.session.backgrounded) {
               return;
@@ -1782,8 +1787,7 @@ export function createExecTool(
             );
           })
           .catch((err) => {
-            if (yieldTimer) {
-              clearTimeout(yieldTimer);
+            cleanup();
             }
             if (yielded || run.session.backgrounded) {
               return;
