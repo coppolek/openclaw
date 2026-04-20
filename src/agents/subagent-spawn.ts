@@ -577,25 +577,11 @@ export async function spawnSubagentDirect(
     }
   };
 
-  // Persist the resolved parent-origin delivery context onto the child entry so
-  // outbound replies (announce / session-mode follow-ups) have a route even
-  // before any inbound message seeds it via gateway.agent. Defense-in-depth:
-  // the gateway-side seeding at server-methods/agent.ts only seeds from the
-  // request's own to/threadId, which can be empty when the child first speaks.
   const initialChildSessionPatch: Record<string, unknown> = {
     spawnDepth: childDepth,
     subagentRole: childCapabilities.role === "main" ? null : childCapabilities.role,
     subagentControlScope: childCapabilities.controlScope,
     ...plan.initialSessionPatch,
-    ...(requesterOrigin
-      ? {
-          deliveryContext: requesterOrigin,
-          lastChannel: requesterOrigin.channel,
-          lastTo: requesterOrigin.to,
-          lastAccountId: requesterOrigin.accountId,
-          lastThreadId: requesterOrigin.threadId,
-        }
-      : {}),
   };
 
   const initialPatchError = await patchChildSession(initialChildSessionPatch);
@@ -665,32 +651,6 @@ export async function spawnSubagentDirect(
     hasBoundThreadDeliveryOrigin = hasRoutableDeliveryOrigin(bindResult.deliveryOrigin);
     childSessionOrigin =
       mergeDeliveryContext(bindResult.deliveryOrigin, requesterOrigin) ?? childSessionOrigin;
-    // The thread binding may have introduced a binding-owned override (e.g. a
-    // different thread targeted by the binding manager). Persist the merged
-    // origin so subsequent outbound resolution honors the binding decision
-    // rather than the pre-binding initial patch. Guard structurally — the
-    // merge helper normalizes into a new object even when routing fields are
-    // unchanged, so a reference check would trigger a redundant patch.
-    const originChanged =
-      childSessionOrigin &&
-      (childSessionOrigin.channel !== requesterOrigin?.channel ||
-        childSessionOrigin.to !== requesterOrigin?.to ||
-        childSessionOrigin.threadId !== requesterOrigin?.threadId ||
-        childSessionOrigin.accountId !== requesterOrigin?.accountId);
-    if (originChanged && childSessionOrigin) {
-      // Thread binding is already live and the initial patch has
-      // requesterOrigin seeded, so a failed follow-up patch is best-effort:
-      // tearing down the child would orphan the binding. Outbound resolution
-      // falls back to the pre-binding origin, which remains correct for the
-      // originating thread.
-      await patchChildSession({
-        deliveryContext: childSessionOrigin,
-        lastChannel: childSessionOrigin.channel,
-        lastTo: childSessionOrigin.to,
-        lastAccountId: childSessionOrigin.accountId,
-        lastThreadId: childSessionOrigin.threadId,
-      });
-    }
   }
   const mountPathHint = sanitizeMountPathHint(params.attachMountPath);
 

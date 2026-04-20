@@ -1090,30 +1090,12 @@ export async function spawnAcpDirect(
   let sessionCreated = false;
   let initializedRuntime: AcpSpawnRuntimeCloseHandle | undefined;
   try {
-    // Only seed deliveryContext from the requester origin when thread binding
-    // will NOT run. When preparedBinding is set, bindPreparedAcpThread may
-    // target a different conversation (placement="child" creates a new
-    // thread), and seeding here would lock the child's persisted delivery to
-    // the parent conversation — the gateway `agent` method merges existing
-    // session data as primary over the request delivery hint, so the bound
-    // route would not replace the preseed. For thread=true ACP spawns,
-    // outbound resolution uses the binding record instead.
-    const initialChildDelivery = preparedBinding ? undefined : requesterState.origin;
     await callGateway({
       method: "sessions.patch",
       params: {
         key: sessionKey,
         spawnedBy: requesterInternalKey,
         ...(params.label ? { label: params.label } : {}),
-        ...(initialChildDelivery
-          ? {
-              deliveryContext: initialChildDelivery,
-              lastChannel: initialChildDelivery.channel,
-              lastTo: initialChildDelivery.to,
-              lastAccountId: initialChildDelivery.accountId,
-              lastThreadId: initialChildDelivery.threadId,
-            }
-          : {}),
       },
       timeoutMs: 10_000,
     });

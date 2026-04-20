@@ -31,19 +31,16 @@ function configWithMain() {
   });
 }
 
-function captureSessionsPatchForChild(childKeyPattern: RegExp) {
-  const patches: Array<Record<string, unknown>> = [];
+function captureAgentCallsForChild(childKeyPattern: RegExp) {
+  const calls: Array<Record<string, unknown>> = [];
   hoisted.callGatewayMock.mockImplementation(
     async (request: { method?: string; params?: unknown }) => {
       if (request.method === "agent") {
-        return { runId: "run-1" };
-      }
-      if (request.method === "sessions.patch") {
-        const params = request.params as { key?: string } & Record<string, unknown>;
-        if (typeof params?.key === "string" && childKeyPattern.test(params.key)) {
-          patches.push(params);
+        const params = request.params as { sessionKey?: string } & Record<string, unknown>;
+        if (typeof params?.sessionKey === "string" && childKeyPattern.test(params.sessionKey)) {
+          calls.push(params);
         }
-        return { ok: true };
+        return { runId: "run-1" };
       }
       if (request.method?.startsWith("sessions.")) {
         return { ok: true };
@@ -51,7 +48,7 @@ function captureSessionsPatchForChild(childKeyPattern: RegExp) {
       return { ok: true };
     },
   );
-  return patches;
+  return calls;
 }
 
 describe("spawnSubagentDirect parent-context backfill", () => {
@@ -108,7 +105,7 @@ describe("spawnSubagentDirect parent-context backfill", () => {
       },
     }));
 
-    const patches = captureSessionsPatchForChild(/^agent:main:subagent:/);
+    const agentCalls = captureAgentCallsForChild(/^agent:main:subagent:/);
 
     const result = await spawnSubagentDirect(
       {
@@ -124,17 +121,15 @@ describe("spawnSubagentDirect parent-context backfill", () => {
 
     expect(result.status).toBe("accepted");
 
-    const initialPatch = patches[0];
-    expect(initialPatch).toBeDefined();
-    expect(initialPatch).toMatchObject({
-      deliveryContext: {
-        channel: "slack",
-        to: "channel:C0ACJ9D6E4W",
-        threadId: "1775970111.589749",
-      },
-      lastChannel: "slack",
-      lastTo: "channel:C0ACJ9D6E4W",
-      lastThreadId: "1775970111.589749",
+    // The backfilled delivery context must reach the gateway `agent` call so
+    // gateway-side seeding (server-methods/agent.ts) writes it onto the child
+    // session entry. Outbound replies then thread correctly.
+    const agentCall = agentCalls[0];
+    expect(agentCall).toBeDefined();
+    expect(agentCall).toMatchObject({
+      channel: "slack",
+      to: "channel:C0ACJ9D6E4W",
+      threadId: "1775970111.589749",
     });
   });
 
@@ -157,7 +152,7 @@ describe("spawnSubagentDirect parent-context backfill", () => {
       },
     }));
 
-    const patches = captureSessionsPatchForChild(/^agent:main:subagent:/);
+    const agentCalls = captureAgentCallsForChild(/^agent:main:subagent:/);
 
     const result = await spawnSubagentDirect(
       {
@@ -174,13 +169,13 @@ describe("spawnSubagentDirect parent-context backfill", () => {
 
     expect(result.status).toBe("accepted");
 
-    const initialPatch = patches[0];
-    expect(initialPatch).toBeDefined();
+    const agentCall = agentCalls[0];
+    expect(agentCall).toBeDefined();
     // mergeDeliveryContext's channelsConflict guard drops the parent's
     // route fields when channels disagree.
-    expect(initialPatch?.deliveryContext).toMatchObject({ channel: "discord" });
-    expect((initialPatch?.deliveryContext as Record<string, unknown>)?.to).toBeUndefined();
-    expect((initialPatch?.deliveryContext as Record<string, unknown>)?.threadId).toBeUndefined();
+    expect(agentCall?.channel).toBe("discord");
+    expect(agentCall?.to).toBeUndefined();
+    expect(agentCall?.threadId).toBeUndefined();
   });
 
   it("ctx values win over parent deliveryContext when both are present", async () => {
@@ -202,7 +197,7 @@ describe("spawnSubagentDirect parent-context backfill", () => {
       },
     }));
 
-    const patches = captureSessionsPatchForChild(/^agent:main:subagent:/);
+    const agentCalls = captureAgentCallsForChild(/^agent:main:subagent:/);
 
     const result = await spawnSubagentDirect(
       {
@@ -220,9 +215,9 @@ describe("spawnSubagentDirect parent-context backfill", () => {
 
     expect(result.status).toBe("accepted");
 
-    const initialPatch = patches[0];
-    expect(initialPatch).toBeDefined();
-    expect(initialPatch?.deliveryContext).toMatchObject({
+    const agentCall = agentCalls[0];
+    expect(agentCall).toBeDefined();
+    expect(agentCall).toMatchObject({
       channel: "slack",
       to: "channel:CURRENT",
       threadId: "1776000000.111111",
