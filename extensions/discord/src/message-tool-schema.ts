@@ -39,7 +39,7 @@ const discordComponentSelectSchema = Type.Object({
 });
 
 const discordComponentBlockSchema = Type.Object({
-  type: Type.String(),
+  type: stringEnum(["text", "section", "separator", "actions", "media-gallery", "file"]),
   text: Type.Optional(Type.String()),
   texts: Type.Optional(Type.Array(Type.String())),
   accessory: Type.Optional(
