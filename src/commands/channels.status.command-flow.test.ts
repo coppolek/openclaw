@@ -237,4 +237,12 @@ describe("channelsStatusCommand SecretRef fallback flow", () => {
     expect(joined).not.toContain("secret unavailable in this command path");
     expect(joined).not.toContain("token:config (unavailable)");
   });
+
+  it("throws for invalid timeout values", async () => {
+    const { runtime } = createRuntimeCapture();
+
+    await expect(
+      channelsStatusCommand({ probe: false, timeout: "0" }, runtime as never),
+    ).rejects.toThrow("invalid --timeout: 0");
+  });
 });
