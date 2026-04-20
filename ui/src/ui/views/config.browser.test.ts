@@ -441,6 +441,57 @@ describe("config view", () => {
     );
   });
 
+  it("does not duplicate section title/description in single-section view", () => {
+    const { container } = renderConfigView({
+      activeSection: "gateway",
+      schema: {
+        type: "object",
+        properties: {
+          gateway: {
+            type: "object",
+            properties: {
+              mode: { type: "string" },
+            },
+          },
+        },
+      },
+      formValue: { gateway: { mode: "local" } },
+      originalValue: { gateway: { mode: "local" } },
+    });
+
+    const hero = container.querySelector(".config-section-hero");
+    expect(hero).not.toBeNull();
+    expect(container.querySelector(".config-section-card")).not.toBeNull();
+    expect(container.querySelector(".config-section-card__header")).toBeNull();
+  });
+
+  it("renders per-card headers when no single section is active", () => {
+    const { container } = renderConfigView({
+      activeSection: null,
+      schema: {
+        type: "object",
+        properties: {
+          gateway: {
+            type: "object",
+            properties: {
+              mode: { type: "string" },
+            },
+          },
+          agents: {
+            type: "object",
+            properties: {},
+          },
+        },
+      },
+      formValue: { gateway: { mode: "local" } },
+      originalValue: { gateway: { mode: "local" } },
+    });
+
+    expect(container.querySelector(".config-section-hero")).toBeNull();
+    const headers = container.querySelectorAll(".config-section-card__header");
+    expect(headers.length).toBeGreaterThanOrEqual(1);
+  });
+
   it("keeps malformed non-SecretRef object values editable when raw mode is unavailable", () => {
     const onFormPatch = vi.fn();
     const { container } = renderConfigView({

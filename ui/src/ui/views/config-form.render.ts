@@ -433,6 +433,10 @@ export function renderConfigForm(props: ConfigFormProps) {
     `;
   }
 
+  // Hide the per-card header in single-section/subsection views because the
+  // enclosing page already renders the same title/description in its hero.
+  const hideCardHeader = Boolean(activeSection);
+
   const renderSectionCard = (params: {
     id: string;
     sectionKey: string;
@@ -443,15 +447,19 @@ export function renderConfigForm(props: ConfigFormProps) {
     path: Array<string | number>;
   }) => html`
     <section class="config-section-card" id=${params.id}>
-      <div class="config-section-card__header">
-        <span class="config-section-card__icon">${getSectionIcon(params.sectionKey)}</span>
-        <div class="config-section-card__titles">
-          <h3 class="config-section-card__title">${params.label}</h3>
-          ${params.description
-            ? html`<p class="config-section-card__desc">${params.description}</p>`
-            : nothing}
-        </div>
-      </div>
+      ${hideCardHeader
+        ? nothing
+        : html`
+            <div class="config-section-card__header">
+              <span class="config-section-card__icon">${getSectionIcon(params.sectionKey)}</span>
+              <div class="config-section-card__titles">
+                <h3 class="config-section-card__title">${params.label}</h3>
+                ${params.description
+                  ? html`<p class="config-section-card__desc">${params.description}</p>`
+                  : nothing}
+              </div>
+            </div>
+          `}
       <div class="config-section-card__content">
         ${renderNode({
           schema: params.node,
