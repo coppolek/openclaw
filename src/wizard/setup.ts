@@ -506,6 +506,11 @@ export async function runSetupWizard(
   if (authChoice === undefined) {
     throw new WizardCancelledError("auth choice is required");
   }
+  if (typeof authChoice === "string" && authChoice.trim() === "") {
+    runtime.error("Invalid --auth-choice. Use a supported auth choice or omit the flag.");
+    runtime.exit(1);
+    return;
+  }
 
   if (authChoice === "custom-api-key") {
     const { promptCustomApiConfig } = await import("../commands/onboard-custom.js");
@@ -540,8 +545,6 @@ export async function runSetupWizard(
       const { warnIfModelConfigLooksOff } = await loadAuthChoiceModule();
       await warnIfModelConfigLooksOff(nextConfig, prompter);
     }
-  } else if (!authChoice) {
-    return;
   } else {
     const [
       { applyAuthChoice, resolvePreferredProviderForAuthChoice, warnIfModelConfigLooksOff },
