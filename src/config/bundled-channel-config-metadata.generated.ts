@@ -15118,6 +15118,9 @@ export const GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA = [
                   additionalProperties: false,
                 },
               },
+              admin: {
+                type: "string",
+              },
             },
             additionalProperties: false,
           },
@@ -15369,6 +15372,9 @@ export const GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA = [
                         additionalProperties: false,
                       },
                     },
+                    admin: {
+                      type: "string",
+                    },
                   },
                   additionalProperties: false,
                 },
@@ -15488,6 +15494,14 @@ export const GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA = [
       configWrites: {
         label: "WhatsApp Config Writes",
         help: "Allow WhatsApp to write config in response to channel events/commands (default: true).",
+      },
+      groups: {
+        label: "WhatsApp Groups",
+        help: "Per-group configuration for WhatsApp groups. Configure admin, mention requirements, and tool policies.",
+      },
+      "groups.*.admin": {
+        label: "Group Admin",
+        help: "WhatsApp number (E.164 format) of the group administrator. Only the admin can run commands and doesn't need to mention the bot.",
       },
     },
     unsupportedSecretRefSurfacePatterns: [
