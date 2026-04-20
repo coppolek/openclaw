@@ -534,6 +534,7 @@ public final class OpenClawChatViewModel {
                     mimeType: att.mimeType,
                     fileName: att.fileName,
                     content: AnyCodable(att.content),
+                    contentCodingKey: .data,
                     id: nil,
                     name: nil,
                     arguments: nil))
