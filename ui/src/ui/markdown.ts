@@ -66,6 +66,7 @@ const MARKDOWN_CHAR_LIMIT = 140_000;
 const MARKDOWN_PARSE_LIMIT = 40_000;
 const MARKDOWN_CACHE_LIMIT = 200;
 const MARKDOWN_CACHE_MAX_CHARS = 50_000;
+const ESCAPED_FENCE_STORM_THRESHOLD = 8;
 const INLINE_DATA_IMAGE_RE = /^data:image\/[a-z0-9.+-]+;base64,/i;
 const markdownCache = new Map<string, string>();
 const TAIL_LINK_BLUR_CLASS = "chat-link-tail-blur";
@@ -501,6 +502,14 @@ export function toSanitizedMarkdownHtml(markdown: string): string {
     }
     return sanitized;
   }
+  if (hasEscapedFenceStorm(truncated.text)) {
+    const html = renderEscapedPlainTextHtml(`${truncated.text}${suffix}`);
+    const sanitized = DOMPurify.sanitize(html, sanitizeOptions);
+    if (input.length <= MARKDOWN_CACHE_MAX_CHARS) {
+      setCachedMarkdown(input, sanitized);
+    }
+    return sanitized;
+  }
   let rendered: string;
   try {
     rendered = md.render(`${truncated.text}${suffix}`);
@@ -519,4 +528,17 @@ export function toSanitizedMarkdownHtml(markdown: string): string {
 
 function renderEscapedPlainTextHtml(value: string): string {
   return `<div class="markdown-plain-text-fallback">${escapeHtml(value.replace(/\r\n?/g, "\n"))}</div>`;
+}
+
+function hasEscapedFenceStorm(value: string): boolean {
+  let count = 0;
+  let index = 0;
+  while ((index = value.indexOf("\\n```", index)) !== -1) {
+    count += 1;
+    if (count >= ESCAPED_FENCE_STORM_THRESHOLD) {
+      return true;
+    }
+    index += 5;
+  }
+  return false;
 }
