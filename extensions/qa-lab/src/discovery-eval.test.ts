@@ -1,9 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   hasDiscoveryLabels,
   reportsDiscoveryScopeLeak,
   reportsMissingDiscoveryFiles,
 } from "./discovery-eval.js";
+
+async function importFreshDiscoveryEval(tag: string) {
+  const modulePath = `./discovery-eval.js?${tag}` as string;
+  return (await import(/* @vite-ignore */ modulePath)) as typeof import("./discovery-eval.js");
+}
 
 describe("qa discovery evaluation", () => {
   it("accepts rich discovery reports that explicitly confirm all required files were read", () => {
@@ -97,5 +102,65 @@ Final QA tally update: all mandatory scenarios resolved. QA run complete.
     expect(hasDiscoveryLabels(report)).toBe(true);
     expect(reportsMissingDiscoveryFiles(report)).toBe(false);
     expect(reportsDiscoveryScopeLeak(report)).toBe(true);
+  });
+
+  it("falls back to default discovery refs when the scenario pack is unavailable at import time", async () => {
+    vi.resetModules();
+    vi.doMock("./scenario-catalog.js", () => ({
+      readQaScenarioExecutionConfig: () => {
+        throw new Error("qa scenario pack not found: qa/scenarios/index.md");
+      },
+    }));
+
+    try {
+      const mod = await importFreshDiscoveryEval("missing-pack");
+      const report = `
+Worked
+- Read all three requested files: repo/qa/scenarios/index.md, repo/extensions/qa-lab/src/suite.ts, and repo/docs/help/testing.md.
+Failed
+- None.
+Blocked
+- Runtime execution not attempted here.
+Follow-up
+- Run the live suite next.
+`.trim();
+
+      expect(mod.hasDiscoveryLabels(report)).toBe(true);
+      expect(mod.reportsMissingDiscoveryFiles(report)).toBe(false);
+      expect(mod.reportsDiscoveryScopeLeak(report)).toBe(false);
+    } finally {
+      vi.doUnmock("./scenario-catalog.js");
+      vi.resetModules();
+    }
+  });
+
+  it("rethrows non-missing scenario pack failures when resolving required refs", async () => {
+    vi.resetModules();
+    vi.doMock("./scenario-catalog.js", () => ({
+      readQaScenarioExecutionConfig: () => {
+        throw new Error("qa scenario pack missing ```yaml qa-pack fence in qa/scenarios/index.md");
+      },
+    }));
+
+    try {
+      const mod = await importFreshDiscoveryEval("invalid-pack");
+      const report = `
+Worked
+- Read all three requested files: repo/qa/scenarios/index.md, repo/extensions/qa-lab/src/suite.ts, and repo/docs/help/testing.md.
+Failed
+- None.
+Blocked
+- Runtime execution not attempted here.
+Follow-up
+- Run the live suite next.
+`.trim();
+
+      expect(() => mod.reportsMissingDiscoveryFiles(report)).toThrow(
+        "qa scenario pack missing ```yaml qa-pack fence in qa/scenarios/index.md",
+      );
+    } finally {
+      vi.doUnmock("./scenario-catalog.js");
+      vi.resetModules();
+    }
   });
 });
