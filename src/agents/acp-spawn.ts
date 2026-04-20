@@ -40,6 +40,7 @@ import { resolveSessionTranscriptFile } from "../config/sessions/transcript.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { callGateway } from "../gateway/call.js";
+import { loadSessionEntry } from "../gateway/session-utils.js";
 import { areHeartbeatsEnabled } from "../infra/heartbeat-wake.js";
 import { resolveConversationIdFromTargets } from "../infra/outbound/conversation-id.js";
 import { normalizeConversationTargetRef } from "../infra/outbound/session-binding-normalization.js";
@@ -686,23 +687,14 @@ function resolveAcpSpawnRequesterState(params: {
     accountId: params.ctx.agentAccountId,
     threadId: params.ctx.agentThreadId,
   });
-  // Best-effort parent lookup; defensive against test harnesses or future
-  // callers that don't provide a writable session store.
+  // Best-effort parent lookup. Use the gateway session-target helper so
+  // display aliases (e.g. `main`) resolve to the canonical internal key in
+  // the correct agent's store — gating on `parseAgentSessionKey` directly
+  // would skip backfill for any caller that passes a display key.
   let parentDelivery: ReturnType<typeof deliveryContextFromSession> = undefined;
-  if (params.parentSessionKey && requesterAgentId) {
+  if (params.parentSessionKey) {
     try {
-      const parentStorePath = resolveStorePath(params.cfg.session?.store, {
-        agentId: requesterAgentId,
-      });
-      const parentStore = loadSessionStore(parentStorePath);
-      // Resolve main-alias → internal key before indexing the store, matching
-      // spawnSubagentDirect's lookup path; callers pass the display key (e.g.
-      // `main`) via ctx.agentSessionKey.
-      const parentInternalKey = resolveRequesterInternalSessionKey({
-        cfg: params.cfg,
-        requesterSessionKey: params.parentSessionKey,
-      });
-      parentDelivery = deliveryContextFromSession(parentStore[parentInternalKey]);
+      parentDelivery = deliveryContextFromSession(loadSessionEntry(params.parentSessionKey).entry);
     } catch {
       parentDelivery = undefined;
     }
@@ -715,7 +707,18 @@ function resolveAcpSpawnRequesterState(params: {
     Boolean(ctxDeliveryHint?.to) &&
     Boolean(parentDelivery?.to) &&
     ctxDeliveryHint?.to !== parentDelivery?.to;
-  const effectiveParentDelivery = toMismatch ? undefined : parentDelivery;
+  // Parent entries with a `threadId` but no `to` cannot be attributed to any
+  // specific conversation. If the current request has its own `to`, folding
+  // that orphan threadId in would route the child into an unrelated stale
+  // thread for the new target. Strip just the threadId and keep the rest
+  // (channel, accountId) so other fields still backfill normally.
+  const threadOnlyParentMismatch =
+    Boolean(ctxDeliveryHint?.to) && !parentDelivery?.to && parentDelivery?.threadId != null;
+  const effectiveParentDelivery = toMismatch
+    ? undefined
+    : threadOnlyParentMismatch
+      ? { ...parentDelivery, threadId: undefined }
+      : parentDelivery;
   const effectiveRequesterDelivery =
     mergeDeliveryContext(ctxDeliveryHint, effectiveParentDelivery) ?? ctxDeliveryHint;
   // Derive thread-context from merged delivery so callers that backfill

@@ -495,7 +495,18 @@ export async function spawnSubagentDirect(
     Boolean(ctxDeliveryHint?.to) &&
     Boolean(parentDelivery?.to) &&
     ctxDeliveryHint?.to !== parentDelivery?.to;
-  const effectiveParentDelivery = toMismatch ? undefined : parentDelivery;
+  // Parent entries with a `threadId` but no `to` cannot be attributed to any
+  // specific conversation. If the current request has its own `to`, folding
+  // that orphan threadId in would route the child into an unrelated stale
+  // thread for the new target. Strip just the threadId and keep the rest
+  // (channel, accountId) so other fields still backfill normally.
+  const threadOnlyParentMismatch =
+    Boolean(ctxDeliveryHint?.to) && !parentDelivery?.to && parentDelivery?.threadId != null;
+  const effectiveParentDelivery = toMismatch
+    ? undefined
+    : threadOnlyParentMismatch
+      ? { ...parentDelivery, threadId: undefined }
+      : parentDelivery;
   const effectiveRequesterDelivery =
     mergeDeliveryContext(ctxDeliveryHint, effectiveParentDelivery) ?? ctxDeliveryHint;
   const requesterOrigin = resolveRequesterOriginForChild({

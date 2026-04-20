@@ -227,6 +227,54 @@ describe("spawnSubagentDirect parent-context backfill", () => {
     expect(agentCall?.threadId).toBeUndefined();
   });
 
+  it("does not inherit parent threadId when parent has threadId but no `to`", async () => {
+    // Parent entry is a stale thread-only remnant (channel+threadId, no `to`).
+    // A root-level spawn with its own explicit `to` must not inherit the
+    // orphan threadId; otherwise the child would be routed into an unrelated
+    // thread. The `to`-mismatch guard alone can't catch this because it only
+    // fires when BOTH sides have a non-empty `to`.
+    ({ spawnSubagentDirect, resetSubagentRegistryForTests } = await loadSubagentSpawnModuleForTest({
+      callGatewayMock: hoisted.callGatewayMock,
+      loadConfig: () => hoisted.configOverride,
+      updateSessionStoreMock: hoisted.updateSessionStoreMock,
+      resolveAgentConfig: () => undefined,
+      resolveSubagentSpawnModelSelection: () => "openai-codex/gpt-5.4",
+      resolveSandboxRuntimeStatus: () => ({ sandboxed: false }),
+      sessionStorePath: "/tmp/subagent-spawn-backfill.json",
+      resetModules: true,
+      parentSessionEntry: {
+        deliveryContext: {
+          channel: "slack",
+          threadId: "1700000000.000000",
+        },
+      },
+    }));
+
+    const agentCalls = captureAgentCallsForChild(/^agent:main:subagent:/);
+
+    const result = await spawnSubagentDirect(
+      {
+        task: "do thing",
+        runTimeoutSeconds: 1,
+        cleanup: "keep",
+      },
+      {
+        agentSessionKey: "main",
+        agentChannel: "slack",
+        agentTo: "channel:C999",
+        // No agentThreadId; must not inherit the orphan parent threadId.
+      },
+    );
+
+    expect(result.status).toBe("accepted");
+
+    const agentCall = agentCalls[0];
+    expect(agentCall).toBeDefined();
+    expect(agentCall?.channel).toBe("slack");
+    expect(agentCall?.to).toBe("channel:C999");
+    expect(agentCall?.threadId).toBeUndefined();
+  });
+
   it("ctx values win over parent deliveryContext when both are present", async () => {
     ({ spawnSubagentDirect, resetSubagentRegistryForTests } = await loadSubagentSpawnModuleForTest({
       callGatewayMock: hoisted.callGatewayMock,
