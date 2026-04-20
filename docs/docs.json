@@ -1209,7 +1209,8 @@
                       "tools/ollama-search",
                       "tools/perplexity-search",
                       "tools/searxng-search",
-                      "tools/tavily"
+                      "tools/tavily",
+                      "tools/yep-search"
                     ]
                   },
                   "tools/btw",
