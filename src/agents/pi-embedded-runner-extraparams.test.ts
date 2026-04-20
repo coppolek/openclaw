@@ -1963,6 +1963,40 @@ describe("applyExtraParamsToAgent", () => {
     expect(effectiveExtraParams.cached_content).toBeUndefined();
   });
 
+  it("keeps model-level service tier alias precedence over defaults", () => {
+    const effectiveExtraParams = resolvePreparedExtraParams({
+      cfg: undefined,
+      provider: "openai",
+      modelId: "gpt-5",
+      resolvedExtraParams: {
+        serviceTier: "auto",
+      },
+      modelExtraParams: {
+        service_tier: "priority",
+      },
+    });
+
+    expect(effectiveExtraParams.serviceTier).toBe("priority");
+    expect(effectiveExtraParams.service_tier).toBeUndefined();
+  });
+
+  it("keeps model-level fast mode alias precedence over defaults", () => {
+    const effectiveExtraParams = resolvePreparedExtraParams({
+      cfg: undefined,
+      provider: "openai",
+      modelId: "gpt-5",
+      resolvedExtraParams: {
+        fastMode: false,
+      },
+      modelExtraParams: {
+        fast_mode: true,
+      },
+    });
+
+    expect(effectiveExtraParams.fastMode).toBe(true);
+    expect(effectiveExtraParams.fast_mode).toBeUndefined();
+  });
+
   it("reads sanitized model-level extraParams from runtime model objects", () => {
     const resolved = resolveModelConfigExtraParams({
       id: "google/gemma-3-27b-it",

@@ -153,15 +153,42 @@ export function resolvePreparedExtraParams(params: {
     ...modelExtraParams,
     ...override,
   };
-  const resolvedCachedContent = resolveAliasedParamValue(
-    [resolvedExtraParams, modelExtraParams, override],
-    "cached_content",
-    "cachedContent",
-  );
-  if (resolvedCachedContent !== undefined) {
-    merged.cachedContent = resolvedCachedContent;
-    delete merged.cached_content;
-  }
+  const aliasSources = [resolvedExtraParams, modelExtraParams, override];
+  applyAliasedParamCanonicalization({
+    merged,
+    sources: aliasSources,
+    snakeCaseKey: "cached_content",
+    camelCaseKey: "cachedContent",
+    canonicalKey: "cachedContent",
+  });
+  applyAliasedParamCanonicalization({
+    merged,
+    sources: aliasSources,
+    snakeCaseKey: "service_tier",
+    camelCaseKey: "serviceTier",
+    canonicalKey: "serviceTier",
+  });
+  applyAliasedParamCanonicalization({
+    merged,
+    sources: aliasSources,
+    snakeCaseKey: "fast_mode",
+    camelCaseKey: "fastMode",
+    canonicalKey: "fastMode",
+  });
+  applyAliasedParamCanonicalization({
+    merged,
+    sources: aliasSources,
+    snakeCaseKey: "text_verbosity",
+    camelCaseKey: "textVerbosity",
+    canonicalKey: "text_verbosity",
+  });
+  applyAliasedParamCanonicalization({
+    merged,
+    sources: aliasSources,
+    snakeCaseKey: "parallel_tool_calls",
+    camelCaseKey: "parallelToolCalls",
+    canonicalKey: "parallel_tool_calls",
+  });
   return (
     providerRuntimeDeps.prepareProviderExtraParams({
       provider: params.provider,
@@ -339,6 +366,30 @@ function resolveAliasedParamValue(
     seen = true;
   }
   return seen ? resolved : undefined;
+}
+
+function applyAliasedParamCanonicalization(params: {
+  merged: Record<string, unknown>;
+  sources: Array<Record<string, unknown> | undefined>;
+  snakeCaseKey: string;
+  camelCaseKey: string;
+  canonicalKey: string;
+}): void {
+  const resolvedValue = resolveAliasedParamValue(
+    params.sources,
+    params.snakeCaseKey,
+    params.camelCaseKey,
+  );
+  if (resolvedValue === undefined) {
+    return;
+  }
+  params.merged[params.canonicalKey] = resolvedValue;
+  if (params.snakeCaseKey !== params.canonicalKey) {
+    delete params.merged[params.snakeCaseKey];
+  }
+  if (params.camelCaseKey !== params.canonicalKey) {
+    delete params.merged[params.camelCaseKey];
+  }
 }
 
 function createParallelToolCallsWrapper(
