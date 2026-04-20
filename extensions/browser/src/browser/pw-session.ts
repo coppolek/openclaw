@@ -1,3 +1,6 @@
+import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import type {
   Browser,
@@ -30,7 +33,9 @@ import {
   InvalidBrowserNavigationUrlError,
   withBrowserNavigationPolicy,
 } from "./navigation-guard.js";
+import { DEFAULT_DOWNLOAD_DIR } from "./paths.js";
 import { withPageScopedCdpClient } from "./pw-session.page-cdp.js";
+import { sanitizeUntrustedFileName } from "./safe-filename.js";
 
 export type BrowserConsoleMessage = {
   type: string;
@@ -60,6 +65,10 @@ export type BrowserNetworkRequest = {
 type SnapshotForAIResult = { full: string; incremental?: string };
 type SnapshotForAIOptions = { timeout?: number; track?: string };
 
+function buildManagedDownloadPath(fileName: string): string {
+  return path.join(DEFAULT_DOWNLOAD_DIR, `${crypto.randomUUID()}-${fileName}`);
+}
+
 export type WithSnapshotForAI = {
   _snapshotForAI?: (options?: SnapshotForAIOptions) => Promise<SnapshotForAIResult>;
 };
@@ -85,6 +94,7 @@ type PageState = {
   armIdUpload: number;
   armIdDialog: number;
   armIdDownload: number;
+  downloadWaiterDepth: number;
   /**
    * Role-based refs from the last role snapshot (e.g. e1/e2).
    * Mode "role" refs are generated from ariaSnapshot and resolved via getByRole.
@@ -319,6 +329,7 @@ export function ensurePageState(page: Page): PageState {
     armIdUpload: 0,
     armIdDialog: 0,
     armIdDownload: 0,
+    downloadWaiterDepth: 0,
   };
   pageStates.set(page, state);
 
@@ -386,6 +397,24 @@ export function ensurePageState(page: Page): PageState {
       }
       rec.failureText = req.failure()?.errorText;
       rec.ok = false;
+    });
+    page.on("download", (download) => {
+      if (state.downloadWaiterDepth > 0) {
+        return;
+      }
+      const suggested = sanitizeUntrustedFileName(
+        download.suggestedFilename?.() || "download.bin",
+        "download.bin",
+      );
+      const managedPath = buildManagedDownloadPath(suggested);
+      const managedSave = (async () => {
+        await fs.mkdir(DEFAULT_DOWNLOAD_DIR, { recursive: true });
+        await download.saveAs(managedPath);
+        return managedPath;
+      })();
+      managedSave.catch(() => {});
+      const patched = download as typeof download & { path?: () => Promise<string> };
+      patched.path = async () => await managedSave;
     });
     page.on("close", () => {
       pageStates.delete(page);

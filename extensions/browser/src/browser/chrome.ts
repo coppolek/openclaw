@@ -49,6 +49,7 @@ import {
   DEFAULT_OPENCLAW_BROWSER_COLOR,
   DEFAULT_OPENCLAW_BROWSER_PROFILE_NAME,
 } from "./constants.js";
+import { DEFAULT_DOWNLOAD_DIR } from "./paths.js";
 
 const log = createSubsystemLogger("browser").child("chrome");
 
@@ -272,11 +273,13 @@ export async function launchOpenClawChrome(
 
   const userDataDir = resolveOpenClawUserDataDir(profile.name);
   fs.mkdirSync(userDataDir, { recursive: true });
+  fs.mkdirSync(DEFAULT_DOWNLOAD_DIR, { recursive: true });
 
   const needsDecorate = !isProfileDecorated(
     userDataDir,
     profile.name,
     (profile.color ?? DEFAULT_OPENCLAW_BROWSER_COLOR).toUpperCase(),
+    { downloadDir: DEFAULT_DOWNLOAD_DIR },
   );
 
   // First launch to create preference files if missing, then decorate and relaunch.
@@ -336,6 +339,7 @@ export async function launchOpenClawChrome(
       decorateOpenClawProfile(userDataDir, {
         name: profile.name,
         color: profile.color,
+        downloadDir: DEFAULT_DOWNLOAD_DIR,
       });
       log.info(`🦞 openclaw browser profile decorated (${profile.color})`);
     } catch (err) {
