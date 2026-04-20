@@ -600,14 +600,17 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
             runtime.error?.(
               `slack socket mode failed to start due to non-recoverable auth error — skipping channel (${formatUnknownError(err)})`,
             );
-            throw err;
+            return;
           }
           reconnectAttempts += 1;
           if (
             SLACK_SOCKET_RECONNECT_POLICY.maxAttempts > 0 &&
             reconnectAttempts >= SLACK_SOCKET_RECONNECT_POLICY.maxAttempts
           ) {
-            throw err;
+            runtime.error?.(
+              `slack socket mode failed to start after ${reconnectAttempts} attempts — stopping channel (${formatUnknownError(err)})`,
+            );
+            return;
           }
           const delayMs = computeBackoff(SLACK_SOCKET_RECONNECT_POLICY, reconnectAttempts);
           runtime.error?.(
@@ -636,9 +639,7 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
           runtime.error?.(
             `slack socket mode disconnected due to non-recoverable auth error — skipping channel (${formatUnknownError(disconnect.error)})`,
           );
-          throw disconnect.error instanceof Error
-            ? disconnect.error
-            : new Error(formatUnknownError(disconnect.error));
+          return;
         }
 
         reconnectAttempts += 1;
@@ -646,9 +647,10 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
           SLACK_SOCKET_RECONNECT_POLICY.maxAttempts > 0 &&
           reconnectAttempts >= SLACK_SOCKET_RECONNECT_POLICY.maxAttempts
         ) {
-          throw new Error(
+          runtime.error?.(
             `Slack socket mode reconnect max attempts reached (${reconnectAttempts}/${SLACK_SOCKET_RECONNECT_POLICY.maxAttempts}) after ${disconnect.event}`,
           );
+          return;
         }
 
         const delayMs = computeBackoff(SLACK_SOCKET_RECONNECT_POLICY, reconnectAttempts);
