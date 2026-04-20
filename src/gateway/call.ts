@@ -510,11 +510,14 @@ async function executeGatewayRequestWithScopes<T>(params: {
             timeoutMs: opts.timeoutMs,
           });
           ignoreClose = true;
+          // Wait for client cleanup to complete before resolving, to prevent
+          // CLI exit hang (#66227). Use a short timeout so we don't block forever.
+          // Use .catch(() => undefined) so timeout errors don't turn a success into a failure.
+          await client.stopAndWait({ timeoutMs: 500 }).catch(() => undefined);
           stop(undefined, result);
-          client.stop();
         } catch (err) {
           ignoreClose = true;
-          client.stop();
+          await client.stopAndWait({ timeoutMs: 500 }).catch(() => undefined);
           stop(err as Error);
         }
       },
