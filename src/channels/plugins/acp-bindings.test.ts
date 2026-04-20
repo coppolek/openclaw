@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildConfiguredAcpSessionKey } from "../../acp/persistent-bindings.types.js";
 import { ensureConfiguredBindingBuiltinsRegistered } from "./configured-binding-builtins.js";
 import * as bindingRegistry from "./configured-binding-registry.js";
@@ -234,4 +234,31 @@ describe("configured binding registry", () => {
 
     expect(plugin.bindings?.compileConfiguredBinding).toHaveBeenCalledTimes(2);
   });
+});
+
+describe("ensureConfiguredBindingRouteReady timeout", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it(
+    "returns {ok: false} after 30 seconds when ensureConfiguredBindingTargetReady hangs",
+    async () => {
+      vi.useFakeTimers();
+
+      const bindingTargets = await import("./binding-targets.js");
+      vi.spyOn(bindingTargets, "ensureConfiguredBindingTargetReady").mockImplementation(
+        () => new Promise<never>(() => {}),
+      );
+
+      const { ensureConfiguredBindingRouteReady } = await import("./binding-routing.js");
+
+      const resultP = ensureConfiguredBindingRouteReady({ cfg: {} as never, bindingResolution: null });
+      await vi.advanceTimersByTimeAsync(30_000);
+      const result = await resultP;
+      expect(result).toEqual({ ok: false, error: expect.stringContaining("timed out") });
+    },
+    35_000,
+  );
 });
