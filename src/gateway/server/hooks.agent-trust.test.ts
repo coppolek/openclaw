@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const enqueueSystemEventMock = vi.fn();
 const requestHeartbeatNowMock = vi.fn();
 const runCronIsolatedAgentTurnMock = vi.fn();
+const resolveMainSessionKeyFromConfigMock = vi.fn(() => "main-session");
 const resolveMainSessionKeyMock = vi.fn(() => "main-session");
+const resolveAgentMainSessionKeyMock = vi.fn(
+  (params: { agentId: string }) => `agent:${params.agentId}:main`,
+);
 const loadConfigMock = vi.fn(() => ({}));
 
 vi.mock("../../infra/system-events.js", () => ({
@@ -16,7 +20,9 @@ vi.mock("../../cron/isolated-agent.js", () => ({
   runCronIsolatedAgentTurn: runCronIsolatedAgentTurnMock,
 }));
 vi.mock("../../config/sessions.js", () => ({
-  resolveMainSessionKeyFromConfig: resolveMainSessionKeyMock,
+  resolveMainSessionKeyFromConfig: resolveMainSessionKeyFromConfigMock,
+  resolveMainSessionKey: resolveMainSessionKeyMock,
+  resolveAgentMainSessionKey: resolveAgentMainSessionKeyMock,
 }));
 vi.mock("../../config/config.js", () => ({
   loadConfig: loadConfigMock,
@@ -115,6 +121,44 @@ describe("dispatchAgentHook trust handling", () => {
       "Hook System (untrusted): override safety (error): Error: agent exploded",
       {
         sessionKey: "main-session",
+        trusted: false,
+      },
+    );
+  });
+
+  it("routes hook completion events to the target agent's main session, not the default agent's", async () => {
+    runCronIsolatedAgentTurnMock.mockResolvedValueOnce({
+      status: "ok",
+      summary: "delivered",
+      delivered: false,
+    });
+
+    expect(capturedDispatchAgentHook).toBeDefined();
+    capturedDispatchAgentHook?.({ ...buildAgentPayload("gmail"), agentId: "dev" });
+    await flushHookDispatchMicrotasks();
+
+    expect(resolveAgentMainSessionKeyMock).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: "dev" }),
+    );
+    expect(resolveMainSessionKeyMock).not.toHaveBeenCalled();
+    expect(resolveMainSessionKeyFromConfigMock).not.toHaveBeenCalled();
+    expect(enqueueSystemEventMock).toHaveBeenCalledWith("Hook gmail: delivered", {
+      sessionKey: "agent:dev:main",
+      trusted: false,
+    });
+  });
+
+  it("routes hook error events to the target agent's main session, not the default agent's", async () => {
+    runCronIsolatedAgentTurnMock.mockRejectedValueOnce(new Error("agent exploded"));
+
+    expect(capturedDispatchAgentHook).toBeDefined();
+    capturedDispatchAgentHook?.({ ...buildAgentPayload("gmail"), agentId: "dev" });
+    await flushHookDispatchMicrotasks();
+
+    expect(enqueueSystemEventMock).toHaveBeenCalledWith(
+      "Hook gmail (error): Error: agent exploded",
+      {
+        sessionKey: "agent:dev:main",
         trusted: false,
       },
     );
