@@ -125,6 +125,7 @@ export function resolvePreparedExtraParams(params: {
   cfg: OpenClawConfig | undefined;
   provider: string;
   modelId: string;
+  modelExtraParams?: Record<string, unknown>;
   extraParamsOverride?: Record<string, unknown>;
   thinkingLevel?: ThinkLevel;
   agentId?: string;
@@ -148,6 +149,7 @@ export function resolvePreparedExtraParams(params: {
       : undefined;
   const merged = {
     ...sanitizeExtraParamsRecord(resolvedExtraParams),
+    ...sanitizeExtraParamsRecord(params.modelExtraParams),
     ...override,
   };
   const resolvedCachedContent = resolveAliasedParamValue(
@@ -185,6 +187,19 @@ function sanitizeExtraParamsRecord(
       ([key]) => key !== "__proto__" && key !== "prototype" && key !== "constructor",
     ),
   );
+}
+
+export function resolveModelConfigExtraParams(
+  model: unknown,
+): Record<string, unknown> | undefined {
+  if (!model || typeof model !== "object" || Array.isArray(model)) {
+    return undefined;
+  }
+  const rawExtraParams = (model as { extraParams?: unknown }).extraParams;
+  if (!rawExtraParams || typeof rawExtraParams !== "object" || Array.isArray(rawExtraParams)) {
+    return undefined;
+  }
+  return sanitizeExtraParamsRecord(rawExtraParams as Record<string, unknown>);
 }
 
 function shouldApplyDefaultOpenAIGptRuntimeParams(params: {
@@ -451,6 +466,7 @@ export function applyExtraParamsToAgent(
   workspaceDir?: string,
   model?: ProviderRuntimeModel,
   agentDir?: string,
+  modelExtraParams?: Record<string, unknown>,
 ): { effectiveExtraParams: Record<string, unknown> } {
   const resolvedExtraParams = resolveExtraParams({
     cfg,
@@ -468,6 +484,7 @@ export function applyExtraParamsToAgent(
     cfg,
     provider,
     modelId,
+    modelExtraParams,
     extraParamsOverride,
     thinkingLevel,
     agentId,
