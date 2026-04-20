@@ -45,6 +45,22 @@ describe("config schema regressions", () => {
     expect(res.success).toBe(true);
   });
 
+  it("accepts WhatsApp group admin config at exact-group and wildcard scope", () => {
+    const res = WhatsAppConfigSchema.safeParse({
+      groups: {
+        "*": {
+          admin: "+15550001111",
+        },
+        "1203630@g.us": {
+          requireMention: true,
+          admin: "+15550002222",
+        },
+      },
+    });
+
+    expect(res.success).toBe(true);
+  });
+
   it("keeps inherited WhatsApp account defaults unset at account scope", () => {
     const res = WhatsAppConfigSchema.safeParse({
       dmPolicy: "allowlist",

@@ -22,6 +22,7 @@ const WhatsAppGroupEntrySchema = z
     requireMention: z.boolean().optional(),
     tools: ToolPolicySchema,
     toolsBySender: ToolPolicyBySenderSchema,
+    admin: z.string().optional(),
   })
   .strict()
   .optional();
