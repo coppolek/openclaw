@@ -6,6 +6,7 @@ Docs: https://docs.openclaw.ai
 
 ### Changes
 
+- Security/opengrep: add a GHSA detector-review pipeline that compiles per-advisory OpenGrep rules into precise and broad super-configs under `security/opengrep/`, plus two manual-dispatch GitHub Actions workflows that scan `src/` and upload SARIF to GitHub Code Scanning [AI-assisted].
 - Plugins/tests: reuse plugin loader alias and Jiti config resolution across repeated same-context loads, reducing import-heavy test overhead. (#69316) Thanks @amknight.
 - Cron: split runtime execution state into `jobs-state.json` so `jobs.json` stays stable for git-tracked job definitions. (#63105) Thanks @Feelw00.
 - Agents/compaction: send opt-in start and completion notices during context compaction. (#67830) Thanks @feniix.
