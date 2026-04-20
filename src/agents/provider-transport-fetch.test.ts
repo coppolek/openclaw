@@ -212,7 +212,7 @@ describe("buildGuardedModelFetch", () => {
     expect(headers.get("authorization")).toBe("Bearer override-token");
   });
 
-  it("keeps configured request headers ahead of caller header collisions", async () => {
+  it("lets request-time headers override non-protected configured defaults", async () => {
     resolveProviderRequestPolicyConfigMock.mockReturnValue({
       allowPrivateNetwork: false,
       headers: {
@@ -254,9 +254,49 @@ describe("buildGuardedModelFetch", () => {
       init?: RequestInit;
     };
     const headers = new Headers(request.init?.headers);
-    expect(headers.get("authorization")).toBe("Bearer configured-token");
-    expect(headers.get("x-tenant")).toBe("configured-tenant");
-    expect(headers.get("x-trace")).toBe("configured-trace");
+    expect(headers.get("authorization")).toBe("Bearer caller-token");
+    expect(headers.get("x-tenant")).toBe("caller-tenant");
+    expect(headers.get("x-trace")).toBe("caller-trace");
     expect(headers.get("x-call")).toBe("1");
+  });
+
+  it("lets request-time beta headers override configured request header defaults", async () => {
+    resolveProviderRequestPolicyConfigMock.mockReturnValue({
+      allowPrivateNetwork: false,
+      headers: {
+        "anthropic-beta": "configured-beta",
+      },
+      policy: {
+        attributionHeaders: {},
+      },
+      auth: {
+        configured: false,
+        mode: "provider-default",
+        injectAuthorizationHeader: false,
+      },
+    } as never);
+
+    const { buildGuardedModelFetch } = await import("./provider-transport-fetch.js");
+    const model = {
+      id: "claude-sonnet-4-6",
+      provider: "anthropic",
+      api: "anthropic-messages",
+      baseUrl: "https://api.anthropic.com/v1",
+    } as unknown as Model<"anthropic-messages">;
+
+    const fetcher = buildGuardedModelFetch(model);
+    await fetcher("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "anthropic-beta": "runtime-beta",
+      },
+      body: '{"messages":[]}',
+    });
+
+    const request = fetchWithSsrFGuardMock.mock.calls[0]?.[0] as {
+      init?: RequestInit;
+    };
+    const headers = new Headers(request.init?.headers);
+    expect(headers.get("anthropic-beta")).toBe("runtime-beta");
   });
 });
