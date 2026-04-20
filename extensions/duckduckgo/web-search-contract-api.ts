@@ -9,6 +9,7 @@ export function createDuckDuckGoWebSearchProvider(): WebSearchProviderPlugin {
     label: "DuckDuckGo Search (experimental)",
     hint: "Free web search fallback with no API key required",
     requiresCredential: false,
+    onboardingScopes: ["text-inference"],
     envVars: [],
     placeholder: "(no key needed)",
     signupUrl: "https://duckduckgo.com/",
