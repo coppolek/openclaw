@@ -49,6 +49,13 @@ export type GatewayCronState = {
 
 const CRON_WEBHOOK_TIMEOUT_MS = 10_000;
 
+function resolveCronSessionTargetSessionKey(sessionTarget: string): string | undefined {
+  if (!sessionTarget.startsWith("session:")) {
+    return undefined;
+  }
+  return assertSafeCronSessionTargetId(sessionTarget.slice(8));
+}
+
 function redactWebhookUrl(url: string): string {
   try {
     const parsed = new URL(url);
@@ -333,8 +340,9 @@ export function buildGatewayCronService(params: {
     runIsolatedAgentJob: async ({ job, message, abortSignal }) => {
       const { agentId, cfg: runtimeConfig } = resolveCronAgent(job.agentId);
       let sessionKey = `cron:${job.id}`;
-      if (job.sessionTarget.startsWith("session:")) {
-        sessionKey = assertSafeCronSessionTargetId(job.sessionTarget.slice(8));
+      const sessionTargetKey = resolveCronSessionTargetSessionKey(job.sessionTarget);
+      if (sessionTargetKey) {
+        sessionKey = sessionTargetKey;
       }
       try {
         return await runCronIsolatedAgentTurn({
@@ -470,6 +478,8 @@ export function buildGatewayCronService(params: {
           if (!isBestEffort) {
             const failureMessage = `Cron job "${job.name}" failed: ${evt.error ?? "unknown error"}`;
             const failureDest = resolveFailureDestination(job, params.cfg.cron?.failureDestination);
+            const deliverySessionKey =
+              resolveCronSessionTargetSessionKey(job.sessionTarget) ?? job.sessionKey;
 
             if (failureDest) {
               // Explicit failureDestination configured — use it
@@ -518,7 +528,7 @@ export function buildGatewayCronService(params: {
                     channel: failureDest.channel,
                     to: failureDest.to,
                     accountId: failureDest.accountId,
-                    sessionKey: job.sessionKey,
+                    sessionKey: deliverySessionKey,
                   },
                   `⚠️ ${failureMessage}`,
                 );
@@ -537,7 +547,7 @@ export function buildGatewayCronService(params: {
                     channel: primaryPlan.channel,
                     to: primaryPlan.to,
                     accountId: primaryPlan.accountId,
-                    sessionKey: job.sessionKey,
+                    sessionKey: deliverySessionKey,
                   },
                   `⚠️ ${failureMessage}`,
                 );
