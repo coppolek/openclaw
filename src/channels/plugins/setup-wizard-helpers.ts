@@ -985,13 +985,16 @@ export async function promptSingleChannelToken(params: {
   keepPrompt: string;
   inputPrompt: string;
 }): Promise<{ useEnv: boolean; token: string | null }> {
-  const promptToken = async (): Promise<string> =>
-    (
-      await params.prompter.text({
-        message: params.inputPrompt,
-        validate: (value) => (value?.trim() ? undefined : "Required"),
-      })
-    ).trim();
+  const promptToken = async (): Promise<string> => {
+    const value = await params.prompter.text({
+      message: params.inputPrompt,
+      validate: (value) => (value?.trim() ? undefined : "Required"),
+    });
+    if (value === undefined || value === null || typeof value !== "string") {
+      throw new Error("Prompt input was cancelled or invalid");
+    }
+    return value.trim();
+  };
 
   if (params.canUseEnv) {
     const keepEnv = await params.prompter.confirm({
