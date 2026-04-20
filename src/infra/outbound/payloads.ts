@@ -1,4 +1,5 @@
 import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
+import type { DroppedMediaItem } from "../../auto-reply/reply-payload.js";
 import { parseReplyDirectives } from "../../auto-reply/reply/reply-directives.js";
 import {
   formatBtwTextForExternalDelivery,
@@ -30,6 +31,7 @@ export type NormalizedOutboundPayload = {
   delivery?: ReplyPayloadDelivery;
   interactive?: InteractiveReply;
   channelData?: Record<string, unknown>;
+  droppedMedia?: DroppedMediaItem[];
 };
 
 export type OutboundPayloadJson = {
@@ -152,7 +154,7 @@ function createOutboundPayloadPlanEntry(
     replyToCurrent: payload.replyToCurrent || parsed.replyToCurrent,
     audioAsVoice: Boolean(payload.audioAsVoice || parsed.audioAsVoice),
   };
-  if (!isRenderablePayload(normalizedPayload) && !isSilent) {
+  if (!isRenderablePayload(normalizedPayload) && !isSilent && !normalizedPayload.droppedMedia?.length) {
     return null;
   }
   const hasChannelData = hasReplyChannelData(normalizedPayload.channelData);
@@ -265,7 +267,8 @@ export function projectOutboundPayloadPlanForOutbound(
       !hasReplyPayloadContent(
         { ...payload, text, mediaUrls: entry.parts.mediaUrls },
         { hasChannelData: entry.hasChannelData },
-      )
+      ) &&
+      !payload.droppedMedia?.length
     ) {
       continue;
     }
@@ -277,6 +280,7 @@ export function projectOutboundPayloadPlanForOutbound(
       ...(payload.delivery ? { delivery: payload.delivery } : {}),
       ...(entry.hasInteractive ? { interactive: payload.interactive } : {}),
       ...(entry.hasChannelData ? { channelData: payload.channelData } : {}),
+      ...(payload.droppedMedia?.length ? { droppedMedia: payload.droppedMedia } : {}),
     });
   }
   return normalizedPayloads;
@@ -326,6 +330,7 @@ export function summarizeOutboundPayloadForTransport(
     delivery: payload.delivery,
     interactive: payload.interactive,
     channelData: payload.channelData,
+    droppedMedia: payload.droppedMedia,
   };
 }
 
