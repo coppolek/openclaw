@@ -61,6 +61,7 @@
   "thread-bindings-runtime",
   "thread-bindings-session-runtime",
   "text-runtime",
+  "telegram-command-config",
   "text-chunking",
   "agent-runtime",
   "simple-completion-runtime",
