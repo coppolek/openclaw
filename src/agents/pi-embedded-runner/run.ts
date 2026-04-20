@@ -309,6 +309,7 @@ export async function runEmbeddedPiAgent(
         attachments: buildBeforeModelResolveAttachments(params.images),
         provider,
         modelId,
+        cfg: params.config,
         hookRunner,
         hookContext: hookCtx,
       });
