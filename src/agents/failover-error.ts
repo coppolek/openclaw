@@ -235,6 +235,9 @@ export function isTimeoutError(err: unknown): boolean {
   if (readErrorName(err) !== "AbortError") {
     return false;
   }
+  if (isSessionLockError(err)) {
+    return false;
+  }
   const message = getErrorMessage(err);
   if (message && ABORT_TIMEOUT_RE.test(message)) {
     return true;
