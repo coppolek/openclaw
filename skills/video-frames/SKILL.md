@@ -7,17 +7,6 @@ metadata:
     "openclaw":
       {
         "emoji": "🎬",
-        "requires": { "bins": ["ffmpeg"] },
-        "install":
-          [
-            {
-              "id": "brew",
-              "kind": "brew",
-              "formula": "ffmpeg",
-              "bins": ["ffmpeg"],
-              "label": "Install ffmpeg (brew)",
-            },
-          ],
       },
   }
 ---
@@ -31,13 +20,13 @@ Extract a single frame from a video, or create quick thumbnails for inspection.
 First frame:
 
 ```bash
-{baseDir}/scripts/frame.sh /path/to/video.mp4 --out /tmp/frame.jpg
+node {baseDir}/scripts/frame.mjs /path/to/video.mp4 --out /tmp/frame.jpg
 ```
 
 At a timestamp:
 
 ```bash
-{baseDir}/scripts/frame.sh /path/to/video.mp4 --time 00:00:10 --out /tmp/frame-10s.jpg
+node {baseDir}/scripts/frame.mjs /path/to/video.mp4 --time 00:00:10 --out /tmp/frame-10s.jpg
 ```
 
 ## Notes

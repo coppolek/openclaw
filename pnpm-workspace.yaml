@@ -18,6 +18,7 @@ minimumReleaseAgeExclude:
   - "@cloudflare/workers-types"
   - "@hono/node-server"
   - "@mariozechner/*"
+  - "@aws-sdk/*"
   - "@typescript/native-preview*"
   - "@types/node"
   - "@rolldown/*"
@@ -41,6 +42,8 @@ onlyBuiltDependencies:
   - node-llama-cpp
   - protobufjs
   - sharp
+  - ffmpeg-static
+  - "@ffprobe-installer/ffprobe"
 
 ignoredBuiltDependencies:
   - koffi
