@@ -182,18 +182,18 @@ describe("cli-session helpers", () => {
     const volatileChannelMessage = '## Inbound Context\n```json\n{"channel":"feishu"}\n```';
     const volatileHeartbeat = '## Inbound Context\n```json\n{"provider":"internal"}\n```';
 
-    const stableHash = hashCliSessionText(stable);
-    // Callers now pass stable-only text as the hash input, so the bound
-    // session hash stays identical across inbound-trigger flips even when
-    // the injected prompt differs.
-    expect(hashCliSessionText(stable)).toBe(stableHash);
+    // When only the stable portion is hashed, a heartbeat run and a channel-inbound
+    // run on the same session produce matching hashes and resolveCliSessionReuse
+    // returns the bound session id instead of "system-prompt" invalidation.
+    const channelInboundHashInput = stable;
+    const heartbeatHashInput = stable;
     expect(
       resolveCliSessionReuse({
         binding: {
           sessionId: "cli-session-1",
-          extraSystemPromptHash: stableHash,
+          extraSystemPromptHash: hashCliSessionText(channelInboundHashInput),
         },
-        extraSystemPromptHash: hashCliSessionText(stable),
+        extraSystemPromptHash: hashCliSessionText(heartbeatHashInput),
       }),
     ).toEqual({ sessionId: "cli-session-1" });
 
@@ -202,5 +202,26 @@ describe("cli-session helpers", () => {
     expect(hashCliSessionText(`${volatileChannelMessage}\n\n${stable}`)).not.toBe(
       hashCliSessionText(`${volatileHeartbeat}\n\n${stable}`),
     );
+  });
+
+  it("keeps CLI session reuse stable for DM sessions where the stable subset is empty (#68471)", () => {
+    // DM session: no group context, no group intro, no group system prompt,
+    // no exec elevation. The caller passes an empty-string stable subset. That
+    // must hash to a consistent "no hash" value so heartbeat vs. channel flips
+    // do not flip the hash slot. This is the most common session shape and
+    // was the original reporter's scenario.
+    const stableEmpty = "";
+    expect(hashCliSessionText(stableEmpty)).toBeUndefined();
+
+    expect(
+      resolveCliSessionReuse({
+        binding: {
+          sessionId: "cli-session-dm",
+          // setCliSessionBinding strips undefined hash from the persisted
+          // binding, so a DM session's binding stores no hash at all.
+        },
+        extraSystemPromptHash: hashCliSessionText(stableEmpty),
+      }),
+    ).toEqual({ sessionId: "cli-session-dm" });
   });
 });

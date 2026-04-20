@@ -687,7 +687,15 @@ export async function runPreparedReply(
       ownerNumbers: command.ownerList.length > 0 ? command.ownerList : undefined,
       inputProvenance: ctx.InputProvenance ?? sessionCtx.InputProvenance,
       extraSystemPrompt: extraSystemPromptParts.join("\n\n") || undefined,
-      extraSystemPromptHashInput: extraSystemPromptStableParts.join("\n\n") || undefined,
+      // Always pass the stable-only text as the hash input — even when empty
+      // (e.g. a DM with no group context and no exec elevation). Without this,
+      // an empty stable subset would fall through to the legacy full-prompt
+      // hash path and the volatile inbound-meta envelope would still bust the
+      // CLI session on every heartbeat transition, defeating the fix for the
+      // most common session shape (DMs). hashCliSessionText("") returns
+      // undefined, so setCliSessionBinding persists no hash on both sides and
+      // reuse matches as undefined === undefined.
+      extraSystemPromptHashInput: extraSystemPromptStableParts.join("\n\n"),
       skipProviderRuntimeHints: useFastReplyRuntime,
       ...(!useFastReplyRuntime &&
       isReasoningTagProvider(provider, {
