@@ -829,6 +829,45 @@ Notes:
 - If `baseUrl` is empty/omitted, OpenClaw keeps the default OpenAI behavior (which resolves to `api.openai.com`).
 - For safety, an explicit `compat.supportsDeveloperRole: true` is still overridden on non-native `openai-completions` endpoints.
 
+## Provider request proxy
+
+OpenClaw does not automatically apply `HTTP_PROXY` / `HTTPS_PROXY` environment variables to provider requests.
+
+If you run OpenClaw in a proxy-required environment (for example WSL, local proxy tools, or corporate networks), configure proxy behavior explicitly for the provider you use.
+
+If you define an explicit `models.providers.<provider>` entry, it must satisfy the provider schema for your current version. In practice, this usually means including the provider's `baseUrl` and `models` along with the proxy configuration.
+
+Example:
+
+```json
+{
+  "models": {
+    "providers": {
+      "openai": {
+        "baseUrl": "https://api.openai.com/v1",
+        "models": [
+          {
+            "id": "gpt-5.4",
+            "name": "gpt-5.4"
+          },
+          {
+            "id": "gpt-5.4-mini",
+            "name": "gpt-5.4-mini"
+          }
+        ],
+        "request": {
+          "proxy": {
+            "mode": "env-proxy"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+This example uses OpenAI for illustration only. Support for `request.proxy` depends on the provider transport API used by the provider you configure.
+
 ## CLI examples
 
 ```bash
