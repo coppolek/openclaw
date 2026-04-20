@@ -7,4 +7,8 @@ export function applyGatewayLaneConcurrency(cfg: OpenClawConfig) {
   setCommandLaneConcurrency(CommandLane.Cron, cfg.cron?.maxConcurrentRuns ?? 1);
   setCommandLaneConcurrency(CommandLane.Main, resolveAgentMaxConcurrent(cfg));
   setCommandLaneConcurrency(CommandLane.Subagent, resolveSubagentMaxConcurrent(cfg));
+  setCommandLaneConcurrency(
+    CommandLane.Nested,
+    Math.max(resolveAgentMaxConcurrent(cfg), resolveSubagentMaxConcurrent(cfg)),
+  );
 }
