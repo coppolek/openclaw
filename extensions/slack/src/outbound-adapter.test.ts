@@ -160,4 +160,46 @@ describe("slackOutbound", () => {
       meta: { cancelled: true },
     });
   });
+
+  it("ignores non-Slack replyToId on sendPayload when threadId is available", async () => {
+    sendMessageSlackMock.mockResolvedValue({ messageId: "m-final" });
+
+    const result = await slackOutbound.sendPayload!({
+      cfg,
+      to: "C123",
+      text: "",
+      payload: {
+        text: "final text",
+        channelData: {
+          slack: {
+            blocks: [
+              {
+                type: "section",
+                text: { type: "plain_text", text: "Block body" },
+              },
+            ],
+          },
+        },
+      },
+      accountId: "default",
+      replyToId: "msg-internal-1",
+      threadId: "1712345678.123456",
+    });
+
+    expect(sendMessageSlackMock).toHaveBeenCalledWith(
+      "C123",
+      "final text",
+      expect.objectContaining({
+        cfg,
+        threadTs: "1712345678.123456",
+        blocks: [
+          {
+            type: "section",
+            text: { type: "plain_text", text: "Block body" },
+          },
+        ],
+      }),
+    );
+    expect(result).toEqual({ channel: "slack", messageId: "m-final" });
+  });
 });
