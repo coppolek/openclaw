@@ -138,6 +138,7 @@ function buildRequestScopedFallbackNarrative(data: NarrativePhaseData): string {
 async function startNarrativeRunOrFallback(params: {
   subagent: SubagentSurface;
   sessionKey: string;
+  idempotencyKey: string;
   message: string;
   data: NarrativePhaseData;
   workspaceDir: string;
@@ -147,7 +148,7 @@ async function startNarrativeRunOrFallback(params: {
 }): Promise<string | null> {
   try {
     const run = await params.subagent.run({
-      idempotencyKey: params.sessionKey,
+      idempotencyKey: params.idempotencyKey,
       sessionKey: params.sessionKey,
       message: params.message,
       extraSystemPrompt: NARRATIVE_SYSTEM_PROMPT,
@@ -183,6 +184,23 @@ function buildNarrativeSessionKey(params: {
   nowMs: number;
 }): string {
   const workspaceHash = createHash("sha1").update(params.workspaceDir).digest("hex").slice(0, 12);
+  // Use a day-based bucket instead of the raw timestamp so that sessions are
+  // reused within the same calendar day, preventing unbounded session growth
+  // (see #68379 — each heartbeat was creating a unique session because the
+  // key included millisecond-precision nowMs).
+  const dayBucket = new Date(params.nowMs).toISOString().slice(0, 10);
+  return `dreaming-narrative-${params.phase}-${workspaceHash}-${dayBucket}`;
+}
+
+function buildNarrativeIdempotencyKey(params: {
+  workspaceDir: string;
+  phase: NarrativePhaseData["phase"];
+  nowMs: number;
+}): string {
+  const workspaceHash = createHash("sha1").update(params.workspaceDir).digest("hex").slice(0, 12);
+  // Idempotency key must be unique per run so the gateway does not cache/dedupe
+  // fresh narrative sweeps within the same day-bucket session (see P1 review on
+  // PR #68437 — day-bucket idempotency caused stale cached narratives).
   return `dreaming-narrative-${params.phase}-${workspaceHash}-${params.nowMs}`;
 }
 
@@ -850,6 +868,11 @@ export async function generateAndAppendDreamNarrative(params: {
     phase: params.data.phase,
     nowMs,
   });
+  const idempotencyKey = buildNarrativeIdempotencyKey({
+    workspaceDir: params.workspaceDir,
+    phase: params.data.phase,
+    nowMs,
+  });
   const message = buildNarrativePrompt(params.data);
   let runId: string | null = null;
   let waitStatus: string | null = null;
@@ -858,6 +881,7 @@ export async function generateAndAppendDreamNarrative(params: {
     runId = await startNarrativeRunOrFallback({
       subagent: params.subagent,
       sessionKey,
+      idempotencyKey,
       message,
       data: params.data,
       workspaceDir: params.workspaceDir,
@@ -932,9 +956,19 @@ export async function generateAndAppendDreamNarrative(params: {
     try {
       await params.subagent.deleteSession({ sessionKey });
     } catch (cleanupErr) {
-      params.logger.warn(
-        `memory-core: narrative session cleanup failed for ${params.data.phase} phase: ${formatErrorMessage(cleanupErr)}`,
-      );
+      // Permission errors (e.g. "missing scope: operator.admin") should be
+      // logged at info level instead of warning — they are expected when the
+      // plugin lacks admin scope and are not actionable by the user (#68379).
+      const errMsg = formatErrorMessage(cleanupErr);
+      if (errMsg.includes("missing scope")) {
+        params.logger.info(
+          `memory-core: narrative session cleanup skipped for ${params.data.phase} phase (insufficient scope): ${errMsg}`,
+        );
+      } else {
+        params.logger.warn(
+          `memory-core: narrative session cleanup failed for ${params.data.phase} phase: ${errMsg}`,
+        );
+      }
     }
 
     await scrubDreamingNarrativeArtifacts(params.logger).catch((scrubErr: unknown) => {
