@@ -1,5 +1,6 @@
 [
   "index",
+  "compat",
   "core",
   "lmstudio",
   "lmstudio-runtime",
