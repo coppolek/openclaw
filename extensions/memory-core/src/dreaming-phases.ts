@@ -11,7 +11,11 @@ import {
   parseUsageCountedSessionIdFromFileName,
   sessionPathForFile,
 } from "openclaw/plugin-sdk/memory-core-host-engine-qmd";
-import type { MemorySearchResult } from "openclaw/plugin-sdk/memory-core-host-runtime-files";
+import {
+  isSessionSummaryDailyMemory,
+  parseDailyMemoryFileName,
+  type MemorySearchResult,
+} from "openclaw/plugin-sdk/memory-core-host-runtime-files";
 import {
   formatMemoryDreamingDay,
   resolveMemoryDreamingWorkspaces,
@@ -70,7 +74,7 @@ type RunPhaseIfTriggeredParams = {
 );
 const LIGHT_SLEEP_EVENT_TEXT = "__openclaw_memory_core_light_sleep__";
 const REM_SLEEP_EVENT_TEXT = "__openclaw_memory_core_rem_sleep__";
-const DAILY_MEMORY_FILENAME_RE = /^(\d{4}-\d{2}-\d{2})\.md$/;
+const ISO_DAY_HEADING_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DAILY_INGESTION_STATE_RELATIVE_PATH = path.join("memory", ".dreams", "daily-ingestion.json");
 const DAILY_INGESTION_SCORE = 0.62;
 const DAILY_INGESTION_MAX_SNIPPET_CHARS = 280;
@@ -152,7 +156,7 @@ function normalizeDailyHeading(line: string): string | null {
     return null;
   }
   const heading = match[1] ? normalizeDailyListMarker(match[1]) : "";
-  if (!heading || DAILY_MEMORY_FILENAME_RE.test(heading) || isGenericDailyHeading(heading)) {
+  if (!heading || ISO_DAY_HEADING_RE.test(heading) || isGenericDailyHeading(heading)) {
     return null;
   }
   return heading.slice(0, DAILY_INGESTION_MAX_SNIPPET_CHARS).replace(/\s+/g, " ");
@@ -1010,6 +1014,12 @@ type DailyIngestionCollectionResult = {
   changed: boolean;
 };
 
+type DailyIngestionCandidate = {
+  day: string;
+  relativePath: string;
+  raw: string;
+};
+
 async function collectDailyIngestionBatches(params: {
   workspaceDir: string;
   lookbackDays: number;
@@ -1028,25 +1038,34 @@ async function collectDailyIngestionBatches(params: {
   const files = entries
     .filter((entry) => entry.isFile())
     .map((entry) => {
-      const match = entry.name.match(DAILY_MEMORY_FILENAME_RE);
-      if (!match) {
+      const parsed = parseDailyMemoryFileName(entry.name);
+      if (!parsed) {
         return null;
       }
-      const day = match[1];
+      const day = parsed.day;
       if (!isDayWithinLookback(day, cutoffMs)) {
         return null;
       }
-      return { fileName: entry.name, day };
+      return { fileName: parsed.fileName, day, canonical: parsed.canonical };
     })
-    .filter((entry): entry is { fileName: string; day: string } => entry !== null)
-    .toSorted((a, b) => b.day.localeCompare(a.day));
+    .filter(
+      (entry): entry is { fileName: string; day: string; canonical: boolean } => entry !== null,
+    )
+    .toSorted((a, b) => {
+      const dayCmp = b.day.localeCompare(a.day);
+      if (dayCmp !== 0) {
+        return dayCmp;
+      }
+      if (a.canonical !== b.canonical) {
+        return a.canonical ? -1 : 1;
+      }
+      return a.fileName.localeCompare(b.fileName);
+    });
 
   const batches: DailyIngestionBatch[] = [];
   const nextFiles: Record<string, DailyIngestionFileState> = {};
+  const changedCandidates: DailyIngestionCandidate[] = [];
   let changed = false;
-  const totalCap = Math.max(20, params.limit * 4);
-  const perFileCap = Math.max(6, Math.ceil(totalCap / Math.max(1, Math.max(files.length, 1))));
-  let total = 0;
   for (const file of files) {
     const relativePath = `memory/${file.fileName}`;
     const filePath = path.join(memoryDir, file.fileName);
@@ -1057,6 +1076,18 @@ async function collectDailyIngestionBatches(params: {
       throw err;
     });
     if (!stat) {
+      continue;
+    }
+    const raw = await fs.readFile(filePath, "utf-8").catch((err: unknown) => {
+      if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+        return "";
+      }
+      throw err;
+    });
+    if (!raw) {
+      continue;
+    }
+    if (isSessionSummaryDailyMemory(raw)) {
       continue;
     }
     const fingerprint: DailyIngestionFileState = {
@@ -1071,25 +1102,24 @@ async function collectDailyIngestionBatches(params: {
       previous.size === fingerprint.size;
     if (!unchanged) {
       changed = true;
-    } else {
-      continue;
+      changedCandidates.push({
+        day: file.day,
+        relativePath,
+        raw,
+      });
     }
+  }
 
-    const raw = await fs.readFile(filePath, "utf-8").catch((err: unknown) => {
-      if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
-        return "";
-      }
-      throw err;
-    });
-    if (!raw) {
-      continue;
-    }
-    const lines = stripManagedDailyDreamingLines(raw.split(/\r?\n/));
+  const totalCap = Math.max(20, params.limit * 4);
+  const perFileCap = Math.max(6, Math.ceil(totalCap / Math.max(1, Object.keys(nextFiles).length)));
+  let total = 0;
+  for (const candidate of changedCandidates) {
+    const lines = stripManagedDailyDreamingLines(candidate.raw.split(/\r?\n/));
     const chunks = buildDailySnippetChunks(lines, perFileCap);
     const results: MemorySearchResult[] = [];
     for (const chunk of chunks) {
       results.push({
-        path: relativePath,
+        path: candidate.relativePath,
         startLine: chunk.startLine,
         endLine: chunk.endLine,
         score: DAILY_INGESTION_SCORE,
@@ -1103,7 +1133,7 @@ async function collectDailyIngestionBatches(params: {
     if (results.length === 0) {
       continue;
     }
-    batches.push({ day: file.day, results });
+    batches.push({ day: candidate.day, results });
     total += results.length;
     if (total >= totalCap) {
       break;
@@ -1189,15 +1219,27 @@ export async function seedHistoricalDailyMemorySignals(params: {
   const resolved = normalizedPaths
     .map((filePath) => {
       const fileName = path.basename(filePath);
-      const match = fileName.match(DAILY_MEMORY_FILENAME_RE);
-      if (!match) {
-        return { filePath, day: null as string | null };
+      const parsed = parseDailyMemoryFileName(fileName);
+      if (!parsed) {
+        return { filePath, fileName, day: null as string | null, canonical: false };
       }
-      return { filePath, day: match[1] ?? null };
+      return {
+        filePath,
+        fileName: parsed.fileName,
+        day: parsed.day,
+        canonical: parsed.canonical,
+      };
     })
     .toSorted((a, b) => {
       if (a.day && b.day) {
-        return b.day.localeCompare(a.day);
+        const dayCmp = b.day.localeCompare(a.day);
+        if (dayCmp !== 0) {
+          return dayCmp;
+        }
+        if (a.canonical !== b.canonical) {
+          return a.canonical ? -1 : 1;
+        }
+        return a.fileName.localeCompare(b.fileName);
       }
       if (a.day) {
         return -1;
@@ -1208,19 +1250,14 @@ export async function seedHistoricalDailyMemorySignals(params: {
       return a.filePath.localeCompare(b.filePath);
     });
 
-  const valid = resolved.filter((entry): entry is { filePath: string; day: string } =>
-    Boolean(entry.day),
+  const valid = resolved.filter(
+    (entry): entry is { filePath: string; fileName: string; day: string; canonical: boolean } =>
+      Boolean(entry.day),
   );
   const skippedPaths = resolved.filter((entry) => !entry.day).map((entry) => entry.filePath);
   const totalCap = Math.max(20, params.limit * 4);
-  const perFileCap = Math.max(6, Math.ceil(totalCap / Math.max(1, valid.length)));
-  let importedSignalCount = 0;
-  let importedFileCount = 0;
-
+  const ingestible: Array<{ filePath: string; fileName: string; day: string; raw: string }> = [];
   for (const entry of valid) {
-    if (importedSignalCount >= totalCap) {
-      break;
-    }
     const raw = await fs.readFile(entry.filePath, "utf-8").catch((err: unknown) => {
       if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
         skippedPaths.push(entry.filePath);
@@ -1228,15 +1265,30 @@ export async function seedHistoricalDailyMemorySignals(params: {
       }
       throw err;
     });
-    if (!raw) {
+    if (!raw || isSessionSummaryDailyMemory(raw)) {
       continue;
     }
-    const lines = stripManagedDailyDreamingLines(raw.split(/\r?\n/));
+    ingestible.push({
+      filePath: entry.filePath,
+      fileName: entry.fileName,
+      day: entry.day,
+      raw,
+    });
+  }
+  const perFileCap = Math.max(6, Math.ceil(totalCap / Math.max(1, ingestible.length)));
+  let importedSignalCount = 0;
+  let importedFileCount = 0;
+
+  for (const entry of ingestible) {
+    if (importedSignalCount >= totalCap) {
+      break;
+    }
+    const lines = stripManagedDailyDreamingLines(entry.raw.split(/\r?\n/));
     const chunks = buildDailySnippetChunks(lines, perFileCap);
     const results: MemorySearchResult[] = [];
     for (const chunk of chunks) {
       results.push({
-        path: `memory/${entry.day}.md`,
+        path: `memory/${entry.fileName}`,
         startLine: chunk.startLine,
         endLine: chunk.endLine,
         score: DAILY_INGESTION_SCORE,
@@ -1777,6 +1829,7 @@ export function registerMemoryDreamingPhases(_api: OpenClawPluginApi): void {
 
 export const __testing = {
   runPhaseIfTriggered,
+  collectDailyIngestionBatches,
   constants: {
     LIGHT_SLEEP_EVENT_TEXT,
     REM_SLEEP_EVENT_TEXT,

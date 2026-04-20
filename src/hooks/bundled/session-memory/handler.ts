@@ -12,10 +12,12 @@ import {
   resolveAgentIdByWorkspacePath,
   resolveAgentWorkspaceDir,
 } from "../../../agents/agent-scope.js";
+import { resolveUserTimezone } from "../../../agents/date-time.js";
 import { resolveStateDir } from "../../../config/paths.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import { writeFileWithinRoot } from "../../../infra/fs-safe.js";
 import { createSubsystemLogger } from "../../../logging/subsystem.js";
+import { rememberRecentDailyMemoryFile } from "../../../memory-host-sdk/runtime-files.js";
 import {
   parseAgentSessionKey,
   resolveAgentIdFromSessionKey,
@@ -27,6 +29,42 @@ import { generateSlugViaLLM } from "../../llm-slug-generator.js";
 import { findPreviousSessionFile, getRecentSessionContentWithResetFallback } from "./transcript.js";
 
 const log = createSubsystemLogger("hooks/session-memory");
+
+function formatSessionMemoryDateParts(
+  now: Date,
+  timezone: string,
+): {
+  dateStamp: string;
+  timeStamp: string;
+} {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  const hour = parts.find((part) => part.type === "hour")?.value;
+  const minute = parts.find((part) => part.type === "minute")?.value;
+  const second = parts.find((part) => part.type === "second")?.value;
+  if (year && month && day && hour && minute && second) {
+    return {
+      dateStamp: `${year}-${month}-${day}`,
+      timeStamp: `${hour}:${minute}:${second}`,
+    };
+  }
+  const utc = now.toISOString();
+  return {
+    dateStamp: utc.split("T")[0] ?? utc.slice(0, 10),
+    timeStamp: utc.split("T")[1]?.split(".")[0] ?? "00:00:00",
+  };
+}
 
 function resolveDisplaySessionKey(params: {
   cfg?: OpenClawConfig;
@@ -82,7 +120,11 @@ const saveSessionToMemory: HookHandler = async (event) => {
 
     // Get today's date for filename
     const now = new Date(event.timestamp);
-    const dateStr = now.toISOString().split("T")[0]; // YYYY-MM-DD
+    const timezone = resolveUserTimezone(cfg?.agents?.defaults?.userTimezone);
+    const { dateStamp: dateStr, timeStamp: localTimeStr } = formatSessionMemoryDateParts(
+      now,
+      timezone,
+    );
 
     // Generate descriptive slug from session using LLM
     // Prefer previousSessionEntry (old session before /new) over current (which may be empty)
@@ -160,7 +202,7 @@ const saveSessionToMemory: HookHandler = async (event) => {
 
     // If no slug, use timestamp
     if (!slug) {
-      const timeSlug = now.toISOString().split("T")[1].split(".")[0].replace(/:/g, "");
+      const timeSlug = localTimeStr.replace(/:/g, "");
       slug = timeSlug.slice(0, 4); // HHMM
       log.debug("Using fallback timestamp slug", { slug });
     }
@@ -173,16 +215,13 @@ const saveSessionToMemory: HookHandler = async (event) => {
       path: memoryFilePath.replace(os.homedir(), "~"),
     });
 
-    // Format time as HH:MM:SS UTC
-    const timeStr = now.toISOString().split("T")[1].split(".")[0];
-
     // Extract context details
     const sessionId = (sessionEntry.sessionId as string) || "unknown";
     const source = (context.commandSource as string) || "unknown";
 
     // Build Markdown entry
     const entryParts = [
-      `# Session: ${dateStr} ${timeStr} UTC`,
+      `# Session: ${dateStr} ${localTimeStr} ${timezone}`,
       "",
       `- **Session Key**: ${displaySessionKey}`,
       `- **Session ID**: ${sessionId}`,
@@ -203,6 +242,16 @@ const saveSessionToMemory: HookHandler = async (event) => {
       relativePath: filename,
       data: entry,
       encoding: "utf-8",
+    });
+    await rememberRecentDailyMemoryFile({
+      memoryDir,
+      fileName: filename,
+      mtimeMs: now.getTime(),
+    }).catch((error: unknown) => {
+      log.debug("Failed to update recent daily memory index", {
+        error: error instanceof Error ? error.message : String(error),
+        fileName: filename,
+      });
     });
     log.debug("Memory file written successfully");
 
