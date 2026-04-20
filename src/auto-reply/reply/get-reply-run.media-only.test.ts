@@ -265,6 +265,24 @@ describe("runPreparedReply media-only handling", () => {
     );
   });
 
+  it("inherits the global emotion default when session and agent values are unset", async () => {
+    await runPreparedReply(
+      baseParams({
+        cfg: { session: {}, channels: {}, agents: { defaults: { emotionDefault: "on" } } },
+      }),
+    );
+
+    expect(runReplyAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        followupRun: expect.objectContaining({
+          run: expect.objectContaining({
+            emotionMode: "on",
+          }),
+        }),
+      }),
+    );
+  });
+
   it("allows media-only prompts and preserves thread context in queued followups", async () => {
     const result = await runPreparedReply(baseParams());
     expect(result).toEqual({ text: "ok" });

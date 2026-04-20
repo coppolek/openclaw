@@ -247,6 +247,7 @@ export async function runPreparedReply(
     normalizeEmotionMode(sessionEntry?.emotionMode) ??
     normalizeEmotionMode(cfg.agents?.list?.find((entry) => entry.id === agentId)?.emotionDefault) ??
     normalizeEmotionMode(agentCfg?.emotionDefault) ??
+    normalizeEmotionMode(cfg.agents?.defaults?.emotionDefault) ??
     "off";
   const useFastReplyRuntime = shouldUseReplyFastTestRuntime({
     cfg,
