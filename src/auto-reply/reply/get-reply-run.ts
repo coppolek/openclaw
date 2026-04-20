@@ -43,6 +43,7 @@ import { shouldUseReplyFastTestRuntime } from "./get-reply-fast-path.js";
 import { resolvePreparedReplyQueueState } from "./get-reply-run-queue.js";
 import { buildGroupChatContext, buildGroupIntro } from "./groups.js";
 import { buildInboundMetaSystemPrompt, buildInboundUserContextPrefix } from "./inbound-meta.js";
+import { isExternalChannelProvider, wrapChannelMessageBody } from "./inbound-text.js";
 import type { createModelSelectionState } from "./model-selection.js";
 import { resolveOriginMessageProvider } from "./origin-routing.js";
 import { buildReplyPromptBodies } from "./prompt-prelude.js";
@@ -303,7 +304,15 @@ export async function runPreparedReply(
       fullAccessBlockedReason: fullAccessState.blockedReason,
     }),
   ].filter(Boolean);
-  const baseBody = sessionCtx.BodyStripped ?? sessionCtx.Body ?? "";
+  const rawBaseBody = sessionCtx.BodyStripped ?? sessionCtx.Body ?? "";
+  // Apply external content protection to channel message bodies so they receive
+  // the same boundary-marker + security-notice treatment as hooks/gmail/webhooks.
+  const channelProvider =
+    normalizeOptionalString(ctx.OriginatingChannel) ?? normalizeOptionalString(ctx.Provider);
+  const baseBody =
+    channelProvider && isExternalChannelProvider(channelProvider)
+      ? wrapChannelMessageBody(rawBaseBody, channelProvider)
+      : rawBaseBody;
   // Use CommandBody/RawBody for bare reset detection (clean message without structural context).
   const rawBodyTrimmed = (ctx.CommandBody ?? ctx.RawBody ?? ctx.Body ?? "").trim();
   const baseBodyTrimmedRaw = baseBody.trim();
@@ -421,8 +430,18 @@ export async function runPreparedReply(
     }
   }
   const prefixedBodyCore = prefixedBodyBase;
-  const threadStarterBody = normalizeOptionalString(ctx.ThreadStarterBody);
-  const threadHistoryBody = normalizeOptionalString(ctx.ThreadHistoryBody);
+  const threadStarterBodyRaw = normalizeOptionalString(ctx.ThreadStarterBody);
+  const threadHistoryBodyRaw = normalizeOptionalString(ctx.ThreadHistoryBody);
+  // Thread context bodies are also untrusted channel content; apply the same wrapping.
+  const isExternalChannel = Boolean(channelProvider && isExternalChannelProvider(channelProvider));
+  const threadStarterBody =
+    threadStarterBodyRaw && isExternalChannel && channelProvider
+      ? wrapChannelMessageBody(threadStarterBodyRaw, channelProvider)
+      : threadStarterBodyRaw;
+  const threadHistoryBody =
+    threadHistoryBodyRaw && isExternalChannel && channelProvider
+      ? wrapChannelMessageBody(threadHistoryBodyRaw, channelProvider)
+      : threadHistoryBodyRaw;
   const threadContextNote = threadHistoryBody
     ? `[Thread history - for context]\n${threadHistoryBody}`
     : threadStarterBody
@@ -639,7 +658,9 @@ export async function runPreparedReply(
   const followupRun = {
     prompt: queuedBody,
     messageId: sessionCtx.MessageSidFull ?? sessionCtx.MessageSid,
-    summaryLine: baseBodyTrimmedRaw,
+    // Use the raw unwrapped body for the human-readable queue label;
+    // baseBodyTrimmedRaw contains boundary markers after wrapping.
+    summaryLine: rawBaseBody.trim(),
     enqueuedAt: Date.now(),
     // Originating channel for reply routing.
     originatingChannel: ctx.OriginatingChannel,
