@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import type { ResponseInput } from "openai/resources/responses/responses.js";
 import { resolveGlobalDedupeCache } from "../infra/dedupe.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 
@@ -65,7 +64,7 @@ function isArrayInput(input: unknown): input is InputItem[] {
   return Array.isArray(input);
 }
 
-export function rewriteSpottedConnectionBoundIds(input: ResponseInput | unknown): boolean {
+export function rewriteSpottedConnectionBoundIds(input: unknown): boolean {
   if (!isArrayInput(input)) {
     return false;
   }
@@ -87,7 +86,7 @@ export function rewriteSpottedConnectionBoundIds(input: ResponseInput | unknown)
   return rewrote;
 }
 
-export function markConnectionBoundIdsAsSpotted(input: ResponseInput | unknown): string[] {
+export function markConnectionBoundIdsAsSpotted(input: unknown): string[] {
   if (!isArrayInput(input)) {
     return [];
   }
