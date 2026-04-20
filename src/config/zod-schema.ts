@@ -210,14 +210,33 @@ const McpServerSchema = z
   .object({
     command: z.string().optional(),
     args: z.array(z.string()).optional(),
-    env: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+    env: z
+      .record(
+        z.string(),
+        z
+          .union([
+            z.string().register(sensitive),
+            SecretInputSchema.register(sensitive),
+            z.number(),
+            z.boolean(),
+          ])
+          .register(sensitive),
+      )
+      .optional(),
     cwd: z.string().optional(),
     workingDirectory: z.string().optional(),
     url: HttpUrlSchema.optional(),
     headers: z
       .record(
         z.string(),
-        z.union([z.string().register(sensitive), z.number(), z.boolean()]).register(sensitive),
+        z
+          .union([
+            z.string().register(sensitive),
+            SecretInputSchema.register(sensitive),
+            z.number(),
+            z.boolean(),
+          ])
+          .register(sensitive),
       )
       .optional(),
   })
