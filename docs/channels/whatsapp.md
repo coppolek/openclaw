@@ -204,6 +204,7 @@ OpenClaw recommends running WhatsApp on a separate number when possible. (The ch
 
     - quote/reply only satisfies mention gating; it does **not** grant sender authorization
     - with `groupPolicy: "allowlist"`, non-allowlisted senders are still blocked even if they reply to an allowlisted user's message
+    - optional per-group admin override: `channels.whatsapp.groups.<jid>.admin` (or `groups."*".admin`) lets the configured E.164 number bypass mention gating and become the only user allowed to run slash commands for that group scope
 
     Session-level activation command:
 

@@ -33,7 +33,10 @@ export type ResolvedWhatsAppInboundPolicy = {
   isDmSenderAllowed: (allowEntries: string[], sender?: string | null) => boolean;
   isGroupSenderAllowed: (allowEntries: string[], sender?: string | null) => boolean;
   resolveConversationGroupPolicy: (conversationId: string) => ChannelGroupPolicy;
-  resolveConversationRequireMention: (conversationId: string) => boolean;
+  resolveConversationRequireMention: (
+    conversationId: string,
+    senderE164?: string | null,
+  ) => boolean;
 };
 
 function resolveGroupConversationId(conversationId: string): string {
@@ -44,6 +47,23 @@ function resolveGroupConversationId(conversationId: string): string {
       Provider: "whatsapp",
     })?.id ?? conversationId
   );
+}
+
+function isGroupAdmin(
+  groups: ResolvedWhatsAppAccount["groups"],
+  groupId: string,
+  senderE164?: string | null,
+): boolean {
+  if (!senderE164 || !groups) {
+    return false;
+  }
+  const groupConfig = groups[groupId] ?? groups["*"];
+  if (!groupConfig?.admin) {
+    return false;
+  }
+  const normalizedAdmin = normalizeE164(groupConfig.admin);
+  const normalizedSender = normalizeE164(senderE164);
+  return normalizedAdmin === normalizedSender;
 }
 
 function isNormalizedSenderAllowed(allowEntries: string[], sender?: string | null): boolean {
@@ -130,12 +150,18 @@ export function resolveWhatsAppInboundPolicy(params: {
         groupId: resolveGroupConversationId(conversationId),
         hasGroupAllowFrom: effectiveGroupAllowFrom.length > 0,
       }),
-    resolveConversationRequireMention: (conversationId) =>
-      resolveChannelGroupRequireMention({
+    resolveConversationRequireMention: (conversationId, senderE164) => {
+      const groupId = resolveGroupConversationId(conversationId);
+      // Admins don't need to be mentioned
+      if (isGroupAdmin(account.groups, groupId, senderE164)) {
+        return false;
+      }
+      return resolveChannelGroupRequireMention({
         cfg: resolvedGroupCfg,
         channel: "whatsapp",
-        groupId: resolveGroupConversationId(conversationId),
-      }),
+        groupId,
+      });
+    },
   };
 }
 
@@ -165,6 +191,14 @@ export async function resolveWhatsAppCommandAuthorized(params: {
   if (!normalizedSender) {
     return false;
   }
+  const groupId = params.msg.from ?? "";
+  const groupConfig = isGroup
+    ? (policy.account.groups?.[groupId] ?? policy.account.groups?.["*"])
+    : undefined;
+  const senderIsConfiguredAdmin =
+    isGroup && groupConfig?.admin
+      ? isGroupAdmin(policy.account.groups, groupId, groupSender)
+      : false;
 
   const storeAllowFrom =
     isGroup || !policy.shouldReadStorePairingApprovals
@@ -192,5 +226,14 @@ export async function resolveWhatsAppCommandAuthorized(params: {
       hasControlCommand: true,
     },
   });
+
+  // Only enable admin-only group commands when the group config declares an admin.
+  if (isGroup && groupConfig?.admin && !senderIsConfiguredAdmin) {
+    return false;
+  }
+  if (senderIsConfiguredAdmin && access.decision === "allow") {
+    return true;
+  }
+
   return access.commandAuthorized;
 }
