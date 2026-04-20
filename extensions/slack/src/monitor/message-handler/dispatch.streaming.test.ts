@@ -176,16 +176,16 @@ describe("slack preview streaming eligibility", () => {
     ).toBe(true);
   });
 
-  it("stays off for top-level DMs without a reply thread", () => {
+  it("stays on for top-level DMs without a reply thread", () => {
     expect(
       shouldEnableSlackPreviewStreaming({
         mode: "partial",
         isDirectMessage: true,
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
-  it("allows DM preview when the reply is threaded", () => {
+  it("stays on for DMs with a reply thread", () => {
     expect(
       shouldEnableSlackPreviewStreaming({
         mode: "partial",
@@ -195,7 +195,7 @@ describe("slack preview streaming eligibility", () => {
     ).toBe(true);
   });
 
-  it("keeps top-level DMs off even when replyToMode would create a reply thread", () => {
+  it("stays on for top-level DMs when replyToMode would create a reply thread", () => {
     const streamThreadHint = resolveSlackStreamingThreadHint({
       replyToMode: "all",
       incomingThreadTs: undefined,
@@ -209,7 +209,7 @@ describe("slack preview streaming eligibility", () => {
         isDirectMessage: true,
         threadTs: undefined,
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(streamThreadHint).toBe("1000.4");
   });
 });
