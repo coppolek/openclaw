@@ -193,7 +193,7 @@ export function buildXaiImageGenerationProvider(): ImageGenerationProvider {
             {
               buffer: Buffer.from(b64, "base64"),
               mimeType,
-              fileName: `image-${idx + 1}.png`,
+              fileName: `image-${idx + 1}.${mimeType.split("/")[1] || "png"}`,
               ...(item.revised_prompt
                 ? { revisedPrompt: normalizeOptionalString(item.revised_prompt) }
                 : {}),

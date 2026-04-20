@@ -48,7 +48,6 @@ function normalizeXaiSpeechResponseFormat(value: unknown): XaiSpeechResponseForm
 }
 
 function resolveSpeechResponseFormat(
-  baseUrl: string,
   target: "audio-file" | "voice-note",
   configuredFormat?: XaiSpeechResponseFormat,
 ): XaiSpeechResponseFormat {
@@ -211,7 +210,6 @@ export function buildXaiSpeechProvider(): SpeechProviderPlugin {
         throw new Error("xAI API key missing");
       }
       const responseFormat = resolveSpeechResponseFormat(
-        config.baseUrl,
         req.target,
         config.responseFormat,
       );

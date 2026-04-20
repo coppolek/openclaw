@@ -41,6 +41,7 @@ vi.mock("openclaw/plugin-sdk/provider-http", () => ({
 
 vi.mock("openclaw/plugin-sdk/text-runtime", () => ({
   normalizeOptionalString: (v: unknown) => (typeof v === "string" ? v.trim() : undefined),
+  normalizeOptionalLowercaseString: (v: unknown) => (typeof v === "string" ? v.trim().toLowerCase() : undefined),
   readStringValue: (v: unknown) => (typeof v === "string" ? v.trim() : undefined),
 }));
 
@@ -59,7 +60,7 @@ describe("xai image generation provider", () => {
     expect(provider.id).toBe("xai");
     expect(provider.label).toBe("xAI");
     expect(provider.defaultModel).toBe("grok-imagine-image");
-    expect(provider.models).toEqual(["grok-imagine-image", "grok-imaging-image-pro"]);
+    expect(provider.models).toEqual(["grok-imagine-image", "grok-imagine-image-pro"]);
     expect(provider.capabilities.generate.maxCount).toBe(4);
     expect(provider.capabilities.generate.supportsAspectRatio).toBe(true);
     expect(provider.capabilities.edit.enabled).toBe(true);
@@ -131,7 +132,7 @@ describe("xai image generation provider", () => {
     const buffer = Buffer.from("fakeimage");
     await provider.generateImage({
       provider: "xai",
-      model: "grok-imaging-image-pro",
+      model: "grok-imagine-image-pro",
       prompt: "Render this as a pencil sketch with detailed shading",
       inputImages: [
         {
@@ -146,7 +147,7 @@ describe("xai image generation provider", () => {
       expect.objectContaining({
         url: expect.stringContaining("/images/edits"),
         body: expect.objectContaining({
-          model: "grok-imaging-image-pro",
+          model: "grok-imagine-image-pro",
           prompt: "Render this as a pencil sketch with detailed shading",
           image: {
             url: expect.stringContaining("data:image/png;base64,"),

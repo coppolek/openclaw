@@ -5,8 +5,8 @@ import {
   trimToUndefined,
   truncateErrorDetail,
 } from "openclaw/plugin-sdk/speech";
-
-export const XAI_BASE_URL = "https://api.x.ai/v1";
+import { XAI_BASE_URL } from "./api.js";
+export { XAI_BASE_URL };
 
 export const XAI_TTS_VOICES = ["eve", "ara", "rex", "sal", "leo"] as const;
 
