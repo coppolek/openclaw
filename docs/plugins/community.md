@@ -75,6 +75,26 @@ cost, tokens, errors, and more.
 openclaw plugins install @opik/opik-openclaw
 ```
 
+### OSOP (Open Standard Operating Procedures)
+
+Structured workflow logging, risk analysis, and self-optimization for AI agents.
+Records every AI session as `.osop` + `.osoplog.yaml` — portable workflow
+definitions that work across Claude Code, Codex, Grok, Cursor, and OpenClaw.
+Includes security review, HTML report generation, and a self-optimization loop
+that improves workflows from execution history.
+
+- **npm:** `osop`, `osop-log`, `osop-report`, `osop-review`, `osop-optimize`
+- **repo:** [github.com/Archie0125/osop-skill](https://github.com/Archie0125/osop-skill)
+- **website:** [osop.ai](https://osop.ai)
+
+```bash
+openclaw plugins install osop
+openclaw plugins install osop-log
+openclaw plugins install osop-report
+openclaw plugins install osop-review
+openclaw plugins install osop-optimize
+```
+
 ### QQbot
 
 Connect OpenClaw to QQ via the QQ Bot API. Supports private chats, group
