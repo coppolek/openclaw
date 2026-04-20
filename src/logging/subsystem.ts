@@ -314,7 +314,19 @@ function logToFile(
 
 export function createSubsystemLogger(subsystem: string): SubsystemLogger {
   let fileLogger: TsLogger<LogObj> | null = null;
-
+  let fileLoggerGeneration = -1;
+  const getFileLogger = () => {
+    // Re-create the child logger when the root logger has been rebuilt
+    // (e.g. after midnight date-based log rotation). Without this,
+    // subsystem loggers keep writing to the previous day's file (#37388).
+    if (!fileLogger || fileLoggerGeneration !== loggingState.loggerGeneration) {
+      fileLogger = getChildLogger({ subsystem });
+      // Read generation after getChildLogger — the getLogger() call inside
+      // may itself increment the counter, so capture the final value.
+      fileLoggerGeneration = loggingState.loggerGeneration;
+    }
+    return fileLogger;
+  };
   const emitLog = (level: LogLevel, message: string, meta?: Record<string, unknown>) => {
     const consoleSettings = getConsoleSettings();
     const consoleEnabled =
@@ -336,10 +348,7 @@ export function createSubsystemLogger(subsystem: string): SubsystemLogger {
       fileMeta = Object.keys(rest).length > 0 ? rest : undefined;
     }
     if (fileEnabled) {
-      if (!fileLogger) {
-        fileLogger = getChildLogger({ subsystem });
-      }
-      logToFile(fileLogger, level, message, fileMeta);
+      logToFile(getFileLogger(), level, message, fileMeta);
     }
     if (!consoleEnabled) {
       return;
