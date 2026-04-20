@@ -33,6 +33,12 @@ export type GatewayLockHandle = {
   lockPath: string;
   configPath: string;
   release: () => Promise<void>;
+  /**
+   * Synchronous best-effort lock release for use in forced-exit paths
+   * (signal handlers, process.on('exit'), shutdown timeouts) where async
+   * operations cannot be awaited.
+   */
+  releaseSync: () => void;
 };
 
 export type GatewayLockOptions = {
@@ -282,12 +288,44 @@ export async function acquireGatewayLock(
         payload.startTime = startTime;
       }
       await handle.writeFile(JSON.stringify(payload), "utf8");
+      let released = false;
+      const markReleased = () => {
+        if (released) {
+          return false;
+        }
+        released = true;
+        return true;
+      };
       return {
         lockPath,
         configPath,
         release: async () => {
+          if (!markReleased()) {
+            return;
+          }
           await handle.close().catch(() => undefined);
           await fs.rm(lockPath, { force: true });
+        },
+        releaseSync: () => {
+          if (!markReleased()) {
+            return;
+          }
+          try {
+            // Use synchronous close via the underlying file descriptor to
+            // guarantee the handle is released before rmSync runs. The async
+            // handle.close() cannot complete in forced-exit paths such as
+            // process.on('exit') or the shutdown timeout timer, and on
+            // Windows the still-open handle would cause rmSync to fail with
+            // EBUSY.
+            fsSync.closeSync(handle.fd);
+          } catch {
+            // best-effort — fd may already be closed
+          }
+          try {
+            fsSync.rmSync(lockPath, { force: true });
+          } catch {
+            // best-effort
+          }
         },
       };
     } catch (err) {
