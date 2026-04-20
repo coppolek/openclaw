@@ -11,6 +11,7 @@ Docs: https://docs.openclaw.ai
 ### Fixes
 
 - Cron/delivery: treat explicit `delivery.mode: "none"` runs as not requested even if the runner reports `delivered: false`, so no-delivery cron jobs no longer persist false delivery failures or errors. (#69285) Thanks @matsuri1987.
+- Agents/failover: classify CJK provider transport, quota, billing, auth, and overload error text so Chinese-language provider failures trigger fallback and user-facing transport copy instead of surfacing as unclassified raw errors. (#56242) Thanks @tomcatzh.
 
 ## 2026.4.20
 
