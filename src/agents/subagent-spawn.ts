@@ -127,6 +127,7 @@ export type SpawnSubagentResult = {
   mode?: SpawnSubagentMode;
   note?: string;
   modelApplied?: boolean;
+  resolvedModel?: string;
   error?: string;
   attachments?: {
     count: number;
@@ -923,6 +924,7 @@ export async function spawnSubagentDirect(
       agentSessionKey: ctx.agentSessionKey,
     }),
     modelApplied: resolvedModel ? modelApplied : undefined,
+    resolvedModel: resolvedModel || undefined,
     attachments: attachmentsReceipt,
   };
 }
