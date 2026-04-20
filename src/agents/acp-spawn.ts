@@ -670,10 +670,6 @@ function resolveAcpSpawnRequesterState(params: {
           .listBySession(params.parentSessionKey)
           .some((record) => record.targetKind === "subagent" && record.status !== "ended")
       : false;
-  const hasThreadContext =
-    typeof params.ctx.agentThreadId === "string"
-      ? Boolean(normalizeOptionalString(params.ctx.agentThreadId))
-      : params.ctx.agentThreadId != null;
   const requesterAgentId = requesterParsedSession?.agentId;
 
   // Backfill missing ctx delivery fields from the parent session's stored
@@ -714,6 +710,11 @@ function resolveAcpSpawnRequesterState(params: {
   const effectiveParentDelivery = toMismatch ? undefined : parentDelivery;
   const effectiveDelivery =
     mergeDeliveryContext(ctxDeliveryHint, effectiveParentDelivery) ?? ctxDeliveryHint;
+  // Derive thread-context from merged delivery so callers that backfill
+  // threadId from the parent session (e.g. top-level-agent spawns where the
+  // tool-wiring layer left ctx.agentThreadId empty) don't get misclassified
+  // as non-threaded by downstream consumers like resolveAcpSpawnStreamPlan.
+  const hasThreadContext = effectiveDelivery?.threadId != null;
 
   return {
     parentSessionKey: params.parentSessionKey,
