@@ -15,6 +15,9 @@ export async function resolveCurrentDirectiveLevels(params: {
     fastModeDefault?: unknown;
     reasoningDefault?: unknown;
   };
+  globalAgentDefaults?: {
+    emotionDefault?: unknown;
+  };
   agentCfg?: {
     thinkingDefault?: unknown;
     emotionDefault?: unknown;
@@ -48,6 +51,7 @@ export async function resolveCurrentDirectiveLevels(params: {
     (params.sessionEntry?.emotionMode as EmotionMode | undefined) ??
     (params.agentEntry?.emotionDefault as EmotionMode | undefined) ??
     (params.agentCfg?.emotionDefault as EmotionMode | undefined) ??
+    (params.globalAgentDefaults?.emotionDefault as EmotionMode | undefined) ??
     "off";
   const currentReasoningLevel =
     (params.sessionEntry?.reasoningLevel as ReasoningLevel | undefined) ??

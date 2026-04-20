@@ -57,6 +57,7 @@ export async function applyInlineDirectivesFastLane(
     currentElevatedLevel,
   } = await resolveCurrentDirectiveLevels({
     sessionEntry,
+    globalAgentDefaults: cfg.agents?.defaults,
     agentCfg,
     resolveDefaultThinkingLevel: directives.hasThinkDirective
       ? () => modelState.resolveDefaultThinkingLevel()

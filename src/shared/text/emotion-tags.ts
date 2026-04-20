@@ -132,8 +132,12 @@ function stripTrailingPartialEmotionTag(text: string): StripEmotionTagsResult {
   if (!text.endsWith("[") && !TRAILING_EMOTION_TAG_RE.test(text)) {
     return { text, changed: false };
   }
+  const codeRegions = findCodeRegions(text);
   if (text.endsWith("[")) {
     const index = text.length - 1;
+    if (isInsideCode(index, codeRegions)) {
+      return { text, changed: false };
+    }
     const before = index > 0 ? text[index - 1] : undefined;
     if (!isEmotionTagBoundary(before, "before")) {
       return { text, changed: false };
@@ -146,6 +150,9 @@ function stripTrailingPartialEmotionTag(text: string): StripEmotionTagsResult {
   }
   const trailingMatch = TRAILING_EMOTION_TAG_RE.exec(text);
   if (!trailingMatch || trailingMatch.index === undefined) {
+    return { text, changed: false };
+  }
+  if (isInsideCode(trailingMatch.index, codeRegions)) {
     return { text, changed: false };
   }
   const before = trailingMatch.index > 0 ? text[trailingMatch.index - 1] : undefined;

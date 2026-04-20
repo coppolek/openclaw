@@ -306,6 +306,7 @@ export async function applyInlineDirectiveOverrides(params: {
     ).resolveCurrentDirectiveLevels({
       sessionEntry,
       agentEntry,
+      globalAgentDefaults: cfg.agents?.defaults,
       agentCfg,
       resolveDefaultThinkingLevel: () => modelState.resolveDefaultThinkingLevel(),
     });

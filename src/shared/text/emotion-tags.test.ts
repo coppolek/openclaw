@@ -52,4 +52,20 @@ describe("sanitizeEmotionTagsForMode", () => {
 
     expect(result).toEqual({ text: "hello ", changed: true });
   });
+
+  test("does not strip trailing partial tags inside inline code", () => {
+    const result = sanitizeEmotionTagsForMode("Use `[soft` in the example", "on", {
+      allowTrailingPartialTag: true,
+    });
+
+    expect(result).toEqual({ text: "Use `[soft` in the example", changed: false });
+  });
+
+  test("does not strip a trailing bracket inside fenced code", () => {
+    const result = sanitizeEmotionTagsForMode("```ts\nconst items = [\n```", "full", {
+      allowTrailingPartialTag: true,
+    });
+
+    expect(result).toEqual({ text: "```ts\nconst items = [\n```", changed: false });
+  });
 });
