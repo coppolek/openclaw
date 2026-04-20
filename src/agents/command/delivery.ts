@@ -23,7 +23,7 @@ import {
   projectOutboundPayloadPlanForOutbound,
 } from "../../infra/outbound/payloads.js";
 import type { OutboundSessionContext } from "../../infra/outbound/session-context.js";
-import type { RuntimeEnv } from "../../runtime.js";
+import type { RuntimeEnv, OutputRuntimeEnv } from "../../runtime.js";
 import { isInternalMessageChannel } from "../../utils/message-channel.js";
 import { isNestedAgentLane } from "../lanes.js";
 import type { AgentCommandOpts } from "./types.js";
@@ -322,15 +322,11 @@ export async function deliverAgentCommandResult(params: {
   const outboundPayloadPlan = createOutboundPayloadPlan(mediaNormalizedReplyPayloads);
   const normalizedPayloads = projectOutboundPayloadPlanForJson(outboundPayloadPlan);
   if (opts.json) {
-    runtime.log(
-      JSON.stringify(
-        buildOutboundResultEnvelope({
-          payloads: normalizedPayloads,
-          meta: result.meta,
-        }),
-        null,
-        2,
-      ),
+    (runtime as OutputRuntimeEnv).writeJson(
+      buildOutboundResultEnvelope({
+        payloads: normalizedPayloads,
+        meta: result.meta,
+      }),
     );
     if (!deliver) {
       return { payloads: normalizedPayloads, meta: result.meta };
