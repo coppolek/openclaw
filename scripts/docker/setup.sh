@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMPOSE_FILE="$ROOT_DIR/docker-compose.yml"
 EXTRA_COMPOSE_FILE="$ROOT_DIR/docker-compose.extra.yml"
+ENV_FILE="$ROOT_DIR/.env"
 IMAGE_NAME="${OPENCLAW_IMAGE:-openclaw:local}"
 EXTRA_MOUNTS="${OPENCLAW_EXTRA_MOUNTS:-}"
 HOME_VOLUME_NAME="${OPENCLAW_HOME_VOLUME:-}"
@@ -37,6 +38,23 @@ is_truthy_value() {
     1 | true | yes | on) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+read_env_file_value() {
+  local file="$1"
+  local key="$2"
+  if [[ ! -f "$file" ]]; then
+    return 0
+  fi
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    local current_key="${line%%=*}"
+    if [[ "$current_key" == "$key" ]]; then
+      printf '%s' "${line#*=}"
+      return 0
+    fi
+  done <"$file"
 }
 
 read_config_gateway_token() {
@@ -231,6 +249,15 @@ fi
 if is_truthy_value "$RAW_SANDBOX_SETTING"; then
   SANDBOX_ENABLED="1"
 fi
+if [[ -z "$EXTRA_MOUNTS" ]]; then
+  EXTRA_MOUNTS="$(read_env_file_value "$ENV_FILE" "OPENCLAW_EXTRA_MOUNTS")"
+fi
+if [[ -z "$HOME_VOLUME_NAME" ]]; then
+  HOME_VOLUME_NAME="$(read_env_file_value "$ENV_FILE" "OPENCLAW_HOME_VOLUME")"
+fi
+if [[ -z "${OPENCLAW_DOCKER_APT_PACKAGES:-}" ]]; then
+  OPENCLAW_DOCKER_APT_PACKAGES="$(read_env_file_value "$ENV_FILE" "OPENCLAW_DOCKER_APT_PACKAGES")"
+fi
 
 OPENCLAW_CONFIG_DIR="${OPENCLAW_CONFIG_DIR:-$HOME/.openclaw}"
 OPENCLAW_WORKSPACE_DIR="${OPENCLAW_WORKSPACE_DIR:-$HOME/.openclaw/workspace}"
@@ -319,30 +346,13 @@ COMPOSE_FILES=("$COMPOSE_FILE")
 COMPOSE_ARGS=()
 
 write_extra_compose() {
-  local home_volume="$1"
-  shift
   local mount
-  local gateway_home_mount
-  local gateway_config_mount
-  local gateway_workspace_mount
 
   cat >"$EXTRA_COMPOSE_FILE" <<'YAML'
 services:
   openclaw-gateway:
     volumes:
 YAML
-
-  if [[ -n "$home_volume" ]]; then
-    gateway_home_mount="${home_volume}:/home/node"
-    gateway_config_mount="${OPENCLAW_CONFIG_DIR}:/home/node/.openclaw"
-    gateway_workspace_mount="${OPENCLAW_WORKSPACE_DIR}:/home/node/.openclaw/workspace"
-    validate_mount_spec "$gateway_home_mount"
-    validate_mount_spec "$gateway_config_mount"
-    validate_mount_spec "$gateway_workspace_mount"
-    printf '      - %s\n' "$gateway_home_mount" >>"$EXTRA_COMPOSE_FILE"
-    printf '      - %s\n' "$gateway_config_mount" >>"$EXTRA_COMPOSE_FILE"
-    printf '      - %s\n' "$gateway_workspace_mount" >>"$EXTRA_COMPOSE_FILE"
-  fi
 
   for mount in "$@"; do
     validate_mount_spec "$mount"
@@ -354,24 +364,10 @@ YAML
     volumes:
 YAML
 
-  if [[ -n "$home_volume" ]]; then
-    printf '      - %s\n' "$gateway_home_mount" >>"$EXTRA_COMPOSE_FILE"
-    printf '      - %s\n' "$gateway_config_mount" >>"$EXTRA_COMPOSE_FILE"
-    printf '      - %s\n' "$gateway_workspace_mount" >>"$EXTRA_COMPOSE_FILE"
-  fi
-
   for mount in "$@"; do
     validate_mount_spec "$mount"
     printf '      - %s\n' "$mount" >>"$EXTRA_COMPOSE_FILE"
   done
-
-  if [[ -n "$home_volume" && "$home_volume" != *"/"* ]]; then
-    validate_named_volume "$home_volume"
-    cat >>"$EXTRA_COMPOSE_FILE" <<YAML
-volumes:
-  ${home_volume}:
-YAML
-  fi
 }
 
 # When sandbox is requested, ensure Docker CLI build arg is set for local builds.
@@ -394,13 +390,8 @@ if [[ -n "$EXTRA_MOUNTS" ]]; then
   done
 fi
 
-if [[ -n "$HOME_VOLUME_NAME" || ${#VALID_MOUNTS[@]} -gt 0 ]]; then
-  # Bash 3.2 + nounset treats "${array[@]}" on an empty array as unbound.
-  if [[ ${#VALID_MOUNTS[@]} -gt 0 ]]; then
-    write_extra_compose "$HOME_VOLUME_NAME" "${VALID_MOUNTS[@]}"
-  else
-    write_extra_compose "$HOME_VOLUME_NAME"
-  fi
+if [[ ${#VALID_MOUNTS[@]} -gt 0 ]]; then
+  write_extra_compose "${VALID_MOUNTS[@]}"
   COMPOSE_FILES+=("$EXTRA_COMPOSE_FILE")
 fi
 for compose_file in "${COMPOSE_FILES[@]}"; do
@@ -414,7 +405,6 @@ for compose_file in "${COMPOSE_FILES[@]}"; do
   COMPOSE_HINT+=" -f ${compose_file}"
 done
 
-ENV_FILE="$ROOT_DIR/.env"
 upsert_env() {
   local file="$1"
   shift
