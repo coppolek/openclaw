@@ -193,6 +193,7 @@ export class GatewayChatClient {
       maxProtocol: PROTOCOL_VERSION,
       onHelloOk: (hello) => {
         this.hello = hello;
+        console.error(`[tui-profile] helloOk received — TUI fully connected`);
         this.resolveReady?.();
         this.onConnected?.();
       },
@@ -217,7 +218,10 @@ export class GatewayChatClient {
   }
 
   static async connect(opts: GatewayConnectionOptions): Promise<GatewayChatClient> {
+    const t0 = Date.now();
+    console.error(`[tui-profile] resolving gateway connection...`);
     const connection = await resolveGatewayConnection(opts);
+    console.error(`[tui-profile] connection resolved +${Date.now() - t0}ms`);
     return new GatewayChatClient(connection);
   }
 

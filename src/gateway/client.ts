@@ -199,6 +199,7 @@ export class GatewayClient {
   private readonly requestTimeoutMs: number;
   private pendingStop: PendingStop | null = null;
   private socketOpened = false;
+  private _connectStartTs: number | null = null;
 
   constructor(opts: GatewayClientOptions) {
     this.opts = {
@@ -218,6 +219,8 @@ export class GatewayClient {
     if (this.closed) {
       return;
     }
+    this._connectStartTs = Date.now();
+    console.error(`[client-profile] WebSocket connecting to ${this.opts.url ?? "ws://127.0.0.1:18789"}...`);
     this.clearConnectChallengeTimeout();
     this.connectNonce = null;
     this.connectSent = false;
@@ -288,6 +291,7 @@ export class GatewayClient {
 
     ws.on("open", () => {
       this.socketOpened = true;
+      console.error(`[client-profile] WebSocket open +${Date.now() - (this._connectStartTs ?? Date.now())}ms`);
       if (url.startsWith("wss://") && this.opts.tlsFingerprint) {
         const tlsError = this.validateTlsFingerprint();
         if (tlsError) {
