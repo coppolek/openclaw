@@ -4,13 +4,20 @@ import { isChannelConfigured } from "./channel-configured.js";
 vi.mock("../channels/plugins/configured-state.js", () => ({
   hasBundledChannelConfiguredState: ({
     channelId,
+    cfg,
     env,
   }: {
     channelId: string;
+    cfg?: { channels?: { telegram?: { botToken?: string; tokenFile?: string; accounts?: Record<string, unknown> } } };
     env?: NodeJS.ProcessEnv;
   }) => {
     if (channelId === "telegram") {
-      return Boolean(env?.TELEGRAM_BOT_TOKEN);
+      if (env?.TELEGRAM_BOT_TOKEN) return true;
+      const tg = cfg?.channels?.telegram;
+      if (tg?.botToken) return true;
+      if (tg?.tokenFile) return true;
+      if (tg?.accounts && Object.keys(tg.accounts).length > 0) return true;
+      return false;
     }
     if (channelId === "discord") {
       return Boolean(env?.DISCORD_BOT_TOKEN);
@@ -42,6 +49,32 @@ vi.mock("../channels/plugins/bootstrap-registry.js", () => ({
 describe("isChannelConfigured", () => {
   it("detects Telegram env configuration through the package metadata seam", () => {
     expect(isChannelConfigured({}, "telegram", { TELEGRAM_BOT_TOKEN: "token" })).toBe(true);
+  });
+
+  it("detects Telegram config-file botToken through the channel plugin seam", () => {
+    expect(
+      isChannelConfigured({ channels: { telegram: { botToken: "123:ABC" } } }, "telegram", {}),
+    ).toBe(true);
+  });
+
+  it("detects Telegram config-file tokenFile through the channel plugin seam", () => {
+    expect(
+      isChannelConfigured(
+        { channels: { telegram: { tokenFile: "/etc/telegram.token" } } },
+        "telegram",
+        {},
+      ),
+    ).toBe(true);
+  });
+
+  it("detects Telegram config-file accounts through the channel plugin seam", () => {
+    expect(
+      isChannelConfigured(
+        { channels: { telegram: { accounts: { bot1: { botToken: "123:ABC" } } } } },
+        "telegram",
+        {},
+      ),
+    ).toBe(true);
   });
 
   it("detects Discord env configuration through the package metadata seam", () => {
