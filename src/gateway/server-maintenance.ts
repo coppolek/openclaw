@@ -12,7 +12,7 @@ import {
 } from "./server-constants.js";
 import type { DedupeEntry } from "./server-shared.js";
 import { formatError } from "./server-utils.js";
-import { setBroadcastHealthUpdate } from "./server/health-state.js";
+import { setBroadcastHealthUpdate, setRuntimeSnapshotFn } from "./server/health-state.js";
 
 export function startGatewayMaintenanceTimers(params: {
   broadcast: (
@@ -27,6 +27,10 @@ export function startGatewayMaintenanceTimers(params: {
   getPresenceVersion: () => number;
   getHealthVersion: () => number;
   refreshGatewayHealthSnapshot: (opts?: { probe?: boolean }) => Promise<HealthSummary>;
+  getRuntimeSnapshot?: () => {
+    channels: Partial<Record<string, unknown>>;
+    channelAccounts: Partial<Record<string, Record<string, unknown>>>;
+  };
   logHealth: { error: (msg: string) => void };
   dedupe: Map<string, DedupeEntry>;
   chatAbortControllers: Map<string, ChatAbortControllerEntry>;
@@ -57,6 +61,9 @@ export function startGatewayMaintenanceTimers(params: {
     });
     params.nodeSendToAllSubscribed("health", snap);
   });
+  if (params.getRuntimeSnapshot) {
+    setRuntimeSnapshotFn(params.getRuntimeSnapshot as Parameters<typeof setRuntimeSnapshotFn>[0]);
+  }
 
   // periodic keepalive
   const tickInterval = setInterval(() => {
