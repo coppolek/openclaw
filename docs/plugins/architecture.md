@@ -1532,7 +1532,7 @@ pipeline rather than just add memory search or hooks.
 import { buildMemorySystemPromptAddition } from "openclaw/plugin-sdk/core";
 
 export default function (api) {
-  api.registerContextEngine("lossless-claw", () => ({
+  api.registerContextEngine("lossless-claw", (ctx) => ({
     info: { id: "lossless-claw", name: "Lossless Claw", ownsCompaction: true },
     async ingest() {
       return { ingested: true };
@@ -1554,6 +1554,9 @@ export default function (api) {
 }
 ```
 
+The factory `ctx` exposes optional `config`, `agentDir`, and `workspaceDir`
+values for construction-time initialization.
+
 If your engine does **not** own the compaction algorithm, keep `compact()`
 implemented and delegate it explicitly:
 
@@ -1564,7 +1567,7 @@ import {
 } from "openclaw/plugin-sdk/core";
 
 export default function (api) {
-  api.registerContextEngine("my-memory-engine", () => ({
+  api.registerContextEngine("my-memory-engine", (ctx) => ({
     info: {
       id: "my-memory-engine",
       name: "My Memory Engine",

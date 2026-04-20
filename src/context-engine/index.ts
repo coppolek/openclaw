@@ -17,7 +17,11 @@ export {
   listContextEngineIds,
   resolveContextEngine,
 } from "./registry.js";
-export type { ContextEngineFactory } from "./registry.js";
+export type {
+  ContextEngineFactory,
+  ContextEngineFactoryContext,
+  ResolveContextEngineOptions,
+} from "./registry.js";
 
 export { LegacyContextEngine } from "./legacy.js";
 export { registerLegacyContextEngine } from "./legacy.registration.js";
