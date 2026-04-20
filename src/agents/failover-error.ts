@@ -1,6 +1,7 @@
 import { readErrorName } from "../infra/errors.js";
 import {
   classifyFailoverSignal,
+  isUnclassifiedNoBodyHttpSignal,
   type FailoverClassification,
   type FailoverSignal,
 } from "./pi-embedded-helpers/errors.js";
@@ -8,6 +9,7 @@ import { isTimeoutErrorMessage } from "./pi-embedded-helpers/errors.js";
 import type { FailoverReason } from "./pi-embedded-helpers/types.js";
 
 const ABORT_TIMEOUT_RE = /request was aborted|request aborted/i;
+const MAX_FAILOVER_CAUSE_DEPTH = 25;
 
 export class FailoverError extends Error {
   readonly reason: FailoverReason;
@@ -183,13 +185,6 @@ function getErrorMessage(err: unknown): string {
   return findErrorProperty(err, readDirectErrorMessage) ?? "";
 }
 
-function getErrorCause(err: unknown): unknown {
-  if (!err || typeof err !== "object" || !("cause" in err)) {
-    return undefined;
-  }
-  return (err as { cause?: unknown }).cause;
-}
-
 function hasTimeoutHint(err: unknown): boolean {
   if (!err) {
     return false;
@@ -236,7 +231,45 @@ function normalizeErrorSignal(err: unknown): FailoverSignal {
   };
 }
 
-function resolveFailoverClassificationFromError(err: unknown): FailoverClassification | null {
+function getNestedErrorCandidates(err: unknown): unknown[] {
+  if (!err || typeof err !== "object") {
+    return [];
+  }
+  const candidate = err as { error?: unknown; cause?: unknown };
+  return [candidate.error, candidate.cause].filter(
+    (value): value is unknown => value !== undefined && value !== err,
+  );
+}
+
+function isFormatClassification(classification: FailoverClassification | null): boolean {
+  return classification?.kind === "reason" && classification.reason === "format";
+}
+
+function isNestedNoBodySignal(candidate: unknown, inheritedStatus: number | undefined): boolean {
+  const candidateSignal = normalizeErrorSignal(candidate);
+  if (!candidateSignal.message?.trim()) {
+    return false;
+  }
+  return isUnclassifiedNoBodyHttpSignal({
+    ...candidateSignal,
+    status: candidateSignal.status ?? inheritedStatus,
+  });
+}
+
+function resolveFailoverClassificationFromErrorInternal(
+  err: unknown,
+  seen: Set<object>,
+  depth: number,
+): FailoverClassification | null {
+  if (depth > MAX_FAILOVER_CAUSE_DEPTH) {
+    return null;
+  }
+  if (err && typeof err === "object") {
+    if (seen.has(err)) {
+      return null;
+    }
+    seen.add(err);
+  }
   if (isFailoverError(err)) {
     return {
       kind: "reason",
@@ -244,14 +277,27 @@ function resolveFailoverClassificationFromError(err: unknown): FailoverClassific
     };
   }
 
-  const classification = classifyFailoverSignal(normalizeErrorSignal(err));
+  const signal = normalizeErrorSignal(err);
+  const classification = classifyFailoverSignal(signal);
+  const nestedCandidates = getNestedErrorCandidates(err);
+
   if (!classification || classification.kind === "context_overflow") {
-    // Let wrapped causes override parent timeout/overflow guesses.
-    const cause = getErrorCause(err);
-    if (cause && cause !== err) {
-      const causeClassification = resolveFailoverClassificationFromError(cause);
-      if (causeClassification) {
-        return causeClassification;
+    for (const candidate of nestedCandidates) {
+      const nestedClassification = resolveFailoverClassificationFromErrorInternal(
+        candidate,
+        seen,
+        depth + 1,
+      );
+      if (nestedClassification) {
+        return nestedClassification;
+      }
+    }
+  }
+
+  if (isFormatClassification(classification)) {
+    for (const candidate of nestedCandidates) {
+      if (isNestedNoBodySignal(candidate, signal.status)) {
+        return null;
       }
     }
   }
@@ -267,6 +313,10 @@ function resolveFailoverClassificationFromError(err: unknown): FailoverClassific
     };
   }
   return null;
+}
+
+function resolveFailoverClassificationFromError(err: unknown): FailoverClassification | null {
+  return resolveFailoverClassificationFromErrorInternal(err, new Set<object>(), 0);
 }
 
 export function resolveFailoverReasonFromError(err: unknown): FailoverReason | null {
