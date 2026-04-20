@@ -21,18 +21,59 @@ type MemorySearchManagerCacheStore = {
   qmdManagerCache: Map<string, MemorySearchManager>;
 };
 
+function isPlainObject(x: unknown): x is Record<PropertyKey, unknown> {
+  return typeof x === "object" && x !== null;
+}
+
 function getMemorySearchManagerCacheStore(): MemorySearchManagerCacheStore {
   // Keep caches reachable across `vi.resetModules()` so later cleanup can close older instances.
-  return resolveGlobalSingleton<MemorySearchManagerCacheStore>(
-    MEMORY_SEARCH_MANAGER_CACHE_KEY,
-    () => ({
-      qmdManagerCache: new Map<string, MemorySearchManager>(),
-    }),
-  );
+  // Use the global slot directly so we can replace the whole value if the stored shape is
+  // a primitive, a frozen object, or a Proxy with throwing accessors.
+  const globalStore = globalThis as Record<PropertyKey, unknown>;
+  const key = MEMORY_SEARCH_MANAGER_CACHE_KEY;
+  const existing = Object.prototype.hasOwnProperty.call(globalStore, key)
+    ? globalStore[key]
+    : undefined;
+
+  const freshStore = (): MemorySearchManagerCacheStore => ({
+    qmdManagerCache: new Map<string, MemorySearchManager>(),
+  });
+
+  // If the stored value is not a plain object (primitive, null, etc.) replace the whole slot.
+  if (!isPlainObject(existing)) {
+    const created = freshStore();
+    globalStore[key] = created;
+    return created;
+  }
+
+  // The slot holds an object — attempt a safe read and in-place repair of qmdManagerCache.
+  let cache: unknown;
+  try {
+    cache = existing.qmdManagerCache;
+  } catch {
+    cache = undefined;
+  }
+
+  if (!(cache instanceof Map)) {
+    try {
+      existing.qmdManagerCache = new Map<string, MemorySearchManager>();
+    } catch {
+      // Frozen, sealed, or accessor-based object — replace the whole slot.
+      const created = freshStore();
+      globalStore[key] = created;
+      return created;
+    }
+  }
+
+  return existing as MemorySearchManagerCacheStore;
 }
 
 const log = createSubsystemLogger("memory");
-const { qmdManagerCache: QMD_MANAGER_CACHE } = getMemorySearchManagerCacheStore();
+
+function getQmdManagerCache(): Map<string, MemorySearchManager> {
+  return getMemorySearchManagerCacheStore().qmdManagerCache;
+}
+
 let managerRuntimePromise: Promise<typeof import("../../manager-runtime.js")> | null = null;
 let qmdManagerModulePromise: Promise<typeof import("./qmd-manager.js")> | null = null;
 
@@ -61,12 +102,12 @@ export async function getMemorySearchManager(params: {
     const statusOnly = params.purpose === "status";
     const baseCacheKey = buildQmdCacheKey(params.agentId, resolved.qmd);
     const cacheKey = `${baseCacheKey}:${statusOnly ? "status" : "full"}`;
-    const cached = QMD_MANAGER_CACHE.get(cacheKey);
+    const cached = getQmdManagerCache().get(cacheKey);
     if (cached) {
       return { manager: cached };
     }
     if (statusOnly) {
-      const fullCached = QMD_MANAGER_CACHE.get(`${baseCacheKey}:full`);
+      const fullCached = getQmdManagerCache().get(`${baseCacheKey}:full`);
       if (fullCached) {
         // Status callers often close the manager they receive. Wrap the live
         // full manager with a no-op close so health/status probes do not tear
@@ -116,10 +157,10 @@ export async function getMemorySearchManager(params: {
               },
             },
             () => {
-              QMD_MANAGER_CACHE.delete(cacheKey);
+              getQmdManagerCache().delete(cacheKey);
             },
           );
-          QMD_MANAGER_CACHE.set(cacheKey, wrapper);
+          getQmdManagerCache().set(cacheKey, wrapper);
           return { manager: wrapper };
         }
       } catch (err) {
@@ -192,8 +233,9 @@ class BorrowedMemoryManager implements MemorySearchManager {
 }
 
 export async function closeAllMemorySearchManagers(): Promise<void> {
-  const managers = Array.from(QMD_MANAGER_CACHE.values());
-  QMD_MANAGER_CACHE.clear();
+  const cache = getQmdManagerCache();
+  const managers = Array.from(cache.values());
+  cache.clear();
   for (const manager of managers) {
     try {
       await manager.close?.();
