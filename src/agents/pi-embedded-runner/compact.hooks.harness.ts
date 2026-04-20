@@ -71,18 +71,21 @@ export const resolveMemorySearchConfigMock = vi.fn(() => ({
 }));
 export const resolveSessionAgentIdMock = vi.fn(() => "main");
 export const estimateTokensMock = vi.fn((_message?: unknown) => 10);
-export const sessionMessages: unknown[] = [
-  { role: "user", content: "hello", timestamp: 1 },
-  { role: "assistant", content: [{ type: "text", text: "hi" }], timestamp: 2 },
-  {
-    role: "toolResult",
-    toolCallId: "t1",
-    toolName: "exec",
-    content: [{ type: "text", text: "output" }],
-    isError: false,
-    timestamp: 3,
-  },
-];
+function createDefaultSessionMessages(): unknown[] {
+  return [
+    { role: "user", content: "hello", timestamp: 1 },
+    { role: "assistant", content: [{ type: "text", text: "hi" }], timestamp: 2 },
+    {
+      role: "toolResult",
+      toolCallId: "t1",
+      toolName: "exec",
+      content: [{ type: "text", text: "output" }],
+      isError: false,
+      timestamp: 3,
+    },
+  ];
+}
+export const sessionMessages: unknown[] = createDefaultSessionMessages();
 export const sessionAbortCompactionMock: Mock<(reason?: unknown) => void> = vi.fn();
 export const createOpenClawCodingToolsMock = vi.fn(() => []);
 export const resolveEmbeddedAgentStreamFnMock: Mock<
@@ -118,20 +121,7 @@ export function resetCompactSessionStateMocks(): void {
   resolveSessionAgentIdMock.mockReturnValue("main");
   estimateTokensMock.mockReset();
   estimateTokensMock.mockReturnValue(10);
-  sessionMessages.splice(
-    0,
-    sessionMessages.length,
-    { role: "user", content: "hello", timestamp: 1 },
-    { role: "assistant", content: [{ type: "text", text: "hi" }], timestamp: 2 },
-    {
-      role: "toolResult",
-      toolCallId: "t1",
-      toolName: "exec",
-      content: [{ type: "text", text: "output" }],
-      isError: false,
-      timestamp: 3,
-    },
-  );
+  sessionMessages.splice(0, sessionMessages.length, ...createDefaultSessionMessages());
   sessionAbortCompactionMock.mockReset();
   resolveEmbeddedAgentStreamFnMock.mockReset();
   resolveEmbeddedAgentStreamFnMock.mockImplementation((_params?: unknown) => vi.fn());
@@ -191,7 +181,7 @@ export function resetCompactHooksHarnessMocks(): void {
 
 export async function loadCompactHooksHarness(): Promise<{
   compactEmbeddedPiSessionDirect: typeof import("./compact.js").compactEmbeddedPiSessionDirect;
-  compactEmbeddedPiSession: typeof import("./compact.js").compactEmbeddedPiSession;
+  compactEmbeddedPiSession: typeof import("./compact.queued.js").compactEmbeddedPiSession;
   __testing: typeof import("./compact.js").__testing;
   onSessionTranscriptUpdate: typeof import("../../sessions/transcript-events.js").onSessionTranscriptUpdate;
 }> {
@@ -570,13 +560,15 @@ export async function loadCompactHooksHarness(): Promise<{
     resolveExecToolDefaults: vi.fn(() => undefined),
   }));
 
-  const [compactModule, transcriptEvents] = await Promise.all([
+  const [compactModule, compactQueuedModule, transcriptEvents] = await Promise.all([
     import("./compact.js"),
+    import("./compact.queued.js"),
     import("../../sessions/transcript-events.js"),
   ]);
 
   return {
     ...compactModule,
+    compactEmbeddedPiSession: compactQueuedModule.compactEmbeddedPiSession,
     onSessionTranscriptUpdate: transcriptEvents.onSessionTranscriptUpdate,
   };
 }

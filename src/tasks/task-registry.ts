@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { createRequire } from "node:module";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { onAgentEvent } from "../infra/agent-events.js";
 import { formatErrorMessage } from "../infra/errors.js";
@@ -24,6 +25,7 @@ import {
   syncFlowFromTask,
   updateFlowRecordByIdExpectedRevision,
 } from "./task-flow-runtime-internal.js";
+import type { TaskRegistryControlRuntime } from "./task-registry-control.types.js";
 import {
   getTaskRegistryObservers,
   getTaskRegistryStore,
@@ -63,19 +65,17 @@ type TaskRegistryDeliveryRuntime = Pick<
   typeof import("./task-registry-delivery-runtime.js"),
   "sendMessage"
 >;
-type TaskRegistryControlRuntime = {
-  getAcpSessionManager: () => Pick<
-    ReturnType<(typeof import("./task-registry-control.runtime.js"))["getAcpSessionManager"]>,
-    "cancelSession"
-  >;
-  killSubagentRunAdmin: (typeof import("./task-registry-control.runtime.js"))["killSubagentRunAdmin"];
-};
 const TASK_REGISTRY_DELIVERY_RUNTIME_OVERRIDE_KEY = Symbol.for(
   "openclaw.taskRegistry.deliveryRuntimeOverride",
 );
 const TASK_REGISTRY_CONTROL_RUNTIME_OVERRIDE_KEY = Symbol.for(
   "openclaw.taskRegistry.controlRuntimeOverride",
 );
+const require = createRequire(import.meta.url);
+const TASK_REGISTRY_CONTROL_RUNTIME_CANDIDATES = [
+  "./task-registry-control.runtime.js",
+  "./task-registry-control.runtime.ts",
+] as const;
 type TaskRegistryGlobalWithRuntimeOverrides = typeof globalThis & {
   [TASK_REGISTRY_DELIVERY_RUNTIME_OVERRIDE_KEY]?: TaskRegistryDeliveryRuntime | null;
   [TASK_REGISTRY_CONTROL_RUNTIME_OVERRIDE_KEY]?: TaskRegistryControlRuntime | null;
@@ -397,7 +397,16 @@ function loadTaskRegistryControlRuntime() {
   }
   // Registry reads happen far more often than task cancellation, so keep the ACP/subagent
   // control graph off the default import path until a cancellation flow actually needs it.
-  controlRuntimePromise ??= import("./task-registry-control.runtime.js");
+  controlRuntimePromise ??= Promise.resolve().then(() => {
+    for (const candidate of TASK_REGISTRY_CONTROL_RUNTIME_CANDIDATES) {
+      try {
+        return require(candidate) as TaskRegistryControlRuntime;
+      } catch {
+        // Try runtime/source candidates in order.
+      }
+    }
+    throw new Error("Failed to load task registry control runtime.");
+  });
   return controlRuntimePromise;
 }
 
@@ -1805,7 +1814,7 @@ export async function cancelTaskById(params: {
 export function listTaskRecords(): TaskRecord[] {
   ensureTaskRegistryReady();
   return [...tasks.values()]
-    .map((task, insertionIndex) => ({ ...cloneTaskRecord(task), insertionIndex }))
+    .map((task, insertionIndex) => Object.assign({}, cloneTaskRecord(task), { insertionIndex }))
     .toSorted(compareTasksNewestFirst)
     .map(({ insertionIndex: _, ...task }) => task);
 }
@@ -1842,7 +1851,7 @@ function listTasksFromIndex(index: Map<string, Set<string>>, key: string): TaskR
   return [...ids]
     .map((taskId, insertionIndex) => {
       const task = tasks.get(taskId);
-      return task ? { ...cloneTaskRecord(task), insertionIndex } : null;
+      return task ? Object.assign({}, cloneTaskRecord(task), { insertionIndex }) : null;
     })
     .filter(
       (

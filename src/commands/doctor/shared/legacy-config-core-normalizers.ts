@@ -1,4 +1,4 @@
-import { normalizeProviderId } from "../../../agents/model-selection-normalize.js";
+import { normalizeProviderId } from "../../../agents/provider-id.js";
 import { resolveSingleAccountKeysToMove } from "../../../channels/plugins/setup-promotion-helpers.js";
 import { resolveNormalizedProviderModelMaxTokens } from "../../../config/defaults.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
@@ -531,10 +531,7 @@ export function normalizeLegacyMistralModelMaxTokens(
       changes.push(
         `Normalized models.providers.${providerId}.models[${index}].maxTokens (${maxTokens} → ${normalizedMaxTokens}) to avoid Mistral context-window rejects.`,
       );
-      return {
-        ...model,
-        maxTokens: normalizedMaxTokens,
-      };
+      return Object.assign({}, model, { maxTokens: normalizedMaxTokens });
     });
 
     if (!modelsChanged) {

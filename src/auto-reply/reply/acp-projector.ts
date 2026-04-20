@@ -15,7 +15,7 @@ import {
   resolveAcpStreamingConfig,
 } from "./acp-stream-settings.js";
 import { createBlockReplyPipeline } from "./block-reply-pipeline.js";
-import type { ReplyDispatchKind } from "./reply-dispatcher.js";
+import type { ReplyDispatchKind } from "./reply-dispatcher.types.js";
 
 const ACP_BLOCK_REPLY_TIMEOUT_MS = 15_000;
 const ACP_LIVE_IDLE_FLUSH_FLOOR_MS = 750;
@@ -279,7 +279,7 @@ export function createAcpReplyProjector(params: {
     if (!(settings.deliveryMode === "final_only" && force)) {
       return;
     }
-    for (const entry of pendingToolDeliveries.splice(0, pendingToolDeliveries.length)) {
+    for (const entry of pendingToolDeliveries.splice(0)) {
       await params.deliver("tool", entry.payload, entry.meta);
     }
   };
