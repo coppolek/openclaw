@@ -30,6 +30,7 @@ import { normalizeMessageChannel } from "../../../utils/message-channel.js";
 import { isReasoningTagProvider } from "../../../utils/provider-utils.js";
 import { resolveOpenClawAgentDir } from "../../agent-paths.js";
 import { resolveSessionAgentIds } from "../../agent-scope.js";
+import { createAgentTraceLogger } from "../../agent-trace-log.js";
 import { createAnthropicPayloadLogger } from "../../anthropic-payload-log.js";
 import {
   analyzeBootstrapBudget,
@@ -1181,6 +1182,15 @@ export async function runEmbeddedAttempt(
         modelApi: params.model.api,
         workspaceDir: params.workspaceDir,
       });
+      const agentTraceLogger = createAgentTraceLogger({
+        env: process.env,
+        runId: params.runId,
+        sessionId: activeSession.sessionId,
+        sessionKey: params.sessionKey,
+        provider: params.provider,
+        modelId: params.modelId,
+        workspaceDir: params.workspaceDir,
+      });
 
       // Rebuild each turn from the session's original stream base so prior-turn
       // wrappers do not pin us to stale provider/API transport behavior.
@@ -1430,6 +1440,9 @@ export async function runEmbeddedAttempt(
           activeSession.agent.streamFn,
         );
       }
+      if (agentTraceLogger) {
+        activeSession.agent.streamFn = agentTraceLogger.wrapStreamFn(activeSession.agent.streamFn);
+      }
       // Anthropic-compatible providers can add new stop reasons before pi-ai maps them.
       // Recover the known "sensitive" stop reason here so a model refusal does not
       // bubble out as an uncaught runner error and stall channel polling.
@@ -1657,6 +1670,7 @@ export async function runEmbeddedAttempt(
           onPartialReply: params.onPartialReply,
           onAssistantMessageStart: params.onAssistantMessageStart,
           onAgentEvent: params.onAgentEvent,
+          onTraceEvent: agentTraceLogger?.logSessionEvent,
           enforceFinalTag: params.enforceFinalTag,
           silentExpected: params.silentExpected,
           config: params.config,
