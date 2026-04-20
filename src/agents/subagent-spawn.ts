@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { SessionsPatchParams } from "../gateway/protocol/schema/types.js";
 import type { SubagentLifecycleHookRunner } from "../plugins/hooks.js";
 import { isValidAgentId, normalizeAgentId, parseAgentSessionKey } from "../routing/session-key.js";
 import {
@@ -564,7 +565,9 @@ export async function spawnSubagentDirect(
     };
   }
   const { resolvedModel, thinkingOverride } = plan;
-  const patchChildSession = async (patch: Record<string, unknown>): Promise<string | undefined> => {
+  const patchChildSession = async (
+    patch: Omit<SessionsPatchParams, "key">,
+  ): Promise<string | undefined> => {
     try {
       await callSubagentGateway({
         method: "sessions.patch",
@@ -577,7 +580,7 @@ export async function spawnSubagentDirect(
     }
   };
 
-  const initialChildSessionPatch: Record<string, unknown> = {
+  const initialChildSessionPatch: Omit<SessionsPatchParams, "key"> = {
     spawnDepth: childDepth,
     subagentRole: childCapabilities.role === "main" ? null : childCapabilities.role,
     subagentControlScope: childCapabilities.controlScope,
