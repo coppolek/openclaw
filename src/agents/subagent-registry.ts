@@ -768,7 +768,6 @@ export function replaceSubagentRunAfterSteer(params: {
 }
 
 export function registerSubagentRun(params: RegisterSubagentRunParams) {
-export function registerSubagentRun(params: RegisterSubagentRunParams) {
   subagentRunManager.registerSubagentRun(params);
 }
 
