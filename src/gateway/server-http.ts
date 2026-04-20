@@ -683,6 +683,7 @@ export function createHooksRequestHandler(
           message: normalized.value.message,
           name: normalized.value.name,
           wakeMode: normalized.value.wakeMode,
+          sessionTarget: null, // mapping-level only; direct /agent endpoint always uses isolated
           deliver: normalized.value.deliver,
           channel: normalized.value.channel,
           to: normalized.value.to ?? null,
@@ -788,6 +789,7 @@ export function createHooksRequestHandler(
               message: mapped.action.message,
               name: mapped.action.name ?? "Hook",
               wakeMode: mapped.action.wakeMode,
+              sessionTarget: mapped.action.sessionTarget ?? null,
               deliver: resolveHookDeliver(mapped.action.deliver),
               channel,
               to: mapped.action.to ?? null,
@@ -807,6 +809,7 @@ export function createHooksRequestHandler(
             idempotencyKey,
             agentId: targetAgentId,
             wakeMode: mapped.action.wakeMode,
+            sessionTarget: mapped.action.sessionTarget,
             sessionKey: normalizedDispatchSessionKey,
             deliver: resolveHookDeliver(mapped.action.deliver),
             channel,
