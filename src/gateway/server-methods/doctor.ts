@@ -16,9 +16,13 @@ import { getActiveMemorySearchManager } from "../../plugins/memory-runtime.js";
 import { formatError } from "../server-utils.js";
 import {
   dedupeDreamDiaryEntries,
+  filterRecallEntriesWithinLookback,
+  previewGroundedRemMarkdown,
+  previewRemDreaming,
+  rankShortTermPromotionCandidates,
+  readShortTermRecallEntries,
   removeBackfillDiaryEntries,
   removeGroundedShortTermCandidates,
-  previewGroundedRemMarkdown,
   repairDreamingArtifacts,
   writeBackfillDiaryEntries,
 } from "./doctor.memory-core-runtime.js";
@@ -31,6 +35,10 @@ const MANAGED_DEEP_SLEEP_CRON_NAME = "Memory Dreaming Promotion";
 const MANAGED_DEEP_SLEEP_CRON_TAG = "[managed-by=memory-core.short-term-promotion]";
 const DEEP_SLEEP_SYSTEM_EVENT_TEXT = "__openclaw_memory_core_short_term_promotion_dream__";
 const DREAM_DIARY_FILE_NAMES = ["DREAMS.md", "dreams.md"] as const;
+const REM_HARNESS_DEFAULT_CANDIDATE_LIMIT = 25;
+const REM_HARNESS_MAX_CANDIDATE_LIMIT = 100;
+const REM_HARNESS_MAX_GROUNDED_FILES = 10;
+const REM_HARNESS_MAX_REM_PREVIEW_LIMIT = 50;
 
 type DoctorMemoryDreamingPhasePayload = {
   enabled: boolean;
@@ -149,6 +157,78 @@ export type DoctorMemoryDreamActionPayload = {
   dedupedEntries?: number;
   keptEntries?: number;
 };
+
+export type DoctorMemoryRemHarnessCandidatePayload = {
+  key: string;
+  path: string;
+  startLine: number;
+  endLine: number;
+  snippet: string;
+  recallCount: number;
+  uniqueQueries: number;
+  avgScore: number;
+  maxScore: number;
+  ageDays: number;
+  firstRecalledAt: string;
+  lastRecalledAt: string;
+  promoted: boolean;
+  promotedAt?: string;
+};
+
+export type DoctorMemoryRemHarnessCandidateTruthPayload = {
+  snippet: string;
+  confidence: number;
+};
+
+export type DoctorMemoryRemHarnessGroundedFilePayload = {
+  path: string;
+  renderedMarkdown: string;
+};
+
+export type DoctorMemoryRemHarnessSuccessPayload = {
+  ok: true;
+  agentId: string;
+  workspaceDir: string;
+  remConfig: {
+    enabled: boolean;
+    lookbackDays: number;
+    limit: number;
+    minPatternStrength: number;
+  };
+  deepConfig: {
+    minScore: number;
+    minRecallCount: number;
+    minUniqueQueries: number;
+    recencyHalfLifeDays: number;
+    maxAgeDays: number | null;
+  };
+  rem: {
+    sourceEntryCount: number;
+    reflections: string[];
+    candidateTruths: DoctorMemoryRemHarnessCandidateTruthPayload[];
+    bodyLines: string[];
+  };
+  grounded: {
+    scannedFiles: number;
+    files: DoctorMemoryRemHarnessGroundedFilePayload[];
+  } | null;
+  deep: {
+    candidateLimit: number;
+    truncated: boolean;
+    candidates: DoctorMemoryRemHarnessCandidatePayload[];
+  };
+};
+
+export type DoctorMemoryRemHarnessErrorPayload = {
+  ok: false;
+  agentId: string;
+  workspaceDir: string;
+  error: string;
+};
+
+export type DoctorMemoryRemHarnessPayload =
+  | DoctorMemoryRemHarnessSuccessPayload
+  | DoctorMemoryRemHarnessErrorPayload;
 
 function extractIsoDayFromPath(filePath: string): string | null {
   const match = filePath.replaceAll("\\", "/").match(/(\d{4}-\d{2}-\d{2})\.md$/i);
@@ -1004,5 +1084,153 @@ export const doctorHandlers: GatewayRequestHandlers = {
       keptEntries: dedupe.kept,
     };
     respond(true, payload, undefined);
+  },
+  "doctor.memory.remHarness": async ({ params, respond }) => {
+    const cfg = loadConfig();
+    const agentId = resolveDefaultAgentId(cfg);
+    const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
+    const req = asRecord(params);
+    const grounded = Boolean(req?.grounded);
+    const includePromoted = Boolean(req?.includePromoted);
+    const requestedLimit =
+      typeof req?.limit === "number" && Number.isFinite(req.limit)
+        ? Math.floor(req.limit)
+        : REM_HARNESS_DEFAULT_CANDIDATE_LIMIT;
+    const candidateLimit = Math.max(1, Math.min(REM_HARNESS_MAX_CANDIDATE_LIMIT, requestedLimit));
+    try {
+      const pluginConfig = resolveMemoryDreamingPluginConfig(cfg);
+      const remConfig = resolveMemoryRemDreamingConfig({ pluginConfig, cfg });
+      const deepConfig = resolveMemoryDeepDreamingConfig({ pluginConfig, cfg });
+
+      const nowMs = Date.now();
+      const allRecallEntries = await readShortTermRecallEntries({ workspaceDir, nowMs });
+      // Mirror real REM/light dreaming lookback semantics (recallDays + lastRecalledAt)
+      // through the memory-core helper so this read-only harness cannot drift from
+      // what the real pipeline would actually process.
+      const recallEntries = filterRecallEntriesWithinLookback({
+        entries: allRecallEntries,
+        nowMs,
+        lookbackDays: remConfig.lookbackDays,
+      });
+
+      // Bounded-read: config-driven `remConfig.limit` is only normalized as a
+      // non-negative int upstream. Cap the value we forward to previewRemDreaming
+      // so a very high config setting cannot blow up harness reflections/bodyLines.
+      // Preserve 0 so `rem.limit: 0` configs surface the same empty preview the
+      // real pipeline would (buildRemReflections.slice(0, 0) -> no patterns).
+      const remPreviewLimit = Math.min(
+        Math.max(0, remConfig.limit),
+        REM_HARNESS_MAX_REM_PREVIEW_LIMIT,
+      );
+      const remPreview = previewRemDreaming({
+        entries: recallEntries,
+        limit: remPreviewLimit,
+        minPatternStrength: remConfig.minPatternStrength,
+      });
+
+      let groundedPayload: DoctorMemoryRemHarnessSuccessPayload["grounded"] = null;
+      if (grounded) {
+        const memoryDir = path.join(workspaceDir, "memory");
+        const dailyFiles = await listWorkspaceDailyFiles(memoryDir);
+        const sliceLimit = Math.min(Math.max(1, remConfig.limit), REM_HARNESS_MAX_GROUNDED_FILES);
+        const groundedInputs = dailyFiles.slice(-sliceLimit);
+        if (groundedInputs.length > 0) {
+          const groundedPreview = await previewGroundedRemMarkdown({
+            workspaceDir,
+            inputPaths: groundedInputs,
+          });
+          groundedPayload = {
+            scannedFiles: groundedPreview.scannedFiles,
+            files: groundedPreview.files.map((file) => ({
+              path: file.path,
+              renderedMarkdown: file.renderedMarkdown,
+            })),
+          };
+        } else {
+          groundedPayload = { scannedFiles: 0, files: [] };
+        }
+      }
+
+      // Harness intentionally bypasses deep.* thresholds so callers can preview
+      // every candidate that could promote. Output is hard-capped at
+      // `candidateLimit` (<= REM_HARNESS_MAX_CANDIDATE_LIMIT) to keep this
+      // read-scoped RPC bounded; we fetch one extra row to detect truncation
+      // without a second ranking pass.
+      const rankedCandidates = await rankShortTermPromotionCandidates({
+        workspaceDir,
+        minScore: 0,
+        minRecallCount: 0,
+        minUniqueQueries: 0,
+        includePromoted,
+        recencyHalfLifeDays: deepConfig.recencyHalfLifeDays,
+        maxAgeDays: deepConfig.maxAgeDays,
+        nowMs,
+        limit: candidateLimit + 1,
+      });
+      const truncated = rankedCandidates.length > candidateLimit;
+      const deepCandidates = rankedCandidates.slice(0, candidateLimit);
+
+      const payload: DoctorMemoryRemHarnessSuccessPayload = {
+        ok: true,
+        agentId,
+        workspaceDir,
+        remConfig: {
+          enabled: remConfig.enabled,
+          lookbackDays: remConfig.lookbackDays,
+          limit: remConfig.limit,
+          minPatternStrength: remConfig.minPatternStrength,
+        },
+        deepConfig: {
+          minScore: deepConfig.minScore,
+          minRecallCount: deepConfig.minRecallCount,
+          minUniqueQueries: deepConfig.minUniqueQueries,
+          recencyHalfLifeDays: deepConfig.recencyHalfLifeDays,
+          maxAgeDays: typeof deepConfig.maxAgeDays === "number" ? deepConfig.maxAgeDays : null,
+        },
+        rem: {
+          sourceEntryCount: remPreview.sourceEntryCount,
+          reflections: [...remPreview.reflections],
+          candidateTruths: remPreview.candidateTruths.map((truth) => ({
+            snippet: truth.snippet,
+            confidence: truth.confidence,
+          })),
+          bodyLines: [...remPreview.bodyLines],
+        },
+        grounded: groundedPayload,
+        deep: {
+          candidateLimit,
+          truncated,
+          candidates: deepCandidates.map((candidate) => {
+            const promoted =
+              typeof candidate.promotedAt === "string" && candidate.promotedAt.length > 0;
+            return {
+              key: candidate.key,
+              path: candidate.path,
+              startLine: candidate.startLine,
+              endLine: candidate.endLine,
+              snippet: candidate.snippet,
+              recallCount: candidate.recallCount,
+              uniqueQueries: candidate.uniqueQueries,
+              avgScore: candidate.avgScore,
+              maxScore: candidate.maxScore,
+              ageDays: candidate.ageDays,
+              firstRecalledAt: candidate.firstRecalledAt,
+              lastRecalledAt: candidate.lastRecalledAt,
+              promoted,
+              ...(promoted ? { promotedAt: candidate.promotedAt } : {}),
+            };
+          }),
+        },
+      };
+      respond(true, payload, undefined);
+    } catch (err) {
+      const payload: DoctorMemoryRemHarnessErrorPayload = {
+        ok: false,
+        agentId,
+        workspaceDir,
+        error: `gateway rem-harness probe failed: ${formatError(err)}`,
+      };
+      respond(true, payload, undefined);
+    }
   },
 };
