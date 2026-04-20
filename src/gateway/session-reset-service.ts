@@ -33,7 +33,7 @@ import {
   normalizeAgentId,
   parseAgentSessionKey,
 } from "../routing/session-key.js";
-import { normalizeMessageChannel } from "../utils/message-channel.js";
+import { isDeliverableMessageChannel, normalizeMessageChannel } from "../utils/message-channel.js";
 import { ErrorCodes, errorShape } from "./protocol/index.js";
 import {
   archiveSessionTranscriptsDetailed,
@@ -59,7 +59,8 @@ function inferMessageProviderFromSessionKey(sessionKey?: string): string | undef
   if (!head || head === "main" || head === "cron" || head === "subagent" || head === "acp") {
     return undefined;
   }
-  return normalizeMessageChannel(head);
+  const normalized = normalizeMessageChannel(head);
+  return normalized && isDeliverableMessageChannel(normalized) ? normalized : undefined;
 }
 
 function stripRuntimeModelState(entry?: SessionEntry): SessionEntry | undefined {
