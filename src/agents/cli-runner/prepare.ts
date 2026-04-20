@@ -78,7 +78,14 @@ export async function prepareCliRunContext(
     authProfileId: params.authProfileId,
   });
   const extraSystemPrompt = params.extraSystemPrompt?.trim() ?? "";
-  const extraSystemPromptHash = hashCliSessionText(extraSystemPrompt);
+  // Hash the stable subset when the caller splits it out, otherwise fall back to
+  // hashing the full injected prompt (legacy callers). Keeps volatile inbound
+  // channel envelope out of the CLI session reuse key (see issue #68471).
+  const extraSystemPromptHashSource =
+    params.extraSystemPromptHashInput !== undefined
+      ? params.extraSystemPromptHashInput.trim()
+      : extraSystemPrompt;
+  const extraSystemPromptHash = hashCliSessionText(extraSystemPromptHashSource);
   const modelId = (params.model ?? "default").trim() || "default";
   const normalizedModel = normalizeCliModel(modelId, backendResolved.config);
   const modelDisplay = `${params.provider}/${modelId}`;
