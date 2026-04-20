@@ -20,7 +20,7 @@ import { resolveSessionKey } from "../../config/sessions/session-key.js";
 import { loadSessionStore } from "../../config/sessions/store-load.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { normalizeAgentId, normalizeMainKey } from "../../routing/session-key.js";
+import { DEFAULT_AGENT_ID, normalizeAgentId, normalizeMainKey } from "../../routing/session-key.js";
 import { resolveSessionIdMatchSelection } from "../../sessions/session-id-resolution.js";
 import { listAgentIds } from "../agent-scope.js";
 import { clearBootstrapSnapshotOnSessionRollover } from "../bootstrap-cache.js";
@@ -85,12 +85,25 @@ function collectSessionIdMatchesForRequest(opts: {
   };
 
   addMatches(opts.sessionStore, opts.storePath, { primary: true });
+  const scannedAgentIds = new Set<string>();
+  if (opts.storeAgentId) {
+    scannedAgentIds.add(opts.storeAgentId);
+  }
   for (const agentId of listAgentIds(opts.cfg)) {
-    if (agentId === opts.storeAgentId) {
+    if (scannedAgentIds.has(agentId)) {
       continue;
     }
+    scannedAgentIds.add(agentId);
     const candidateStorePath = resolveStorePath(opts.cfg.session?.store, { agentId });
     addMatches(loadSessionStore(candidateStorePath), candidateStorePath);
+  }
+  // Also scan the legacy "main" store when the resolved agent differs, so that
+  // sessionId resume can find sessions stored under the old default agent.
+  if (!scannedAgentIds.has(DEFAULT_AGENT_ID)) {
+    const legacyStorePath = resolveStorePath(opts.cfg.session?.store, {
+      agentId: DEFAULT_AGENT_ID,
+    });
+    addMatches(loadSessionStore(legacyStorePath), legacyStorePath);
   }
 
   return { matches, primaryStoreMatches, storeByKey };
@@ -143,15 +156,18 @@ export function resolveSessionKeyForRequest(opts: {
       cfg: opts.cfg,
       agentId: opts.agentId,
     });
-  const storeAgentId = resolveAgentIdFromSessionKey(explicitSessionKey);
-  const storePath = resolveStorePath(sessionCfg?.store, {
-    agentId: storeAgentId,
-  });
-  const sessionStore = loadSessionStore(storePath);
 
+  // Derive sessionKey first so the store can be loaded from the resolved key's agent.
   const ctx: MsgContext | undefined = opts.to?.trim() ? { From: opts.to } : undefined;
   let sessionKey: string | undefined =
-    explicitSessionKey ?? (ctx ? resolveSessionKey(scope, ctx, mainKey) : undefined);
+    explicitSessionKey ?? (ctx ? resolveSessionKey(scope, ctx, mainKey, opts.cfg) : undefined);
+
+  // Now load the store from the derived key's agent ID.
+  const storeAgentId = resolveAgentIdFromSessionKey(sessionKey ?? explicitSessionKey);
+  let storePath = resolveStorePath(sessionCfg?.store, {
+    agentId: storeAgentId,
+  });
+  let sessionStore = loadSessionStore(storePath);
 
   // If a session id was provided, prefer to re-use its existing entry (by id) even when no key was
   // derived. When duplicates exist across agent stores, pick the same deterministic best match used
