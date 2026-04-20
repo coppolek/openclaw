@@ -87,6 +87,10 @@ function resolveProviderCatalogTimeoutMs(env: NodeJS.ProcessEnv): number {
   return DEFAULT_PROVIDER_DISCOVERY_TIMEOUT_MS;
 }
 
+export function resolveProviderCatalogTimeoutMsForTest(env: NodeJS.ProcessEnv): number {
+  return resolveProviderCatalogTimeoutMs(env);
+}
+
 function resolveProviderDiscoveryFilter(params: {
   config?: OpenClawConfig;
   workspaceDir?: string;
