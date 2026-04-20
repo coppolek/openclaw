@@ -141,6 +141,24 @@ describe("buildStatusMessage", () => {
     expect(normalized).toContain("Emotions: full");
   });
 
+  it("shows inherited emotion defaults when session emotion mode is unset", () => {
+    const text = buildStatusMessage({
+      agent: {
+        model: "anthropic/pi:opus",
+        emotionDefault: "on",
+      },
+      sessionEntry: {
+        sessionId: "abc",
+        updatedAt: 0,
+      },
+      sessionKey: "agent:main:main",
+      queue: { mode: "collect", depth: 0 },
+    });
+    const normalized = normalizeTestText(text);
+
+    expect(normalized).toContain("Emotions: on");
+  });
+
   it("shows plugin status lines only when verbose is enabled", () => {
     const visible = normalizeTestText(
       buildStatusMessage({

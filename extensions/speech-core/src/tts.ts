@@ -29,12 +29,6 @@ import {
   stripEmotionTags,
   stripMarkdown,
 } from "openclaw/plugin-sdk/text-runtime";
-import type {
-  TtsAutoMode as RuntimeTtsAutoMode,
-  TtsConfig as RuntimeTtsConfig,
-  TtsModelOverrideConfig as RuntimeTtsModelOverrideConfig,
-  TtsProvider as RuntimeTtsProvider,
-} from "../../../src/config/types.tts.js";
 import {
   canonicalizeSpeechProviderId,
   getSpeechProvider,
@@ -58,6 +52,31 @@ export type {
   ResolvedTtsModelOverrides,
   TtsDirectiveOverrides,
   TtsDirectiveParseResult,
+};
+
+type RuntimeTtsProvider = string;
+type RuntimeTtsAutoMode = "off" | "always" | "inbound" | "tagged";
+type RuntimeTtsModelOverrideConfig = {
+  enabled?: boolean;
+  allowText?: boolean;
+  allowProvider?: boolean;
+  allowVoice?: boolean;
+  allowModelId?: boolean;
+  allowVoiceSettings?: boolean;
+  allowNormalization?: boolean;
+  allowSeed?: boolean;
+};
+type RuntimeTtsConfig = {
+  auto?: RuntimeTtsAutoMode;
+  enabled?: boolean;
+  mode?: "final" | "all";
+  provider?: RuntimeTtsProvider;
+  summaryModel?: string;
+  modelOverrides?: RuntimeTtsModelOverrideConfig;
+  providers?: Record<string, Record<string, unknown>>;
+  prefsPath?: string;
+  maxTextLength?: number;
+  timeoutMs?: number;
 };
 
 const DEFAULT_TIMEOUT_MS = 30_000;

@@ -150,6 +150,22 @@ function resolveConfiguredTextVerbosity(params: {
   );
 }
 
+function resolveEffectiveEmotionMode(
+  args: Pick<StatusArgs, "config" | "agent" | "agentId" | "sessionEntry">,
+): "off" | "on" | "full" {
+  const configuredAgentEmotionDefault = args.agentId
+    ? normalizeEmotionMode(
+        args.config?.agents?.list?.find((entry) => entry.id === args.agentId)?.emotionDefault,
+      )
+    : undefined;
+  return (
+    normalizeEmotionMode(args.sessionEntry?.emotionMode) ??
+    configuredAgentEmotionDefault ??
+    normalizeEmotionMode(args.agent?.emotionDefault) ??
+    "off"
+  );
+}
+
 function resolveRuntimeLabel(
   args: Pick<StatusArgs, "config" | "agent" | "sessionKey" | "sessionScope">,
 ): string {
@@ -644,10 +660,7 @@ export function buildStatusMessage(args: StatusArgs): string {
   const verboseLevel =
     args.resolvedVerbose ?? args.sessionEntry?.verboseLevel ?? args.agent?.verboseDefault ?? "off";
   const fastMode = args.resolvedFast ?? args.sessionEntry?.fastMode ?? false;
-  const emotionMode =
-    normalizeEmotionMode(args.sessionEntry?.emotionMode) ??
-    normalizeEmotionMode(args.agent?.emotionDefault) ??
-    "off";
+  const emotionMode = resolveEffectiveEmotionMode(args);
   const reasoningLevel = args.resolvedReasoning ?? args.sessionEntry?.reasoningLevel ?? "off";
   const elevatedLevel =
     args.resolvedElevated ??

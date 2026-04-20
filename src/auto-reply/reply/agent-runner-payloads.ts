@@ -8,6 +8,7 @@ import type { EmotionMode } from "../../emotion-mode.js";
 import { isEmotionModeEnabled } from "../../emotion-mode.js";
 import { logVerbose } from "../../globals.js";
 import { sanitizeEmotionTagsForMode } from "../../shared/text/emotion-tags.js";
+import { stripInlineDirectiveTagsForDelivery } from "../../utils/directive-tags.js";
 import { stripHeartbeatToken } from "../heartbeat.js";
 import type { OriginatingChannelType } from "../templating.js";
 import { SILENT_REPLY_TOKEN } from "../tokens.js";
@@ -199,8 +200,17 @@ export async function buildReplyPayloads(params: {
           payload: parsed,
           normalizeMediaPaths: params.normalizeMediaPaths,
         })) as EmotionTaggedPayload;
-        if (typeof rawEmotionTtsText === "string" && rawEmotionTtsText.trim().length > 0) {
-          setReplyPayloadMetadata(normalizedPayload, { ttsSourceText: rawEmotionTtsText });
+        const cleanedRawEmotionTtsText =
+          typeof rawEmotionTtsText === "string"
+            ? stripInlineDirectiveTagsForDelivery(rawEmotionTtsText).text
+            : undefined;
+        if (
+          typeof cleanedRawEmotionTtsText === "string" &&
+          cleanedRawEmotionTtsText.trim().length > 0
+        ) {
+          setReplyPayloadMetadata(normalizedPayload, {
+            ttsSourceText: cleanedRawEmotionTtsText,
+          });
         }
         delete normalizedPayload[EMOTION_RAW_TTS_TEXT_KEY];
         return normalizedPayload;

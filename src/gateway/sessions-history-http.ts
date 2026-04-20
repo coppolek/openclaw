@@ -39,7 +39,7 @@ export function createCachedEmotionModeResolver(params: {
   loadEmotionMode: () => "off" | "on" | "full";
 }): () => "off" | "on" | "full" {
   let cachedEmotionMode = params.initialEmotionMode;
-  let cachedEmotionModeAt = 0;
+  let cachedEmotionModeAt = Date.now();
   const ttlMs = params.ttlMs ?? LIVE_EMOTION_MODE_CACHE_TTL_MS;
   return () => {
     const now = Date.now();

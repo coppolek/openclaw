@@ -25,6 +25,7 @@ const READ_SCOPE_HEADER = { "x-openclaw-scopes": "operator.read" };
 const cleanupDirs: string[] = [];
 
 afterEach(async () => {
+  vi.useRealTimers();
   await Promise.all(
     cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })),
   );
@@ -63,6 +64,25 @@ async function seedSession(params?: { text?: string }) {
   }
   return { storePath };
 }
+
+test("createCachedEmotionModeResolver honors the initial mode for the first ttl window", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-04-20T00:00:00.000Z"));
+  const loadEmotionMode = vi.fn(() => "full" as const);
+  const resolveEmotionMode = createCachedEmotionModeResolver({
+    initialEmotionMode: "on",
+    ttlMs: 250,
+    loadEmotionMode,
+  });
+
+  expect(resolveEmotionMode()).toBe("on");
+  expect(loadEmotionMode).not.toHaveBeenCalled();
+
+  vi.advanceTimersByTime(251);
+
+  expect(resolveEmotionMode()).toBe("full");
+  expect(loadEmotionMode).toHaveBeenCalledTimes(1);
+});
 
 function makeTranscriptAssistantMessage(params: {
   text: string;
@@ -282,6 +302,11 @@ describe("session history HTTP endpoints", () => {
         loadEmotionMode,
       });
 
+      expect(resolveEmotionMode()).toBe("off");
+      expect(resolveEmotionMode()).toBe("off");
+      expect(loadEmotionMode).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(251);
       expect(resolveEmotionMode()).toBe("full");
       expect(resolveEmotionMode()).toBe("full");
       expect(loadEmotionMode).toHaveBeenCalledTimes(1);
