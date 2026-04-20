@@ -61,6 +61,7 @@ export type ResolvedMemorySearchConfig = {
     watch: boolean;
     watchDebounceMs: number;
     intervalMinutes: number;
+    embeddingBatchTimeoutSeconds: number | undefined;
     sessions: {
       deltaBytes: number;
       deltaMessages: number;
@@ -358,6 +359,8 @@ function resolveSyncConfig(
       defaults?.sync?.watchDebounceMs ??
       DEFAULT_WATCH_DEBOUNCE_MS,
     intervalMinutes: overrides?.sync?.intervalMinutes ?? defaults?.sync?.intervalMinutes ?? 0,
+    embeddingBatchTimeoutSeconds:
+      overrides?.sync?.embeddingBatchTimeoutSeconds ?? defaults?.sync?.embeddingBatchTimeoutSeconds,
     sessions: {
       deltaBytes:
         overrides?.sync?.sessions?.deltaBytes ??
