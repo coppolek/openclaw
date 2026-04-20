@@ -135,7 +135,7 @@ describe("createAcpxRuntimeService", () => {
     await service.stop?.(ctx);
   });
 
-  it("warns when legacy compatibility config is explicitly ignored", async () => {
+  it("warns only for legacy compatibility flags that remain unsupported", async () => {
     const workspaceDir = await makeTempDir();
     const ctx = createServiceContext(workspaceDir);
     const runtime = createMockRuntime();
@@ -151,8 +151,41 @@ describe("createAcpxRuntimeService", () => {
 
     expect(ctx.logger.warn).toHaveBeenCalledWith(
       expect.stringContaining(
-        "embedded acpx runtime ignores legacy compatibility config: queueOwnerTtlSeconds, strictWindowsCmdWrapper=false",
+        "embedded acpx runtime ignores legacy compatibility config: strictWindowsCmdWrapper=false",
       ),
+    );
+
+    await service.stop?.(ctx);
+  });
+
+  it("passes queueOwnerTtlSeconds to the embedded runtime factory", async () => {
+    const workspaceDir = await makeTempDir();
+    const ctx = createServiceContext(workspaceDir);
+    const runtime = {
+      ensureSession: vi.fn(),
+      runTurn: vi.fn(),
+      cancel: vi.fn(),
+      close: vi.fn(),
+      probeAvailability: vi.fn(async () => {}),
+      isHealthy: vi.fn(() => true),
+      doctor: vi.fn(async () => ({ ok: true, message: "ok" })),
+    };
+    const runtimeFactory = vi.fn(() => runtime as never);
+    const service = createAcpxRuntimeService({
+      pluginConfig: {
+        queueOwnerTtlSeconds: 42,
+      },
+      runtimeFactory,
+    });
+
+    await service.start(ctx);
+
+    expect(runtimeFactory).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pluginConfig: expect.objectContaining({
+          queueOwnerTtlSeconds: 42,
+        }),
+      }),
     );
 
     await service.stop?.(ctx);

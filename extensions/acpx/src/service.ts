@@ -55,6 +55,7 @@ function createDefaultRuntime(params: AcpxRuntimeFactoryParams): AcpxRuntimeLike
       params.pluginConfig.timeoutSeconds != null
         ? params.pluginConfig.timeoutSeconds * 1_000
         : undefined,
+    queueOwnerTtlSeconds: params.pluginConfig.queueOwnerTtlSeconds,
   });
 }
 
@@ -63,9 +64,6 @@ function warnOnIgnoredLegacyCompatibilityConfig(params: {
   logger?: PluginLogger;
 }): void {
   const ignoredFields: string[] = [];
-  if (params.pluginConfig.legacyCompatibilityConfig.queueOwnerTtlSeconds != null) {
-    ignoredFields.push("queueOwnerTtlSeconds");
-  }
   if (params.pluginConfig.legacyCompatibilityConfig.strictWindowsCmdWrapper === false) {
     ignoredFields.push("strictWindowsCmdWrapper=false");
   }
