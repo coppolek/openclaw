@@ -307,6 +307,21 @@ export function toPluginMessageSentEvent(
     content: canonical.content,
     success: canonical.success,
     ...(canonical.error ? { error: canonical.error } : {}),
+    // Surface the native channel message ID to plugins so they can correlate
+    // bot-sent messages with later reactions, edits, or audit records
+    // (#66729). It is already present on `canonical` (via
+    // `toInternalMessageSentContext`) — only the plugin-facing version was
+    // filtering it out.
+    //
+    // Outbound delivery normalises a missing native ID to "" rather than
+    // undefined (see `createEmptyChannelResult` / `buildChannelSendResult`
+    // in src/infra/outbound), and `deliver.ts` forwards that empty string
+    // verbatim. We treat "" the same as undefined here so a plugin never
+    // sees `messageId: ""` and mistakes the empty sentinel for a real
+    // adapter ID when it tries to correlate edits/reactions/audits.
+    ...(typeof canonical.messageId === "string" && canonical.messageId.length > 0
+      ? { messageId: canonical.messageId }
+      : {}),
   };
 }
 

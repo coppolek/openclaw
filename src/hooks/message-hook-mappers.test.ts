@@ -251,6 +251,7 @@ describe("message hook mappers", () => {
       content: "reply",
       success: false,
       error: "network error",
+      messageId: "out-1",
     });
     expect(toInternalMessageSentContext(canonical)).toEqual({
       to: "demo-chat:chat:456",
@@ -264,5 +265,59 @@ describe("message hook mappers", () => {
       isGroup: true,
       groupId: "demo-chat:chat:456",
     });
+  });
+
+  // Regression: plugins need `messageId` on the sent event so they can track
+  // the bot's own outgoing messages by their native channel id (#66729).
+  it("omits messageId from the plugin sent event when the adapter did not provide one", () => {
+    const canonical = buildCanonicalSentMessageHookContext({
+      to: "demo-chat:chat:456",
+      content: "reply",
+      success: true,
+      channelId: "demo-chat",
+    });
+
+    const event = toPluginMessageSentEvent(canonical);
+    expect(event).toEqual({
+      to: "demo-chat:chat:456",
+      content: "reply",
+      success: true,
+    });
+    expect("messageId" in event).toBe(false);
+  });
+
+  it("surfaces messageId on the plugin sent event when the adapter provided one", () => {
+    const canonical = buildCanonicalSentMessageHookContext({
+      to: "demo-chat:chat:456",
+      content: "reply",
+      success: true,
+      channelId: "demo-chat",
+      messageId: "adapter-msg-42",
+    });
+
+    expect(toPluginMessageSentEvent(canonical)).toEqual({
+      to: "demo-chat:chat:456",
+      content: "reply",
+      success: true,
+      messageId: "adapter-msg-42",
+    });
+  });
+
+  // Codex P2 review on PR #66770: outbound delivery normalises missing
+  // native IDs to "" rather than undefined (see `createEmptyChannelResult`
+  // and `buildChannelSendResult` under src/infra/outbound). Plugins must
+  // not see `messageId: ""` and mistake the empty sentinel for a real
+  // adapter ID — treat "" the same as undefined.
+  it("omits messageId when the canonical sentinel is an empty string", () => {
+    const canonical = buildCanonicalSentMessageHookContext({
+      to: "demo-chat:chat:456",
+      content: "reply",
+      success: true,
+      channelId: "demo-chat",
+      messageId: "",
+    });
+
+    const event = toPluginMessageSentEvent(canonical);
+    expect("messageId" in event).toBe(false);
   });
 });
