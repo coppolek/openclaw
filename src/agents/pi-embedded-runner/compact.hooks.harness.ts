@@ -95,6 +95,9 @@ export const registerProviderStreamForModelMock: Mock<(params?: unknown) => unkn
 export const applyExtraParamsToAgentMock = vi.fn(() => ({ effectiveExtraParams: {} }));
 export const resolveAgentTransportOverrideMock: Mock<(params?: unknown) => string | undefined> =
   vi.fn(() => undefined);
+export const resolveModelConfigExtraParamsMock: Mock<
+  (model?: unknown) => Record<string, unknown> | undefined
+> = vi.fn(() => undefined);
 
 export function resetCompactSessionStateMocks(): void {
   sanitizeSessionHistoryMock.mockReset();
@@ -131,6 +134,8 @@ export function resetCompactSessionStateMocks(): void {
   applyExtraParamsToAgentMock.mockReturnValue({ effectiveExtraParams: {} });
   resolveAgentTransportOverrideMock.mockReset();
   resolveAgentTransportOverrideMock.mockReturnValue(undefined);
+  resolveModelConfigExtraParamsMock.mockReset();
+  resolveModelConfigExtraParamsMock.mockReturnValue(undefined);
 }
 
 export function resetCompactHooksHarnessMocks(): void {
@@ -386,6 +391,7 @@ export async function loadCompactHooksHarness(): Promise<{
   vi.doMock("./extra-params.js", () => ({
     applyExtraParamsToAgent: applyExtraParamsToAgentMock,
     resolveAgentTransportOverride: resolveAgentTransportOverrideMock,
+    resolveModelConfigExtraParams: resolveModelConfigExtraParamsMock,
   }));
 
   vi.doMock("./tool-split.js", () => ({

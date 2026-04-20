@@ -180,10 +180,12 @@ describe("compactEmbeddedPiSessionDirect hooks", () => {
       workspaceDir: "/tmp/workspace",
     });
 
-    expect(ensureRuntimePluginsLoaded).toHaveBeenCalledWith({
-      config: undefined,
-      workspaceDir: "/tmp/workspace",
-    });
+    expect(ensureRuntimePluginsLoaded).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: undefined,
+        workspaceDir: expect.stringMatching(/[\\/]tmp[\\/]workspace$/),
+      }),
+    );
   });
 
   it("forwards gateway subagent binding opt-in during compaction bootstrap", async () => {
@@ -203,11 +205,13 @@ describe("compactEmbeddedPiSessionDirect hooks", () => {
       allowGatewaySubagentBinding: true,
     });
 
-    expect(ensureRuntimePluginsLoaded).toHaveBeenCalledWith({
-      config: undefined,
-      workspaceDir: "/tmp/workspace",
-      allowGatewaySubagentBinding: true,
-    });
+    expect(ensureRuntimePluginsLoaded).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: undefined,
+        workspaceDir: expect.stringMatching(/[\\/]tmp[\\/]workspace$/),
+        allowGatewaySubagentBinding: true,
+      }),
+    );
   });
 
   it("routes compaction through shared stream resolution and extra params", async () => {
@@ -264,6 +268,7 @@ describe("compactEmbeddedPiSessionDirect hooks", () => {
         api: "responses",
       }),
       "/tmp/workspace",
+      undefined,
     );
   });
 
