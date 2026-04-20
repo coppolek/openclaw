@@ -983,8 +983,7 @@ export abstract class MemoryManagerSyncOps {
         providerKey: this.providerKey ?? undefined,
         configuredSources,
         configuredScopeHash,
-        chunkTokens: this.settings.chunking.tokens,
-        chunkOverlap: this.settings.chunking.overlap,
+        chunking: this.settings.chunking,
         vectorReady,
         ftsTokenizer: this.settings.store.fts.tokenizer,
       });
@@ -1201,6 +1200,7 @@ export abstract class MemoryManagerSyncOps {
             }),
             chunkTokens: this.settings.chunking.tokens,
             chunkOverlap: this.settings.chunking.overlap,
+            chunkingConfig: this.settings.chunking,
             ftsTokenizer: this.settings.store.fts.tokenizer,
           };
 
@@ -1277,6 +1277,7 @@ export abstract class MemoryManagerSyncOps {
       }),
       chunkTokens: this.settings.chunking.tokens,
       chunkOverlap: this.settings.chunking.overlap,
+      chunkingConfig: this.settings.chunking,
       ftsTokenizer: this.settings.store.fts.tokenizer,
     };
     if (this.vector.available && this.vector.dims) {
