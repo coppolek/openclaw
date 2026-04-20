@@ -49,6 +49,11 @@ export type GatewayCronState = {
 
 const CRON_WEBHOOK_TIMEOUT_MS = 10_000;
 
+/** Runs that complete faster than this threshold on a main-session systemEvent job
+ * are flagged as potential ghost runs: the gateway may have been unhealthy and the
+ * cron job did not actually execute any agent turn. */
+const GHOST_RUN_THRESHOLD_MS = 50;
+
 function redactWebhookUrl(url: string): string {
   try {
     const parsed = new URL(url);
@@ -544,6 +549,46 @@ export function buildGatewayCronService(params: {
               }
             }
           }
+        }
+
+        // Ghost-run detection for main-session systemEvent jobs.
+        //
+        // wakeMode "now" waits for runHeartbeatOnce to complete before
+        // returning.  A sub-threshold ok result means the heartbeat ran
+        // but found nothing to process — the enqueued system event was
+        // likely dropped silently, which is the ghost-run scenario.
+        //
+        // wakeMode "next-heartbeat" is excluded: it fires
+        // requestHeartbeatNow and returns immediately (fire-and-forget),
+        // so every healthy invocation completes in < 50 ms and a
+        // duration check would produce 100 % false positives.
+        //
+        // Recurring "now" jobs are excluded: when the main lane is busy
+        // (requests-in-flight) the timer returns early with status "ok"
+        // to avoid blocking the cron lane (#58833), which is a
+        // legitimate fast return, not a ghost run.
+        if (
+          evt.status === "ok" &&
+          typeof evt.durationMs === "number" &&
+          evt.durationMs < GHOST_RUN_THRESHOLD_MS &&
+          job &&
+          job.sessionTarget === "main" &&
+          job.payload.kind === "systemEvent" &&
+          job.wakeMode === "now" &&
+          job.schedule.kind === "at"
+        ) {
+          cronLogger.warn(
+            {
+              jobId: evt.jobId,
+              durationMs: evt.durationMs,
+              sessionTarget: job.sessionTarget,
+              payloadKind: job.payload.kind,
+              wakeMode: job.wakeMode,
+              scheduleKind: job.schedule.kind,
+              ghostRunThresholdMs: GHOST_RUN_THRESHOLD_MS,
+            },
+            "cron: possible ghost run detected — job completed suspiciously fast; gateway may be unhealthy",
+          );
         }
 
         const logPath = resolveCronRunLogPath({
