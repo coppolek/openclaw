@@ -88,6 +88,18 @@ and files.
 openclaw plugins install @tencent-connect/openclaw-qqbot
 ```
 
+### TeamSpeak
+
+OpenClaw channel plugin for TeamSpeak — text & voice chat via the native
+client protocol. Compatible with TeamSpeak 3, 5 & 6.
+
+- **npm:** `@honeybbq/openclaw-teamspeak`
+- **repo:** [github.com/HoneyBBQ/openclaw-teamspeak](https://github.com/HoneyBBQ/openclaw-teamspeak)
+
+```bash
+openclaw plugins install @honeybbq/openclaw-teamspeak
+```
+
 ### wecom
 
 WeCom channel plugin for OpenClaw by the Tencent WeCom team. Powered by
