@@ -377,6 +377,82 @@ describe("loadModelCatalog", () => {
     expect(matches[0]?.name).toBe("Kilo Auto");
   });
 
+  it("filters catalog to configured providers when models.mode is 'replace'", async () => {
+    mockPiDiscoveryModels([
+      { id: "gpt-5.4", provider: "openai", name: "GPT-5.4" },
+      { id: "claude-sonnet-4-6", provider: "anthropic", name: "Claude Sonnet 4.6" },
+      { id: "gemini-3-pro", provider: "google", name: "Gemini 3 Pro" },
+    ]);
+
+    const cfg = {
+      models: {
+        mode: "replace" as const,
+        providers: {
+          anthropic: {
+            baseUrl: "https://api.anthropic.com",
+            models: [
+              {
+                id: "claude-sonnet-4-6",
+                name: "Claude Sonnet 4.6",
+                reasoning: true,
+                input: ["text"],
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                contextWindow: 200000,
+                maxTokens: 8192,
+              },
+            ],
+          },
+        },
+      },
+    } as OpenClawConfig;
+
+    const result = await loadModelCatalog({ config: cfg });
+
+    // Only anthropic models should survive.
+    expect(result).toContainEqual(
+      expect.objectContaining({ provider: "anthropic", id: "claude-sonnet-4-6" }),
+    );
+    expect(result).not.toContainEqual(expect.objectContaining({ provider: "openai" }));
+    expect(result).not.toContainEqual(expect.objectContaining({ provider: "google" }));
+  });
+
+  it("returns full catalog when models.mode is 'merge'", async () => {
+    mockPiDiscoveryModels([
+      { id: "gpt-5.4", provider: "openai", name: "GPT-5.4" },
+      { id: "claude-sonnet-4-6", provider: "anthropic", name: "Claude Sonnet 4.6" },
+    ]);
+
+    const cfg = {
+      models: {
+        mode: "merge" as const,
+        providers: {
+          anthropic: {
+            baseUrl: "https://api.anthropic.com",
+            models: [
+              {
+                id: "claude-sonnet-4-6",
+                name: "Claude Sonnet 4.6",
+                reasoning: true,
+                input: ["text"],
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                contextWindow: 200000,
+                maxTokens: 8192,
+              },
+            ],
+          },
+        },
+      },
+    } as OpenClawConfig;
+
+    const result = await loadModelCatalog({ config: cfg });
+
+    // Both providers should be present in merge mode.
+    expect(result).toContainEqual(
+      expect.objectContaining({ provider: "anthropic", id: "claude-sonnet-4-6" }),
+    );
+    expect(result).toContainEqual(expect.objectContaining({ provider: "openai", id: "gpt-5.4" }));
+  });
+
   it("matches models across canonical provider aliases", () => {
     expect(
       findModelInCatalog([{ provider: "z.ai", id: "glm-5", name: "GLM-5" }], "z-ai", "glm-5"),
