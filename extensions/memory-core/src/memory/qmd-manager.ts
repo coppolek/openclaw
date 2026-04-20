@@ -1280,7 +1280,7 @@ export class QmdMemoryManager implements MemorySearchManager {
   async probeVectorAvailability(): Promise<boolean> {
     try {
       const result = await this.runQmd(["status"], {
-        timeoutMs: Math.min(this.qmd.limits.timeoutMs, 5_000),
+        timeoutMs: this.qmd.limits.timeoutMs,
       });
       const vectorCount = parseQmdStatusVectorCount(`${result.stdout}\n${result.stderr}`);
       if (vectorCount === null) {
@@ -2024,7 +2024,10 @@ export class QmdMemoryManager implements MemorySearchManager {
     }
     const exportDir = this.sessionExporter.dir;
     await fs.mkdir(exportDir, { recursive: true });
-    const files = await listSessionFilesForAgent(this.agentId);
+    const files = (await listSessionFilesForAgent(this.agentId)).filter((sessionFile) => {
+      const baseName = path.basename(sessionFile);
+      return !baseName.includes(".checkpoint.");
+    });
     const keep = new Set<string>();
     const tracked = new Set<string>();
     const cutoff = this.sessionExporter.retentionMs
