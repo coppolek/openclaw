@@ -80,6 +80,9 @@ Docs: https://docs.openclaw.ai
 - Anthropic/models: add Claude Opus 4.7 `xhigh` reasoning effort support and keep it separate from adaptive thinking.
 - Control UI/settings: overhaul the settings and slash-command experience with faster presets, quick-create flows, and refreshed command discovery. (#67819) Thanks @BunsDev.
 - macOS/gateway: add `screen.snapshot` support for macOS app nodes, including runtime plumbing, default macOS allowlisting, and docs for monitor preview flows. (#67954) Thanks @BunsDev.
+- Plugins/message_sent: expose the native channel `messageId` on the plugin SDK `message_sent` hook event (`toPluginMessageSentEvent`) so plugins can match responses, react to bot-sent messages, and audit outbound deliveries without patching compiled chunks. (#66729)
+- Docs/showcase: add a scannable hero, complete section jump links, and a responsive video grid for community examples. (#48493) Thanks @jchopard69.
+- Agents/local models: add `agents.defaults.localModelMode: "lean"` to drop heavyweight default tools like `browser`, `cron`, and `message`, reducing prompt size for weaker local-model setups without changing the normal path. Thanks @ImLukeF.
 
 ### Fixes
 
