@@ -25,6 +25,20 @@ OpenClaw checks ClawHub first and falls back to npm automatically.
 
 ## Listed plugins
 
+### A2A Gateway
+
+OpenClaw plugin implementing the A2A (Agent-to-Agent) v0.3.0 protocol. Enables
+agents to discover and communicate across servers with bio-inspired routing,
+mDNS discovery, four-state circuit breaker, SSE streaming, and a DevTools CLI.
+486 tests, actively maintained.
+
+- **npm:** `openclaw-a2a-gateway`
+- **repo:** [github.com/win4r/openclaw-a2a-gateway](https://github.com/win4r/openclaw-a2a-gateway)
+
+```bash
+openclaw plugins install openclaw-a2a-gateway
+```
+
 ### Codex App Server Bridge
 
 Independent OpenClaw bridge for Codex App Server conversations. Bind a chat to
@@ -61,6 +75,19 @@ while reducing token usage.
 
 ```bash
 openclaw plugins install @martian-engineering/lossless-claw
+```
+
+### Memory LanceDB Pro
+
+Enhanced LanceDB memory plugin for OpenClaw with hybrid retrieval (vector +
+BM25), cross-encoder reranking, multi-scope isolation, automatic long-context
+chunking, and a management CLI. 486 tests, 39 npm releases, actively maintained.
+
+- **npm:** `memory-lancedb-pro`
+- **repo:** [github.com/CortexReach/memory-lancedb-pro](https://github.com/CortexReach/memory-lancedb-pro)
+
+```bash
+openclaw plugins install memory-lancedb-pro
 ```
 
 ### Opik
