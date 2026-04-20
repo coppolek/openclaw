@@ -13,7 +13,7 @@ import {
   resolveProviderHttpRequestConfig,
   resolveProviderOperationTimeoutMs,
 } from "openclaw/plugin-sdk/provider-http";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
+import { normalizeOptionalLowercaseString, normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import {
   resolveXaiBaseUrl,
   XAI_BASE_URL,
@@ -74,7 +74,7 @@ function buildBody(req: ImageGenerationRequest, edit: boolean): Record<string, u
     body.aspect_ratio = aspect;
   }
 
-  const resolution = normalizeOptionalString(req.resolution);
+  const resolution = normalizeOptionalLowercaseString(req.resolution);
   if (resolution) {
     body.resolution = resolution;
   }

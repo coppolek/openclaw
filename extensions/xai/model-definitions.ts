@@ -3,7 +3,7 @@ import { normalizeOptionalLowercaseString } from "openclaw/plugin-sdk/text-runti
 
 export const XAI_BASE_URL = "https://api.x.ai/v1";
 export const XAI_DEFAULT_IMAGE_MODEL = "grok-imagine-image";
-export const XAI_IMAGE_MODELS = ["grok-imagine-image", "grok-imaging-image-pro"] as const;
+export const XAI_IMAGE_MODELS = ["grok-imagine-image", "grok-imagine-image-pro"] as const;
 export const XAI_DEFAULT_CONTEXT_WINDOW = 256_000;
 export const XAI_LARGE_CONTEXT_WINDOW = 2_000_000;
 export const XAI_CODE_CONTEXT_WINDOW = 256_000;
