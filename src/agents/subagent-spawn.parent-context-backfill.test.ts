@@ -272,4 +272,96 @@ describe("spawnSubagentDirect parent-context backfill", () => {
       threadId: "1776000000.111111",
     });
   });
+
+  it("child session entry is seeded with parent deliveryContext after spawn", async () => {
+    // End-to-end assertion on the *persisted* child entry (not just the
+    // gateway `agent` call params). The spawn path carries the parent's
+    // delivery hint to the gateway `agent` call; the gateway then merges it
+    // onto the child's session entry (see gateway/server-methods/agent.ts
+    // seeding block). This test simulates that seeding so a regression in
+    // either half of the chain — ctx backfill on spawn, or gateway-side
+    // merge — fails loudly.
+    ({ spawnSubagentDirect, resetSubagentRegistryForTests } = await loadSubagentSpawnModuleForTest({
+      callGatewayMock: hoisted.callGatewayMock,
+      loadConfig: () => hoisted.configOverride,
+      updateSessionStoreMock: hoisted.updateSessionStoreMock,
+      resolveAgentConfig: () => undefined,
+      resolveSubagentSpawnModelSelection: () => "openai-codex/gpt-5.4",
+      resolveSandboxRuntimeStatus: () => ({ sandboxed: false }),
+      sessionStorePath: "/tmp/subagent-spawn-backfill.json",
+      resetModules: true,
+      parentSessionEntry: {
+        deliveryContext: {
+          channel: "slack",
+          to: "channel:C0ACJ9D6E4W",
+          threadId: "1775970111.589749",
+        },
+      },
+    }));
+
+    const gatewayStore: Record<string, Record<string, unknown>> = {};
+    hoisted.callGatewayMock.mockImplementation(
+      async (request: { method?: string; params?: unknown }) => {
+        const method = request.method;
+        const params = (request.params ?? {}) as Record<string, unknown>;
+        if (method === "sessions.patch" && typeof params.key === "string") {
+          const { key, ...patch } = params as { key: string } & Record<string, unknown>;
+          gatewayStore[key] = { ...gatewayStore[key], ...patch };
+          return { ok: true };
+        }
+        if (method === "agent" && typeof params.sessionKey === "string") {
+          const sessionKey = params.sessionKey;
+          const existing = (gatewayStore[sessionKey]?.deliveryContext ?? {}) as Record<
+            string,
+            unknown
+          >;
+          const hint: Record<string, unknown> = {};
+          if (typeof params.channel === "string" && params.channel) {
+            hint.channel = params.channel;
+          }
+          if (typeof params.to === "string" && params.to) {
+            hint.to = params.to;
+          }
+          if (params.threadId != null && params.threadId !== "") {
+            hint.threadId = params.threadId;
+          }
+          if (typeof params.accountId === "string" && params.accountId) {
+            hint.accountId = params.accountId;
+          }
+          // Mirrors mergeDeliveryContext(primary=existing, fallback=hint):
+          // existing wins, hint fills gaps. Later spread keys beat earlier.
+          gatewayStore[sessionKey] = {
+            ...gatewayStore[sessionKey],
+            deliveryContext: { ...hint, ...existing },
+          };
+          return { runId: "run-1" };
+        }
+        return { ok: true };
+      },
+    );
+
+    const result = await spawnSubagentDirect(
+      {
+        task: "do thing",
+        runTimeoutSeconds: 1,
+        cleanup: "keep",
+      },
+      {
+        agentSessionKey: "main",
+        // Intentionally omit agentTo / agentThreadId — forces the backfill
+        // path to fill the child entry from the parent's stored context.
+      },
+    );
+
+    expect(result.status).toBe("accepted");
+
+    const childKey = Object.keys(gatewayStore).find((k) => k.startsWith("agent:main:subagent:"));
+    expect(childKey).toBeDefined();
+    const childEntry = gatewayStore[childKey as string];
+    expect(childEntry?.deliveryContext).toMatchObject({
+      channel: "slack",
+      to: "channel:C0ACJ9D6E4W",
+      threadId: "1775970111.589749",
+    });
+  });
 });
