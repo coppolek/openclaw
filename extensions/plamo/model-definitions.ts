@@ -44,5 +44,5 @@ const PLAMO_MODEL_CATALOG = [
 ] as const satisfies readonly ModelDefinitionConfig[];
 
 export function buildPlamoCatalogModels(): ModelDefinitionConfig[] {
-  return PLAMO_MODEL_CATALOG.map((model) => ({ ...model, input: [...model.input] }));
+  return PLAMO_MODEL_CATALOG.map((model) => Object.assign({}, model, { input: [...model.input] }));
 }
