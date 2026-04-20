@@ -364,6 +364,9 @@ export function buildExecApprovalUnavailableReplyPayload(
     lines.push(getExecApprovalApproverDmNoticeText());
     return {
       text: lines.join("\n\n"),
+      channelData: {
+        execApprovalUnavailable: { reason: params.reason },
+      },
     };
   }
 
@@ -405,5 +408,8 @@ export function buildExecApprovalUnavailableReplyPayload(
 
   return {
     text: lines.join("\n\n"),
+    channelData: {
+      execApprovalUnavailable: { reason: params.reason },
+    },
   };
 }
