@@ -27,24 +27,29 @@ describe("openai-responses-spotted-ids", () => {
     expect(isConnectionBoundIdError(undefined)).toBe(false);
   });
 
-  it("rewrites known spotted IDs to short local IDs and leaves unknown IDs alone", () => {
+  it("rewrites known spotted IDs to deterministic local IDs and leaves unknown IDs alone", () => {
     const spotted = makeBase64Id("spotted");
     const fresh = makeBase64Id("fresh");
 
-    const input: Array<Record<string, unknown>> = [
+    const first: Array<Record<string, unknown>> = [
       { id: spotted, type: "reasoning" },
       { id: fresh, type: "message" },
       { id: "msg_short", type: "message" },
       { type: "message" },
     ];
+    const second: Array<Record<string, unknown>> = [
+      { id: spotted, type: "reasoning" },
+    ];
 
     markConnectionBoundIdsAsSpotted([{ id: spotted, type: "reasoning" }]);
-    const rewrote = rewriteSpottedConnectionBoundIds(input);
+    const rewrote = rewriteSpottedConnectionBoundIds(first);
+    rewriteSpottedConnectionBoundIds(second);
 
     expect(rewrote).toBe(true);
-    expect(input[0].id).toMatch(/^rs_[a-z0-9]+$/);
-    expect(input[1].id).toBe(fresh);
-    expect(input[2].id).toBe("msg_short");
+    expect(first[0].id).toMatch(/^rs_[a-f0-9]{16}$/);
+    expect(first[0].id).toBe(second[0].id); // stable across calls
+    expect(first[1].id).toBe(fresh);
+    expect(first[2].id).toBe("msg_short");
   });
 
   it("only marks IDs that look like connection-bound base64 tokens", () => {
@@ -74,9 +79,9 @@ describe("openai-responses-spotted-ids", () => {
       { id: msg, type: "message" },
     ];
     rewriteSpottedConnectionBoundIds(input);
-    expect(input[0].id).toMatch(/^rs_/);
-    expect(input[1].id).toMatch(/^fc_/);
-    expect(input[2].id).toMatch(/^msg_/);
+    expect(input[0].id).toMatch(/^rs_[a-f0-9]{16}$/);
+    expect(input[1].id).toMatch(/^fc_[a-f0-9]{16}$/);
+    expect(input[2].id).toMatch(/^msg_[a-f0-9]{16}$/);
   });
 
   it("tolerates non-array input without throwing", () => {

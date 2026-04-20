@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import type { ResponseInput } from "openai/resources/responses/responses.js";
 import { resolveGlobalDedupeCache } from "../infra/dedupe.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
@@ -48,9 +48,15 @@ function looksLikeConnectionBoundId(id: string): boolean {
   return Buffer.from(id, "base64").length >= 16;
 }
 
-function generateReplacementId(type: string | undefined): string {
+function deriveReplacementId(type: string | undefined, originalId: string): string {
+  // Deterministic: same originalId → same replacement. Upstream prompt cache
+  // keys on the serialized input, so generating a fresh random ID per request
+  // would defeat caching for the entire conversation history. Using a stable
+  // hash-derived ID keeps the request byte-for-byte identical across retries
+  // and across later requests that reuse the same history.
   const prefix = type === "reasoning" ? "rs" : type === "function_call" ? "fc" : "msg";
-  return `${prefix}_${randomBytes(8).toString("hex")}`;
+  const hex = createHash("sha256").update(originalId).digest("hex").slice(0, 16);
+  return `${prefix}_${hex}`;
 }
 
 type InputItem = Record<string, unknown> & { id?: unknown; type?: unknown };
@@ -74,7 +80,7 @@ export function rewriteSpottedConnectionBoundIds(input: ResponseInput | unknown)
     // unused entries expire on their own.
     if (SPOTTED_IDS.peek(id)) {
       SPOTTED_IDS.check(id);
-      item.id = generateReplacementId(typeof item.type === "string" ? item.type : undefined);
+      item.id = deriveReplacementId(typeof item.type === "string" ? item.type : undefined, id);
       rewrote = true;
     }
   }
