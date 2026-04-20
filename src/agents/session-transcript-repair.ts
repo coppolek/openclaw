@@ -468,13 +468,17 @@ export function repairToolUseResultPairing(
     const assistant = msg as Extract<AgentMessage, { role: "assistant" }>;
 
     const toolCalls = extractToolCallsFromAssistant(assistant);
-    if (toolCalls.length === 0) {
+    // Filter out tool calls with empty/missing IDs before processing.
+    // These phantom entries can appear when a provider signals stopReason "toolUse"
+    // without producing a complete tool call block (see #21985).
+    const validToolCalls = toolCalls.filter((t) => t.id && t.id.trim());
+    if (validToolCalls.length === 0) {
       out.push(msg);
       continue;
     }
 
-    const toolCallIds = new Set(toolCalls.map((t) => t.id));
-    const toolCallNamesById = new Map(toolCalls.map((t) => [t.id, t.name] as const));
+    const toolCallIds = new Set(validToolCalls.map((t) => t.id));
+    const toolCallNamesById = new Map(validToolCalls.map((t) => [t.id, t.name] as const));
 
     const spanResultsById = new Map<string, Extract<AgentMessage, { role: "toolResult" }>>();
     const remainder: AgentMessage[] = [];
@@ -531,7 +535,7 @@ export function repairToolUseResultPairing(
     if (stopReason === "error" || stopReason === "aborted") {
       out.push(msg);
       if (!shouldDropErroredAssistantResults(options)) {
-        for (const toolCall of toolCalls) {
+        for (const toolCall of validToolCalls) {
           const result = spanResultsById.get(toolCall.id);
           if (!result) {
             continue;
@@ -555,7 +559,7 @@ export function repairToolUseResultPairing(
       changed = true;
     }
 
-    for (const call of toolCalls) {
+    for (const call of validToolCalls) {
       const existing = spanResultsById.get(call.id);
       if (existing) {
         pushToolResult(existing);
