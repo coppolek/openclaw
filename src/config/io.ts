@@ -109,6 +109,7 @@ export { resolveShellEnvExpectedKeys } from "./shell-env-expected-keys.js";
 
 const CONFIG_HEALTH_STATE_FILENAME = "config-health.json";
 const loggedInvalidConfigs = new Set<string>();
+const loggedConfigWarningFingerprints = new Map<string, string>();
 
 type ConfigHealthFingerprint = {
   hash: string;
@@ -1198,7 +1199,14 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
               `- ${sanitizeTerminalText(iss.path || "<root>")}: ${sanitizeTerminalText(iss.message)}`,
           )
           .join("\n");
-        deps.logger.warn(`Config warnings:\\n${details}`);
+        const rawHash = hashConfigRaw(raw);
+        const fingerprint = hashConfigRaw(`${rawHash}\n${details}`);
+        if (loggedConfigWarningFingerprints.get(configPath) !== fingerprint) {
+          loggedConfigWarningFingerprints.set(configPath, fingerprint);
+          deps.logger.warn(`Config warnings:\\n${details}`);
+        }
+      } else {
+        loggedConfigWarningFingerprints.delete(configPath);
       }
       warnIfConfigFromFuture(validated.config, deps.logger);
       const cfg = materializeRuntimeConfig(validated.config, "load");
