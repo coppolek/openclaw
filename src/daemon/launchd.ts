@@ -35,7 +35,7 @@ import type {
 } from "./service-types.js";
 
 const LAUNCH_AGENT_DIR_MODE = 0o755;
-const LAUNCH_AGENT_PLIST_MODE = 0o644;
+const LAUNCH_AGENT_PLIST_MODE = 0o600;
 
 function assertValidLaunchAgentLabel(label: string): string {
   const trimmed = label.trim();
