@@ -59,7 +59,7 @@ describe("createCodexDynamicToolBridge", () => {
 
   it("preserves audio-as-voice metadata from tts results", async () => {
     const toolResult = {
-      content: [{ type: "text", text: "Generated audio reply." }],
+      content: [{ type: "text", text: "(spoken) hello" }],
       details: {
         media: {
           mediaUrl: "/tmp/reply.opus",
@@ -85,7 +85,7 @@ describe("createCodexDynamicToolBridge", () => {
 
     expect(result).toEqual({
       success: true,
-      contentItems: [{ type: "inputText", text: "Generated audio reply." }],
+      contentItems: [{ type: "inputText", text: "(spoken) hello" }],
     });
     expect(bridge.telemetry.toolMediaUrls).toEqual(["/tmp/reply.opus"]);
     expect(bridge.telemetry.toolAudioAsVoice).toBe(true);
