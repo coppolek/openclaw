@@ -200,6 +200,61 @@ describe("exec approvals store helpers", () => {
     expect(fs.existsSync(path.join(realHome, ".openclaw"))).toBe(false);
   });
 
+  it("allows a symlinked .openclaw dir when OPENCLAW_STATE_DIR points at the same real path", () => {
+    // Regression: AWS deployments symlink ~/.openclaw -> OPENCLAW_STATE_DIR.
+    const realHome = makeTempDir();
+    tempDirs.push(realHome);
+    const realStateDir = makeTempDir();
+    tempDirs.push(realStateDir);
+
+    process.env.OPENCLAW_HOME = realHome;
+    const originalStateDir = process.env.OPENCLAW_STATE_DIR;
+    process.env.OPENCLAW_STATE_DIR = realStateDir;
+    fs.symlinkSync(realStateDir, path.join(realHome, ".openclaw"));
+
+    try {
+      expect(() =>
+        saveExecApprovals({ version: 1, defaults: { security: "full" }, agents: {} }),
+      ).not.toThrow();
+    } finally {
+      if (originalStateDir === undefined) {
+        delete process.env.OPENCLAW_STATE_DIR;
+      } else {
+        process.env.OPENCLAW_STATE_DIR = originalStateDir;
+      }
+    }
+  });
+
+  it("refuses a symlinked .openclaw dir that resolves outside the trusted state root", () => {
+    // Ensures OPENCLAW_STATE_DIR does not open a bypass for symlinks pointing
+    // at arbitrary directories — only the exact configured state root is allowed.
+    const realHome = makeTempDir();
+    tempDirs.push(realHome);
+    const realStateDir = makeTempDir();
+    tempDirs.push(realStateDir);
+    const otherDir = makeTempDir();
+    tempDirs.push(otherDir);
+
+    process.env.OPENCLAW_HOME = realHome;
+    const originalStateDir = process.env.OPENCLAW_STATE_DIR;
+    process.env.OPENCLAW_STATE_DIR = realStateDir;
+
+    // ~/.openclaw points at otherDir, not realStateDir.
+    fs.symlinkSync(otherDir, path.join(realHome, ".openclaw"));
+
+    try {
+      expect(() =>
+        saveExecApprovals({ version: 1, defaults: { security: "full" }, agents: {} }),
+      ).toThrow(/Refusing to use unsafe exec approvals directory/);
+    } finally {
+      if (originalStateDir === undefined) {
+        delete process.env.OPENCLAW_STATE_DIR;
+      } else {
+        process.env.OPENCLAW_STATE_DIR = originalStateDir;
+      }
+    }
+  });
+
   it("adds trimmed allowlist entries once and persists generated ids", () => {
     const dir = createHomeDir();
     vi.spyOn(Date, "now").mockReturnValue(123_456);

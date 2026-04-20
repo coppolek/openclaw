@@ -227,12 +227,48 @@ function mergeLegacyAgent(
   };
 }
 
-function ensureDir(filePath: string) {
+// When OPENCLAW_STATE_DIR is set (e.g. in a systemd service), use its real
+// path as the trusted root so that a ~/.openclaw symlink pointing at the same
+// directory does not produce a false-positive symlink rejection.
+function resolveApprovalsPathTrustedRoot(env: NodeJS.ProcessEnv = process.env): string {
+  const stateDir = env.OPENCLAW_STATE_DIR?.trim();
+  if (stateDir) {
+    try {
+      return fs.realpathSync(expandHomePrefix(stateDir));
+    } catch {
+      // State dir not yet created; fall through to HOME-based root.
+    }
+  }
+  return resolveRequiredHomeDir(env);
+}
+
+function ensureDir(filePath: string, env: NodeJS.ProcessEnv = process.env) {
   const dir = path.dirname(filePath);
-  assertNoSymlinkPathComponents(dir, resolveRequiredHomeDir());
+  const trustedRoot = resolveApprovalsPathTrustedRoot(env);
+  assertNoSymlinkPathComponents(dir, trustedRoot);
+  // When OPENCLAW_STATE_DIR shifts the trusted root away from HOME, also verify
+  // that HOME itself contains no symlink components — without descending into
+  // .openclaw, which may intentionally be a symlink to the state dir.
+  const homeRoot = resolveRequiredHomeDir(env);
+  if (homeRoot !== trustedRoot) {
+    assertNoSymlinkPathComponents(homeRoot, homeRoot);
+  }
   fs.mkdirSync(dir, { recursive: true });
   const dirStat = fs.lstatSync(dir);
-  if (!dirStat.isDirectory() || dirStat.isSymbolicLink()) {
+  if (dirStat.isSymbolicLink()) {
+    // Allow a symlink dir only when OPENCLAW_STATE_DIR is set, and only if
+    // the symlink resolves to exactly the trusted root (not just any dir).
+    const realDir = fs.realpathSync(dir);
+    if (realDir !== trustedRoot) {
+      throw new Error(`Refusing to use unsafe exec approvals directory: ${dir}`);
+    }
+    const realStat = fs.lstatSync(realDir);
+    if (!realStat.isDirectory()) {
+      throw new Error(`Refusing to use unsafe exec approvals directory: ${dir}`);
+    }
+    return realDir;
+  }
+  if (!dirStat.isDirectory()) {
     throw new Error(`Refusing to use unsafe exec approvals directory: ${dir}`);
   }
   return dir;
