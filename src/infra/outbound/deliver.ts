@@ -837,8 +837,11 @@ async function deliverOutboundPayloadsCore(
       },
     );
   }
-  for (const payload of normalizedPayloads) {
+  const deliveredPayloadIndices = new Set<number>();
+  for (let payloadIndex = 0; payloadIndex < normalizedPayloads.length; payloadIndex++) {
+    const payload = normalizedPayloads[payloadIndex];
     let payloadSummary = buildPayloadSummary(payload);
+    let payloadDelivered = false;
     try {
       throwIfAborted(abortSignal);
 
@@ -855,6 +858,7 @@ async function deliverOutboundPayloadsCore(
       if (hookResult.cancelled) {
         continue;
       }
+      payloadDelivered = true;
       let effectivePayload = await renderPresentationForDelivery(handler, hookResult.payload);
       payloadSummary = buildPayloadSummary(effectivePayload);
 
@@ -1003,6 +1007,7 @@ async function deliverOutboundPayloadsCore(
         messageId: lastMessageId,
       });
     } catch (err) {
+      payloadDelivered = false;
       emitMessageSent({
         success: false,
         content: payloadSummary.text,
@@ -1012,11 +1017,18 @@ async function deliverOutboundPayloadsCore(
         throw err;
       }
       params.onError?.(err, payloadSummary);
+    } finally {
+      if (payloadDelivered) {
+        deliveredPayloadIndices.add(payloadIndex);
+      }
     }
   }
   if (params.mirror && results.length > 0) {
-    // Collect all dropped media notices across payloads for transcript mirror.
-    const allDropped = payloads.flatMap((p) => p.droppedMedia ?? []);
+    // Only collect dropped-media notices from payloads that were actually
+    // delivered (not cancelled by message_sending hooks or errored).
+    const allDropped = normalizedPayloads
+      .filter((_, i) => deliveredPayloadIndices.has(i))
+      .flatMap((p) => p.droppedMedia ?? []);
     const droppedNotice = allDropped.length > 0 ? formatDroppedMediaNotice(allDropped) : "";
     const mirrorText = resolveMirroredTranscriptText({
       text: params.mirror.text,
