@@ -38,6 +38,11 @@ import {
   resolveOpenAIResponsesPayloadPolicy,
 } from "./openai-responses-payload-policy.js";
 import {
+  isConnectionBoundIdError,
+  markConnectionBoundIdsAsSpotted,
+  rewriteSpottedConnectionBoundIds,
+} from "./openai-responses-spotted-ids.js";
+import {
   normalizeOpenAIStrictToolParameters,
   resolveOpenAIStrictToolFlagForInventory,
   resolveOpenAIStrictToolSetting,
@@ -698,10 +703,37 @@ export function createOpenAIResponsesTransportStreamFn(): StreamFn {
           params = nextParams as typeof params;
         }
         params = mergeTransportMetadata(params, turnState?.metadata);
-        const responseStream = (await client.responses.create(
-          params as never,
-          options?.signal ? { signal: options.signal } : undefined,
-        )) as unknown as AsyncIterable<unknown>;
+        rewriteSpottedConnectionBoundIds(params.input);
+        let responseStream: AsyncIterable<unknown>;
+        try {
+          responseStream = (await client.responses.create(
+            params as never,
+            options?.signal ? { signal: options.signal } : undefined,
+          )) as unknown as AsyncIterable<unknown>;
+        } catch (error) {
+          // Some OpenAI-compatible providers (notably GitHub Copilot) encode
+          // connection-bound state into `input[].id` values. Those IDs are
+          // rejected after the connection is gone with a specific error. We
+          // remember the offending IDs, rewrite them to short local IDs, and
+          // retry once — transparently to the caller and to failover/retry
+          // budget. Subsequent requests proactively rewrite remembered IDs
+          // before sending.
+          const message = error instanceof Error ? error.message : "";
+          if (isConnectionBoundIdError(message)) {
+            const spotted = markConnectionBoundIdsAsSpotted(params.input);
+            if (spotted.length > 0) {
+              rewriteSpottedConnectionBoundIds(params.input);
+              responseStream = (await client.responses.create(
+                params as never,
+                options?.signal ? { signal: options.signal } : undefined,
+              )) as unknown as AsyncIterable<unknown>;
+            } else {
+              throw error;
+            }
+          } else {
+            throw error;
+          }
+        }
         stream.push({ type: "start", partial: output as never });
         await processResponsesStream(responseStream, output, stream, model, {
           serviceTier: (options as OpenAIResponsesOptions | undefined)?.serviceTier,
