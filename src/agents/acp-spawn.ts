@@ -49,6 +49,7 @@ import {
   type SessionBindingRecord,
 } from "../infra/outbound/session-binding-service.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import {
   isSubagentSessionKey,
   normalizeAgentId,
@@ -985,6 +986,26 @@ export async function spawnAcpDirect(
     // on webchat/CLI the `thread=true` path fails with a separate binding
     // error. Make the fallback path explicit so callers on any channel have
     // a viable next step.
+    //
+    // Additional #67400 parity with spawnSubagentDirect: when NO channel plugin
+    // has registered the `subagent_spawning` hook (e.g. pure webchat / CLI
+    // deployments), `thread=true` cannot be satisfied later. Probe the runner
+    // up front and collapse the two-step dead-end ("retry with thread=true" →
+    // "thread=true is unavailable") into one actionable message pointing at
+    // `mode="run"` directly. (Global probe; in mixed deployments where some
+    // but not all channels have the hook, the probe can still return true —
+    // that broader channel-scoped case is tracked for follow-up.)
+    const hookRunner = getGlobalHookRunner();
+    if (hookRunner?.hasHooks("subagent_spawning") !== true) {
+      return createAcpSpawnFailure({
+        status: "error",
+        errorCode: "thread_required",
+        error:
+          'sessions_spawn(runtime="acp", mode="session") is only available on channels that expose thread bindings (e.g. Discord threads, Slack threads, Telegram forum topics). ' +
+          "This agent is not running on a channel that registered the required plugin hook. " +
+          'Use mode="run" for one-shot ACP work.',
+      });
+    }
     return createAcpSpawnFailure({
       status: "error",
       errorCode: "thread_required",
