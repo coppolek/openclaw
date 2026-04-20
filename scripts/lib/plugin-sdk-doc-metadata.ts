@@ -78,7 +78,6 @@ export const pluginSdkDocMetadata = {
     category: "provider",
   },
   "provider-http-runtime": {
-  "provider-http-runtime": {
     category: "provider",
   },
   opencode: {
