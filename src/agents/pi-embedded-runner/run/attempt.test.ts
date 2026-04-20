@@ -5,6 +5,7 @@ import { appendBootstrapPromptWarning } from "../../bootstrap-budget.js";
 import { SYSTEM_PROMPT_CACHE_BOUNDARY } from "../../system-prompt-cache-boundary.js";
 import { buildAgentSystemPrompt } from "../../system-prompt.js";
 import {
+  buildAfterToolsResolvedToolMetadata,
   buildContextEnginePromptCacheInfo,
   buildAfterTurnRuntimeContext,
   buildAfterTurnRuntimeContextFromUsage,
@@ -27,6 +28,26 @@ import {
   wrapStreamFnSanitizeMalformedToolCalls,
   wrapStreamFnTrimToolCallNames,
 } from "./attempt.js";
+
+describe("buildAfterToolsResolvedToolMetadata", () => {
+  it("passes parameters by reference", () => {
+    const parameters = {
+      type: "object",
+      properties: { command: { type: "string" } },
+    };
+    const tools = [{ name: "exec", parameters }];
+
+    const metadata = buildAfterToolsResolvedToolMetadata(tools);
+    expect(metadata[0]?.parameters).toBe(parameters);
+  });
+
+  it("keeps tools with undefined parameters", () => {
+    const metadata = buildAfterToolsResolvedToolMetadata([{ name: "client_tool" }]);
+    expect(metadata).toHaveLength(1);
+    expect(metadata[0]).toMatchObject({ name: "client_tool" });
+    expect(metadata[0]?.parameters).toBeUndefined();
+  });
+});
 
 type FakeWrappedStream = {
   result: () => Promise<unknown>;
@@ -60,7 +81,6 @@ async function invokeWrappedTestStream(
   const wrappedFn = wrap(baseFn);
   return await Promise.resolve(wrappedFn({} as never, {} as never, {} as never));
 }
-
 describe("resolvePromptBuildHookResult", () => {
   function createLegacyOnlyHookRunner() {
     return {
