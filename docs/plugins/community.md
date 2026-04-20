@@ -63,6 +63,19 @@ while reducing token usage.
 openclaw plugins install @martian-engineering/lossless-claw
 ```
 
+### Memori
+
+Long-term memory integration for OpenClaw agents using the Memori SDK, with
+continuous interaction capture, structured knowledge extraction, and intelligent
+memory ranking and retrieval.
+
+- **npm:** `@memorilabs/openclaw-memori`
+- **repo:** [github.com/MemoriLabs/Memori](https://github.com/MemoriLabs/Memori)
+
+```bash
+openclaw plugins install @memorilabs/openclaw-memori
+```
+
 ### Opik
 
 Official plugin that exports agent traces to Opik. Monitor agent behavior,
