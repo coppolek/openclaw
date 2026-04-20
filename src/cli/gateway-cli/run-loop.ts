@@ -1,9 +1,13 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   abortEmbeddedPiRun,
   getActiveEmbeddedRunCount,
   waitForActiveEmbeddedRuns,
 } from "../../agents/pi-embedded-runner/runs.js";
 import { loadConfig } from "../../config/config.js";
+import { resolveGatewaySystemdServiceName } from "../../daemon/constants.js";
 import type { startGatewayServer } from "../../gateway/server.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { acquireGatewayLock } from "../../infra/gateway-lock.js";
@@ -24,10 +28,60 @@ import {
 } from "../../process/command-queue.js";
 import { createRestartIterationHook } from "../../process/restart-recovery.js";
 import type { RuntimeEnv } from "../../runtime.js";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
 
 const gatewayLog = createSubsystemLogger("gateway");
 const LAUNCHD_SUPERVISED_RESTART_EXIT_DELAY_MS = 1500;
 const DEFAULT_RESTART_DRAIN_TIMEOUT_MS = 300_000;
+
+function sanitizeSystemdUnitForFilename(unitName: string): string {
+  return unitName.replace(/[^a-zA-Z0-9._-]+/g, "-");
+}
+
+function resolveSystemdRestartExpectationMarkerPath(env: NodeJS.ProcessEnv = process.env): string {
+  const unitName =
+    normalizeOptionalString(env.OPENCLAW_SYSTEMD_UNIT) ||
+    `${resolveGatewaySystemdServiceName(env.OPENCLAW_PROFILE)}.service`;
+  const tmpDir = normalizeOptionalString(env.TMPDIR) || os.tmpdir();
+  return path.join(
+    tmpDir,
+    `openclaw-systemd-restart-expected-${sanitizeSystemdUnitForFilename(unitName)}.txt`,
+  );
+}
+
+function consumePendingSystemdRestartExpectation(
+  env: NodeJS.ProcessEnv = process.env,
+  maxAgeMs = 600_000,
+): boolean {
+  const markerPath = resolveSystemdRestartExpectationMarkerPath(env);
+  let raw: string;
+  try {
+    raw = fs.readFileSync(markerPath, "utf8");
+  } catch {
+    return false;
+  }
+  try {
+    fs.unlinkSync(markerPath);
+  } catch {
+    // Best effort only. Restart semantics should still continue.
+  }
+  const [unitLine = "", tsLine = ""] = raw.split(/\r?\n/);
+  const expectedUnit = normalizeOptionalString(unitLine);
+  const currentUnit =
+    normalizeOptionalString(env.OPENCLAW_SYSTEMD_UNIT) ||
+    `${resolveGatewaySystemdServiceName(env.OPENCLAW_PROFILE)}.service`;
+  if (!expectedUnit || expectedUnit !== currentUnit) {
+    return false;
+  }
+  const epochSeconds = Number.parseInt(tsLine.trim(), 10);
+  if (Number.isFinite(epochSeconds) && epochSeconds > 0) {
+    const ageMs = Date.now() - epochSeconds * 1000;
+    if (ageMs < 0 || ageMs > maxAgeMs) {
+      return false;
+    }
+  }
+  return true;
+}
 
 type GatewayRunSignalAction = "stop" | "restart";
 
@@ -210,6 +264,11 @@ export async function runGatewayLoop(params: {
 
   const onSigterm = () => {
     gatewayLog.info("signal SIGTERM received");
+    if (consumePendingSystemdRestartExpectation(process.env)) {
+      gatewayLog.info("SIGTERM matched pending systemd restart expectation");
+      request("restart", "SIGTERM");
+      return;
+    }
     request("stop", "SIGTERM");
   };
   const onSigint = () => {

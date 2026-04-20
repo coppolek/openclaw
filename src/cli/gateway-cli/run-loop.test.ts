@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { GatewayBonjourBeacon } from "../../infra/bonjour-discovery.js";
 import { pickBeaconHost, pickGatewayPort } from "./discover.js";
@@ -224,6 +227,60 @@ describe("runGatewayLoop", () => {
       });
       expect(runtime.exit).toHaveBeenCalledWith(0);
     });
+  });
+
+  it("routes SIGTERM through restart semantics when a pending systemd restart marker exists", async () => {
+    vi.clearAllMocks();
+
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-run-loop-restart-"));
+    const unitName = "openclaw-gateway.service";
+    const markerPath = path.join(
+      tmpRoot,
+      "openclaw-systemd-restart-expected-openclaw-gateway.service.txt",
+    );
+    const prevTmpDir = process.env.TMPDIR;
+    const prevUnit = process.env.OPENCLAW_SYSTEMD_UNIT;
+
+    try {
+      process.env.TMPDIR = tmpRoot;
+      process.env.OPENCLAW_SYSTEMD_UNIT = unitName;
+      await fs.writeFile(markerPath, `${unitName}\n${Math.floor(Date.now() / 1000)}\n`, "utf8");
+      restartGatewayProcessWithFreshPid.mockReturnValueOnce({
+        mode: "spawned",
+        pid: 9999,
+      });
+
+      await withIsolatedSignals(async ({ captureSignal }) => {
+        const { close, runtime, exited } = await createSignaledLoopHarness();
+        const sigterm = captureSignal("SIGTERM");
+
+        sigterm();
+
+        await expect(exited).resolves.toBe(0);
+        expect(close).toHaveBeenCalledWith({
+          reason: "gateway restarting",
+          restartExpectedMs: 1500,
+        });
+        expect(runtime.exit).toHaveBeenCalledWith(0);
+        expect(gatewayLog.info).toHaveBeenCalledWith(
+          "SIGTERM matched pending systemd restart expectation",
+        );
+      });
+
+      await expect(fs.access(markerPath)).rejects.toThrow();
+    } finally {
+      if (prevTmpDir === undefined) {
+        delete process.env.TMPDIR;
+      } else {
+        process.env.TMPDIR = prevTmpDir;
+      }
+      if (prevUnit === undefined) {
+        delete process.env.OPENCLAW_SYSTEMD_UNIT;
+      } else {
+        process.env.OPENCLAW_SYSTEMD_UNIT = prevUnit;
+      }
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    }
   });
 
   it("restarts after SIGUSR1 even when drain times out, and resets lanes for the new iteration", async () => {
