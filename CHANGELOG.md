@@ -12,6 +12,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Ollama: honor `params.num_ctx` on models configured under `agents.defaults.models[].params.num_ctx` or `models.providers.ollama.models[].params.num_ctx`, overriding the model's `contextWindow` when building both the native-Ollama and OpenAI-compat `/api/generate` payloads. Lets operators hard-cap `num_ctx` below a model's GGUF-reported ceiling (e.g. qwen3-coder's 262144) to fit larger models on VRAM-constrained GPUs without CPU spillover. Fixes #44550.
 - Plugins/memory: preserve the active memory capability when read-only snapshot plugin loads run, so status and provider discovery paths no longer wipe memory public artifacts. (#69219) Thanks @zeroaltitude.
 - Plugins: keep only the highest-precedence manifest when distinct discovered plugins share an id, so lower-precedence global or workspace duplicates no longer load beside bundled or config-selected plugins. (#41626) Thanks @Tortes.
 - fix(security): block MINIMAX_API_HOST workspace env injection and remove env-driven URL routing [AI-assisted]. (#67300) Thanks @pgondhi987.
