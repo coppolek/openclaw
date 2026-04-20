@@ -13,6 +13,7 @@ import {
   normalizeProviderResolvedModelWithPlugin,
   shouldPreferProviderRuntimeResolvedModel,
 } from "../../plugins/provider-runtime.js";
+import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
 import { resolveOpenClawAgentDir } from "../agent-paths.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../defaults.js";
 import { buildModelAliasLines } from "../model-alias-lines.js";
@@ -275,6 +276,45 @@ function resolveConfiguredProviderConfig(
   return findNormalizedProviderValue(configuredProviders, provider);
 }
 
+/**
+ * Merge per-model `params` from both config sources into a single record.
+ * Precedence (later overrides earlier): discovery → agents.defaults.models[].params → providerConfig.models[].params.
+ * User-supplied config always wins over discovered params so explicit overrides cannot be silently clobbered.
+ * Returns `undefined` when no source contributes any entry, so unrelated models stay `params`-free.
+ */
+function mergeConfiguredModelParams(params: {
+  cfg: OpenClawConfig | undefined;
+  provider: string;
+  modelId: string;
+  discoveredParams?: Record<string, unknown>;
+  configuredParams?: Record<string, unknown>;
+}): Record<string, unknown> | undefined {
+  const agentDefaultsModels = params.cfg?.agents?.defaults?.models;
+  const providerPrefix = `${params.provider}/`;
+  const bareModelId = params.modelId.toLowerCase().startsWith(providerPrefix.toLowerCase())
+    ? params.modelId.slice(providerPrefix.length)
+    : params.modelId;
+  const lookupKey = normalizeLowercaseStringOrEmpty(`${params.provider}/${bareModelId}`);
+  let defaultsParams: Record<string, unknown> | undefined;
+  if (agentDefaultsModels) {
+    for (const [rawKey, entry] of Object.entries(agentDefaultsModels)) {
+      if (normalizeLowercaseStringOrEmpty(rawKey) === lookupKey) {
+        const candidate = (entry as { params?: unknown })?.params;
+        if (candidate && typeof candidate === "object") {
+          defaultsParams = candidate as Record<string, unknown>;
+        }
+        break;
+      }
+    }
+  }
+  const merged: Record<string, unknown> = {
+    ...params.discoveredParams,
+    ...defaultsParams,
+    ...params.configuredParams,
+  };
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
 function applyConfiguredProviderOverrides(params: {
   provider: string;
   discoveredModel: ProviderRuntimeModel;
@@ -283,12 +323,19 @@ function applyConfiguredProviderOverrides(params: {
   cfg?: OpenClawConfig;
   runtimeHooks?: ProviderRuntimeHooks;
 }): ProviderRuntimeModel {
-  const { discoveredModel, providerConfig, modelId } = params;
+  const { discoveredModel, providerConfig, modelId, cfg, provider } = params;
+  const baseParams = mergeConfiguredModelParams({
+    cfg,
+    provider,
+    modelId,
+    discoveredParams: discoveredModel.params,
+  });
   if (!providerConfig) {
     return {
       ...discoveredModel,
       // Discovered models originate from models.json and may contain persistence markers.
       headers: sanitizeModelHeaders(discoveredModel.headers, { stripSecretRefMarkers: true }),
+      ...(baseParams ? { params: baseParams } : {}),
     };
   }
   const configuredModel =
@@ -306,6 +353,13 @@ function applyConfiguredProviderOverrides(params: {
   const configuredHeaders = sanitizeModelHeaders(configuredModel?.headers, {
     stripSecretRefMarkers: true,
   });
+  const mergedParams = mergeConfiguredModelParams({
+    cfg,
+    provider,
+    modelId,
+    discoveredParams: discoveredModel.params,
+    configuredParams: configuredModel?.params,
+  });
   if (
     !configuredModel &&
     !providerConfig.baseUrl &&
@@ -316,6 +370,7 @@ function applyConfiguredProviderOverrides(params: {
     return {
       ...discoveredModel,
       headers: discoveredHeaders,
+      ...(mergedParams ? { params: mergedParams } : {}),
     };
   }
   const normalizedInput = resolveProviderModelInput({
@@ -361,6 +416,7 @@ function applyConfiguredProviderOverrides(params: {
       maxTokens: configuredModel?.maxTokens ?? discoveredModel.maxTokens,
       headers: requestConfig.headers,
       compat: configuredModel?.compat ?? discoveredModel.compat,
+      ...(mergedParams ? { params: mergedParams } : {}),
     },
     providerRequest,
   );
@@ -511,6 +567,12 @@ function resolveConfiguredFallbackModel(params: {
   if (!providerConfig && !modelId.startsWith("mock-")) {
     return undefined;
   }
+  const mergedParams = mergeConfiguredModelParams({
+    cfg,
+    provider,
+    modelId,
+    configuredParams: configuredModel?.params,
+  });
   const fallbackTransport = resolveProviderTransport({
     provider,
     api: providerConfig?.api ?? "openai-responses",
@@ -558,6 +620,7 @@ function resolveConfiguredFallbackModel(params: {
           providerConfig?.models?.[0]?.maxTokens ??
           DEFAULT_CONTEXT_TOKENS,
         headers: requestConfig.headers,
+        ...(mergedParams ? { params: mergedParams } : {}),
       } as Model<Api>,
       providerRequest,
     ),

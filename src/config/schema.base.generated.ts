@@ -2896,6 +2896,13 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                         },
                         additionalProperties: false,
                       },
+                      params: {
+                        type: "object",
+                        propertyNames: {
+                          type: "string",
+                        },
+                        additionalProperties: {},
+                      },
                     },
                     required: ["id", "name"],
                     additionalProperties: false,
