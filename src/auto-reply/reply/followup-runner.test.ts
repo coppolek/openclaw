@@ -1230,7 +1230,7 @@ describe("createFollowupRunner messaging tool dedupe", () => {
                   },
                 },
               },
-            } as OpenClawConfig,
+            } as unknown as OpenClawConfig,
           },
         }),
       ),
