@@ -4,7 +4,7 @@ import type { SessionEntry } from "../../config/sessions.js";
 import { CommandLaneClearedError, GatewayDrainingError } from "../../process/command-queue.js";
 import type { TemplateContext } from "../templating.js";
 import type { GetReplyOptions } from "../types.js";
-import { MAX_LIVE_SWITCH_RETRIES } from "./agent-runner-execution.js";
+import { MAX_LIVE_SWITCH_RETRIES, buildContextOverflowResetMessage } from "./agent-runner-execution.js";
 import type { FollowupRun } from "./queue.js";
 import type { ReplyOperation } from "./reply-run-registry.js";
 import type { TypingSignaler } from "./typing-mode.js";
@@ -224,6 +224,26 @@ function createMockReplyOperation(): {
     },
   };
 }
+
+describe("buildContextOverflowResetMessage", () => {
+  it("keeps reserveTokensFloor guidance when the floor is below the default", () => {
+    const result = buildContextOverflowResetMessage({ reserveTokensFloor: 12_000 });
+
+    expect(result).toContain("reserveTokensFloor");
+    expect(result).toContain("20000 or higher");
+  });
+
+  it("does not blame reserveTokensFloor when the floor is already healthy", () => {
+    const result = buildContextOverflowResetMessage({
+      reserveTokensFloor: 40_000,
+      duringCompaction: true,
+    });
+
+    expect(result).toContain("during compaction");
+    expect(result).toContain("already 40000");
+    expect(result).not.toContain("20000 or higher");
+  });
+});
 
 describe("runAgentTurnWithFallback", () => {
   beforeEach(() => {
