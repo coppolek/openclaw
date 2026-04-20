@@ -464,7 +464,13 @@ export abstract class MemoryManagerEmbeddingOps extends MemoryManagerSyncOps {
   }
 
   protected getIndexConcurrency(): number {
-    return this.batch.enabled ? this.batch.concurrency : EMBEDDING_INDEX_CONCURRENCY;
+    // Respect the user's configured concurrency even when batch mode is
+    // disabled (e.g. Ollama without batch API). Only fall back to the
+    // hardcoded default when no user config is present.
+    const hasUserConcurrency = this.settings.remote?.batch?.concurrency != null;
+    return hasUserConcurrency || this.batch.enabled
+      ? this.batch.concurrency
+      : EMBEDDING_INDEX_CONCURRENCY;
   }
 
   private clearIndexedFileData(pathname: string, source: MemorySource): void {
