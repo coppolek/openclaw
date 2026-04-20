@@ -147,13 +147,14 @@ export function resolvePreparedExtraParams(params: {
           ),
         )
       : undefined;
+  const modelExtraParams = sanitizeExtraParamsRecord(params.modelExtraParams);
   const merged = {
     ...sanitizeExtraParamsRecord(resolvedExtraParams),
-    ...sanitizeExtraParamsRecord(params.modelExtraParams),
+    ...modelExtraParams,
     ...override,
   };
   const resolvedCachedContent = resolveAliasedParamValue(
-    [resolvedExtraParams, override],
+    [resolvedExtraParams, modelExtraParams, override],
     "cached_content",
     "cachedContent",
   );

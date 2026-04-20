@@ -1937,6 +1937,32 @@ describe("applyExtraParamsToAgent", () => {
     expect(effectiveExtraParams.temperature).toBe(0.3);
   });
 
+  it("keeps model-level cached content alias precedence over defaults", () => {
+    const effectiveExtraParams = resolvePreparedExtraParams({
+      cfg: {
+        agents: {
+          defaults: {
+            models: {
+              "openrouter/google/gemma-3-27b-it": {
+                params: {
+                  cachedContent: "from-default",
+                },
+              },
+            },
+          },
+        },
+      } as Parameters<typeof resolvePreparedExtraParams>[0]["cfg"],
+      provider: "openrouter",
+      modelId: "google/gemma-3-27b-it",
+      modelExtraParams: {
+        cached_content: "from-model",
+      },
+    });
+
+    expect(effectiveExtraParams.cachedContent).toBe("from-model");
+    expect(effectiveExtraParams.cached_content).toBeUndefined();
+  });
+
   it("reads sanitized model-level extraParams from runtime model objects", () => {
     const resolved = resolveModelConfigExtraParams({
       id: "google/gemma-3-27b-it",
