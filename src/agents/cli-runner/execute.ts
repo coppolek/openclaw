@@ -21,6 +21,7 @@ import { prepareClaudeCliSkillsPlugin } from "./claude-skills-plugin.js";
 import {
   buildCliSupervisorScopeKey,
   buildCliArgs,
+  applyWindowsArgvGuard,
   resolveCliRunQueueKey,
   enqueueCliRun,
   prepareCliPromptImagePayload,
@@ -226,7 +227,7 @@ export async function executePreparedCliRun(
     backend,
     prompt,
   });
-  const stdinPayload = stdin ?? "";
+  let stdinPayload = stdin ?? "";
   const baseArgs = useResume ? (backend.resumeArgs ?? backend.args ?? []) : (backend.args ?? []);
   const resolvedArgs = useResume
     ? baseArgs.map((entry) => entry.replaceAll("{sessionId}", resolvedSessionId ?? ""))
@@ -235,7 +236,7 @@ export async function executePreparedCliRun(
     backendId: context.backendResolved.id,
     skillsSnapshot: params.skillsSnapshot,
   });
-  const args = buildCliArgs({
+  let args = buildCliArgs({
     backend,
     baseArgs:
       claudeSkillsPlugin.args.length > 0
@@ -249,6 +250,23 @@ export async function executePreparedCliRun(
     promptArg: argsPrompt,
     useResume,
   });
+
+  // On Windows, CreateProcessW has a ~32 K char command-line limit.  When
+  // the system prompt makes the argv too long, move it off the command line
+  // and into stdin so the spawn does not fail with ENAMETOOLONG.
+  const argvGuard = applyWindowsArgvGuard({
+    command: backend.command,
+    args,
+    stdinPayload,
+    systemPromptArg: backend.systemPromptArg,
+  });
+  if (argvGuard) {
+    args = argvGuard.args;
+    stdinPayload = argvGuard.stdinPayload;
+    cliBackendLog.info(
+      "cli argv guard: moved system prompt from args to stdin (Windows arg limit)",
+    );
+  }
 
   const queueKey = resolveCliRunQueueKey({
     backendId: context.backendResolved.id,
