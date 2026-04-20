@@ -1405,9 +1405,11 @@ export async function runReplyAgent(params: {
       const cacheWrite = usage.cacheWrite ?? 0;
       const promptTokens = input + cacheRead + cacheWrite;
       const totalTokens = usage.total ?? promptTokens + output;
+      const agentId = sessionKey ? resolveAgentIdFromSessionKey(sessionKey) : undefined;
       const costConfig = resolveModelCostConfig({
         provider: providerUsed,
         model: modelUsed,
+        agent: agentId,
         config: cfg,
       });
       const costUsd = estimateUsageCost({ usage, cost: costConfig });
@@ -1418,6 +1420,7 @@ export async function runReplyAgent(params: {
         channel: replyToChannel,
         provider: providerUsed,
         model: modelUsed,
+        agent: agentId,
         usage: {
           input,
           output,
@@ -1447,6 +1450,7 @@ export async function runReplyAgent(params: {
         ? resolveModelCostConfig({
             provider: providerUsed,
             model: modelUsed,
+        agent: agentId,
             config: cfg,
           })
         : undefined;
