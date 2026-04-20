@@ -349,7 +349,7 @@ describe("bedrock mantle discovery", () => {
     expect(provider?.api).toBe("openai-completions");
     expect(provider?.auth).toBe("api-key");
     expect(provider?.apiKey).toBe("env:AWS_BEARER_TOKEN_BEDROCK");
-    expect(provider?.models).toHaveLength(1);
+    expect(provider?.models).toHaveLength(2);
   });
 
   it("returns null when no auth is available", async () => {

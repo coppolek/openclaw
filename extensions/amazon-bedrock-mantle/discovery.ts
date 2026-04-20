@@ -42,6 +42,14 @@ function mantleEndpoint(region: string): string {
   return `https://bedrock-mantle.${region}.api.aws`;
 }
 
+/**
+ * Anthropic Messages API endpoint on Mantle.
+ * Claude models use /anthropic/v1/messages, not the OpenAI-compatible endpoint.
+ */
+function mantleAnthropicBaseUrl(region: string): string {
+  return `https://bedrock-mantle.${region}.api.aws/anthropic`;
+}
+
 function isSupportedRegion(region: string): boolean {
   return (MANTLE_SUPPORTED_REGIONS as readonly string[]).includes(region);
 }
@@ -286,12 +294,38 @@ export async function resolveImplicitMantleProvider(params: {
 
   log.debug?.("Mantle provider resolved", { region, modelCount: models.length });
 
+  // Append Claude models available on Mantle's Anthropic Messages endpoint.
+  // Opus 4.7 is the first (and currently only) Claude model on Mantle.
+  // These use api: "anthropic-messages" and a different baseUrl, which
+  // override the provider-level openai-completions API per-model.
+  const anthropicBaseUrl = mantleAnthropicBaseUrl(region);
+  const claudeModels: ModelDefinitionConfig[] = [
+    {
+      id: "anthropic.claude-opus-4-7",
+      name: "Claude Opus 4.7",
+      api: "anthropic-messages" as const,
+      baseUrl: anthropicBaseUrl,
+      reasoning: true,
+      input: ["text", "image"],
+      cost: {
+        input: 5,
+        output: 25,
+        cacheRead: 0.5,
+        cacheWrite: 6.25,
+      },
+      contextWindow: 1_000_000,
+      maxTokens: 128_000,
+    },
+  ];
+
+  const allModels = [...models, ...claudeModels];
+
   return {
     baseUrl: `${mantleEndpoint(region)}/v1`,
     api: "openai-completions",
     auth: "api-key",
     apiKey: explicitBearerToken ? "env:AWS_BEARER_TOKEN_BEDROCK" : bearerToken,
-    models,
+    models: allModels,
   };
 }
 

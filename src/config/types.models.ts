@@ -70,6 +70,8 @@ export type ModelDefinitionConfig = {
    */
   contextTokens?: number;
   maxTokens: number;
+  /** Optional per-model base URL override (e.g. different API endpoint). */
+  baseUrl?: string;
   headers?: Record<string, string>;
   compat?: ModelCompatConfig;
 };
