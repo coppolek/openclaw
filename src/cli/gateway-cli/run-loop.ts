@@ -28,6 +28,11 @@ import type { RuntimeEnv } from "../../runtime.js";
 const gatewayLog = createSubsystemLogger("gateway");
 const LAUNCHD_SUPERVISED_RESTART_EXIT_DELAY_MS = 1500;
 const DEFAULT_RESTART_DRAIN_TIMEOUT_MS = 300_000;
+// If the gateway does not finish starting within this window, the process exits
+// non-zero so that supervised launchers (launchd, systemd) can restart it.
+// This prevents an indefinite hang when the process starts before the network
+// is ready (e.g. macOS sleep/wake with RunAtLoad=true in the launchd plist).
+const STARTUP_TIMEOUT_MS = 60_000;
 
 type GatewayRunSignalAction = "stop" | "restart";
 
@@ -260,7 +265,45 @@ export async function runGatewayLoop(params: {
     for (;;) {
       onIteration();
       try {
-        server = await params.start({ startupStartedAt });
+        // Guard against indefinite hangs during startup (e.g. a network call
+        // without a timeout made before the OS network stack is ready after
+        // sleep/wake). If startup does not complete in time, exit non-zero so
+        // the supervisor (launchd KeepAlive / systemd Restart) relaunches the
+        // process once the network is actually available. (#63966)
+        let startupTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
+        const startupTimeoutPromise = new Promise<never>((_, reject) => {
+          startupTimeoutHandle = setTimeout(() => {
+            reject(
+              new Error(
+                `gateway startup timed out after ${STARTUP_TIMEOUT_MS}ms; ` +
+                  `network may not be ready — exiting so the supervisor can restart`,
+              ),
+            );
+          }, STARTUP_TIMEOUT_MS);
+        });
+        // Hold a reference to the start promise so we can abort a timed-out
+        // startup that resolves late, preventing an untracked server from
+        // holding the gateway port across restart boundaries.
+        const startPromise = params.start({ startupStartedAt });
+        try {
+          server = await Promise.race([startPromise, startupTimeoutPromise]);
+        } catch (err) {
+          // If the timeout fired while start() was still in-flight, close any
+          // server it eventually produces so it cannot hold the port untracked.
+          // Swallow close() rejections — this is best-effort cleanup on an
+          // abandoned startup; a throwing close must not become an unhandled
+          // rejection that terminates the process (Node 22+).
+          void startPromise.then(
+            (s) =>
+              s.close({ reason: "startup timed out", restartExpectedMs: null }).catch(() => {}),
+            () => {},
+          );
+          throw err;
+        } finally {
+          // The Promise constructor callback is synchronous, so startupTimeoutHandle
+          // is always assigned by the time this finally block runs.
+          clearTimeout(startupTimeoutHandle!);
+        }
         isFirstStart = false;
       } catch (err) {
         // On initial startup, let the error propagate so the outer handler

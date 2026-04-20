@@ -450,6 +450,107 @@ describe("runGatewayLoop", () => {
     });
   });
 
+  it("exits non-zero when startup times out on first start (no network)", async () => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+
+    try {
+      await withIsolatedSignals(async () => {
+        const { runtime } = createRuntimeWithExitSignal();
+        // start() never resolves — simulates a hung network call at boot
+        const start = vi.fn(async () => new Promise<never>(() => {}));
+
+        const { loopPromise } = await runLoopWithStart({ start, runtime });
+
+        // Attach a no-op rejection handler before advancing timers so that the
+        // internal startupTimeoutPromise rejection is not reported as unhandled
+        // while the microtask queue is draining inside advanceTimersByTimeAsync.
+        loopPromise.catch(() => {});
+
+        // Advance past the 60 s startup deadline
+        await vi.advanceTimersByTimeAsync(60_001);
+
+        await expect(loopPromise).rejects.toThrow("gateway startup timed out after 60000ms");
+        expect(start).toHaveBeenCalledTimes(1);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("closes a late-resolving start() after timeout to avoid untracked server holding the port", async () => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+
+    try {
+      await withIsolatedSignals(async ({ captureSignal }) => {
+        const closeFirst = vi.fn(async () => {});
+        // Simulate a close() that rejects — must not become an unhandled rejection
+        const lateStartClose = vi.fn(async () => {
+          throw new Error("close failed");
+        });
+        const { runtime, exited } = createRuntimeWithExitSignal();
+
+        // Signal so we know exactly when the second start() is invoked
+        let resolveSecondStartCalled: (() => void) | null = null;
+        const secondStartCalled = new Promise<void>((r) => {
+          resolveSecondStartCalled = r;
+        });
+        // Use an object property to avoid TypeScript narrowing the let-binding to never
+        const startControl = { resolve: null as (() => void) | null };
+
+        const start = vi
+          .fn()
+          .mockResolvedValueOnce({ close: closeFirst })
+          .mockImplementationOnce(
+            () =>
+              new Promise((resolve) => {
+                resolveSecondStartCalled?.();
+                startControl.resolve = () => resolve({ close: lateStartClose });
+              }),
+          );
+
+        const { runGatewayLoop } = await import("./run-loop.js");
+        void runGatewayLoop({
+          start: start as unknown as Parameters<typeof runGatewayLoop>[0]["start"],
+          runtime: runtime as unknown as Parameters<typeof runGatewayLoop>[0]["runtime"],
+        });
+
+        // Flush setImmediate queue (faked by vi.useFakeTimers) and microtasks
+        await vi.advanceTimersByTimeAsync(0);
+        const sigusr1 = captureSignal("SIGUSR1");
+        const sigterm = captureSignal("SIGTERM");
+
+        sigusr1();
+
+        // The restart chain is all microtasks — wait for second start() to be invoked
+        await secondStartCalled;
+        // Flush any pending setImmediate calls
+        await vi.advanceTimersByTimeAsync(0);
+
+        // Now the startupTimeoutPromise is live — advance past the 60 s deadline
+        await vi.advanceTimersByTimeAsync(60_001);
+        await vi.advanceTimersByTimeAsync(0);
+
+        // Second start() resolves late — the orphan server must be closed immediately
+        startControl.resolve?.();
+        await vi.advanceTimersByTimeAsync(0);
+
+        // close() was called on the orphan server and its rejection was swallowed
+        expect(lateStartClose).toHaveBeenCalledWith({
+          reason: "startup timed out",
+          restartExpectedMs: null,
+        });
+
+        sigterm();
+        await vi.advanceTimersByTimeAsync(0);
+        await expect(exited).resolves.toBe(0);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("exits when lock reacquire fails during in-process restart fallback", async () => {
     vi.clearAllMocks();
 
