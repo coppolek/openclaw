@@ -12,7 +12,7 @@ import { resolveBootstrapWarningSignaturesSeen } from "../../agents/bootstrap-bu
 import { runCliAgent } from "../../agents/cli-runner.js";
 import { getCliSessionBinding } from "../../agents/cli-session.js";
 import { LiveSessionModelSwitchError } from "../../agents/live-model-switch-error.js";
-import { runWithModelFallback, isFallbackSummaryError } from "../../agents/model-fallback.js";
+import { runWithModelFallback, isFallbackSummaryError, type ModelFallbackRunOptions } from "../../agents/model-fallback.js";
 import { isCliProvider } from "../../agents/model-selection.js";
 import {
   BILLING_ERROR_USER_MESSAGE,
@@ -649,7 +649,8 @@ export async function runAgentTurnWithFallback(params: {
   const persistFallbackCandidateSelection = async (
     provider: string,
     model: string,
-  ): Promise<(() => Promise<void>) | undefined> => {
+    runOptions?: ModelFallbackRunOptions,
+  ) => {
     if (
       !params.sessionKey ||
       !params.activeSessionStore ||
@@ -661,6 +662,19 @@ export async function runAgentTurnWithFallback(params: {
     const activeSessionEntry =
       params.getActiveSessionEntry() ?? params.activeSessionStore[params.sessionKey];
     if (!activeSessionEntry) {
+      return undefined;
+    }
+
+    // Auth failures are configuration errors, not model health issues.  A
+    // sticky session-level override would keep the fallback model active even
+    // after the user fixes their API key, forcing a manual /new to recover.
+    // Skip persistence so the primary model is retried on the next request and
+    // resumes automatically once auth is restored.
+    const previousReasons = runOptions?.previousFailureReasons ?? [];
+    const allAuthFailures =
+      previousReasons.length > 0 &&
+      previousReasons.every((r) => r === "auth" || r === "auth_permanent");
+    if (allAuthFailures) {
       return undefined;
     }
 
@@ -832,6 +846,7 @@ export async function runAgentTurnWithFallback(params: {
             rollbackFallbackCandidateSelection = await persistFallbackCandidateSelection(
               provider,
               model,
+              runOptions,
             );
           } catch (error) {
             logVerbose(

@@ -65,6 +65,14 @@ export function isFallbackSummaryError(err: unknown): err is FallbackSummaryErro
 
 export type ModelFallbackRunOptions = {
   allowTransientCooldownProbe?: boolean;
+  /**
+   * Reasons why all previous fallback candidates failed, in order.
+   * Provided to the `run` callback so it can make informed persistence
+   * decisions — e.g. skipping a sticky session override when every prior
+   * failure was due to a missing API key (a config issue, not a model
+   * health issue).
+   */
+  previousFailureReasons?: FailoverReason[];
 };
 
 type ModelFallbackRunFn<T> = (
@@ -783,7 +791,23 @@ export async function runWithModelFallback<T>(params: {
       run: params.run,
       ...candidate,
       attempts,
-      options: runOptions,
+      // Only pass options when there is something meaningful to convey, so
+      // that existing tests/callers that don't expect a third argument are
+      // not broken.
+      ...(runOptions !== undefined || attempts.length > 0
+        ? {
+            options: {
+              ...runOptions,
+              ...(attempts.length > 0
+                ? {
+                    previousFailureReasons: attempts.flatMap((a) =>
+                      a.reason ? [a.reason] : [],
+                    ),
+                  }
+                : undefined),
+            },
+          }
+        : undefined),
     });
     if ("success" in attemptRun) {
       if (i > 0 || attempts.length > 0 || attemptedDuringCooldown) {
