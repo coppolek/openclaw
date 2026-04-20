@@ -40,6 +40,7 @@ import { DEFAULT_JOB_TIMEOUT_MS, resolveCronJobTimeoutMs } from "./timeout-polic
 export { DEFAULT_JOB_TIMEOUT_MS } from "./timeout-policy.js";
 
 const MAX_TIMER_DELAY_MS = 60_000;
+const COMMAND_ABORT_SETTLE_GRACE_MS = 500;
 
 /**
  * Minimum gap between consecutive fires of the same cron job.  This is a
@@ -85,15 +86,39 @@ export async function executeJobCoreWithTimeout(
   }
 
   const runAbortController = new AbortController();
-  let timeoutId: NodeJS.Timeout | undefined;
+  const executionPromise = executeJobCore(state, job, runAbortController.signal);
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
-      executeJobCore(state, job, runAbortController.signal),
-      new Promise<never>((_, reject) => {
+      executionPromise,
+      new Promise<Awaited<ReturnType<typeof executeJobCore>>>((resolve, reject) => {
         timeoutId = setTimeout(() => {
           runAbortController.abort(timeoutErrorMessage());
+          if (job.payload.kind === "command") {
+            void Promise.race([
+              executionPromise,
+              new Promise<symbol>((graceResolve) => {
+                const graceTimer = setTimeout(() => {
+                  graceResolve(Symbol.for("cron-command-timeout-grace-expired"));
+                }, COMMAND_ABORT_SETTLE_GRACE_MS);
+                graceTimer.unref?.();
+              }),
+            ])
+              .then((result) => {
+                if (typeof result === "symbol") {
+                  reject(new Error(timeoutErrorMessage()));
+                  return;
+                }
+                resolve(result);
+              })
+              .catch((err) => {
+                reject(err instanceof Error ? err : new Error(timeoutErrorMessage()));
+              });
+            return;
+          }
           reject(new Error(timeoutErrorMessage()));
         }, jobTimeoutMs);
+        timeoutId.unref?.();
       }),
     ]);
   } finally {
@@ -1277,11 +1302,41 @@ async function executeDetachedCronJob(
 ): Promise<
   CronRunOutcome & CronRunTelemetry & { delivered?: boolean; deliveryAttempted?: boolean }
 > {
-  if (job.payload.kind !== "agentTurn") {
-    return { status: "skipped", error: "isolated job requires payload.kind=agentTurn" };
+  if (job.payload.kind !== "agentTurn" && job.payload.kind !== "command") {
+    return {
+      status: "skipped",
+      error: 'isolated job requires payload.kind="agentTurn" or "command"',
+    };
   }
   if (abortSignal?.aborted) {
     return resolveAbortError();
+  }
+
+  if (job.payload.kind === "command") {
+    const res = await state.deps.runCommandJob({
+      job,
+      command: job.payload.command,
+      args: job.payload.args,
+      timeoutSeconds: job.payload.timeoutSeconds,
+      abortSignal,
+    });
+
+    if (abortSignal?.aborted && res.status !== "aborted") {
+      return { status: "error", error: timeoutErrorMessage() };
+    }
+
+    return {
+      status: res.status,
+      error: res.error,
+      summary: res.summary,
+      delivered: res.delivered,
+      deliveryAttempted: res.deliveryAttempted,
+      sessionId: res.sessionId,
+      sessionKey: res.sessionKey,
+      model: res.model,
+      provider: res.provider,
+      usage: res.usage,
+    };
   }
 
   const res = await state.deps.runIsolatedAgentJob({

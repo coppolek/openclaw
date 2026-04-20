@@ -18,6 +18,18 @@ function cronAgentTurnPayloadSchema(params: { message: TSchema; toolsAllow: TSch
   );
 }
 
+function cronCommandPayloadSchema(params: { command: TSchema; args: TSchema }) {
+  return Type.Object(
+    {
+      kind: Type.Literal("command"),
+      command: params.command,
+      args: Type.Optional(params.args),
+      timeoutSeconds: Type.Optional(Type.Integer({ minimum: 0 })),
+    },
+    { additionalProperties: false },
+  );
+}
+
 const CronSessionTargetSchema = Type.Union([
   Type.Literal("main"),
   Type.Literal("isolated"),
@@ -29,6 +41,7 @@ const CronRunStatusSchema = Type.Union([
   Type.Literal("ok"),
   Type.Literal("error"),
   Type.Literal("skipped"),
+  Type.Literal("aborted"),
 ]);
 const CronSortDirSchema = Type.Union([Type.Literal("asc"), Type.Literal("desc")]);
 const CronJobsEnabledFilterSchema = Type.Union([
@@ -46,11 +59,13 @@ const CronRunsStatusFilterSchema = Type.Union([
   Type.Literal("ok"),
   Type.Literal("error"),
   Type.Literal("skipped"),
+  Type.Literal("aborted"),
 ]);
 const CronRunsStatusValueSchema = Type.Union([
   Type.Literal("ok"),
   Type.Literal("error"),
   Type.Literal("skipped"),
+  Type.Literal("aborted"),
 ]);
 const CronDeliveryStatusSchema = Type.Union([
   Type.Literal("delivered"),
@@ -139,6 +154,10 @@ export const CronPayloadSchema = Type.Union([
     message: NonEmptyString,
     toolsAllow: Type.Array(Type.String()),
   }),
+  cronCommandPayloadSchema({
+    command: NonEmptyString,
+    args: Type.Array(Type.String()),
+  }),
 ]);
 
 export const CronPayloadPatchSchema = Type.Union([
@@ -152,6 +171,10 @@ export const CronPayloadPatchSchema = Type.Union([
   cronAgentTurnPayloadSchema({
     message: Type.Optional(NonEmptyString),
     toolsAllow: Type.Union([Type.Array(Type.String()), Type.Null()]),
+  }),
+  cronCommandPayloadSchema({
+    command: Type.Optional(NonEmptyString),
+    args: Type.Union([Type.Array(Type.String()), Type.Null()]),
   }),
 ]);
 
@@ -330,7 +353,7 @@ export const CronRunsParamsSchema = Type.Object(
     jobId: Type.Optional(CronRunLogJobIdSchema),
     limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
     offset: Type.Optional(Type.Integer({ minimum: 0 })),
-    statuses: Type.Optional(Type.Array(CronRunsStatusValueSchema, { minItems: 1, maxItems: 3 })),
+    statuses: Type.Optional(Type.Array(CronRunsStatusValueSchema, { minItems: 1, maxItems: 4 })),
     status: Type.Optional(CronRunsStatusFilterSchema),
     deliveryStatuses: Type.Optional(
       Type.Array(CronDeliveryStatusSchema, { minItems: 1, maxItems: 4 }),
