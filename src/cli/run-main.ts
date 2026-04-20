@@ -210,12 +210,20 @@ export async function runCli(argv: string[] = process.argv) {
     // Capture all console output into structured logs while keeping stdout/stderr behavior.
     enableConsoleCapture();
 
-    const [{ buildProgram }, { installUnhandledRejectionHandler }, { restoreTerminalState }] =
-      await Promise.all([
-        import("./program.js"),
-        import("../infra/unhandled-rejections.js"),
-        import("../terminal/restore.js"),
-      ]);
+    const [
+      { buildProgram },
+      {
+        installUnhandledRejectionHandler,
+        isAbortError,
+        isTransientNetworkError,
+        isUncaughtExceptionHandled,
+      },
+      { restoreTerminalState },
+    ] = await Promise.all([
+      import("./program.js"),
+      import("../infra/unhandled-rejections.js"),
+      import("../terminal/restore.js"),
+    ]);
     const program = buildProgram();
 
     // Global error handlers to prevent silent crashes from unhandled rejections/exceptions.
@@ -223,6 +231,20 @@ export async function runCli(argv: string[] = process.argv) {
     installUnhandledRejectionHandler();
 
     process.on("uncaughtException", (error) => {
+      if (isUncaughtExceptionHandled(error)) {
+        return;
+      }
+      if (isAbortError(error)) {
+        console.warn("[openclaw] Suppressed AbortError:", formatUncaughtError(error));
+        return;
+      }
+      if (isTransientNetworkError(error)) {
+        console.warn(
+          "[openclaw] Non-fatal uncaught exception (continuing):",
+          formatUncaughtError(error),
+        );
+        return;
+      }
       console.error("[openclaw] Uncaught exception:", formatUncaughtError(error));
       restoreTerminalState("uncaught exception", { resumeStdinIfPaused: false });
       process.exit(1);
