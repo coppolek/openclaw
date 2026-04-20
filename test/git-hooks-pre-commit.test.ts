@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanupTempDirs, makeTempRepoRoot } from "./helpers/temp-repo.js";
@@ -107,5 +107,38 @@ describe("git-hooks/pre-commit (integration)", () => {
     });
 
     expect(output).toContain("FAST_COMMIT enabled: skipping pnpm check in pre-commit hook.");
+  });
+
+  it("falls back to corepack pnpm when pnpm is not directly on PATH", () => {
+    const dir = makeTempRepoRoot(tempDirs, "openclaw-pre-commit-corepack-");
+    run(dir, "git", ["init", "-q", "--initial-branch=main"]);
+
+    const fakeBinDir = installPreCommitFixture(dir);
+    writeFileSync(path.join(dir, "package.json"), '{"name":"tmp"}\n', "utf8");
+    writeFileSync(path.join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n", "utf8");
+
+    const markerFile = path.join(dir, "corepack-ran.txt");
+    writeExecutable(
+      fakeBinDir,
+      "corepack",
+      `#!/usr/bin/env bash
+[ "$1" = "pnpm" ] || exit 90
+[ "$2" = "check" ] || exit 91
+echo ok > "${markerFile}"
+exit 0
+`,
+    );
+
+    writeFileSync(path.join(dir, "tracked.txt"), "hello\n", "utf8");
+    run(dir, "git", ["add", "--", "tracked.txt"]);
+
+    const output = run(dir, "bash", ["git-hooks/pre-commit"], {
+      PATH: `${fakeBinDir}:/usr/bin:/bin`,
+    });
+
+    expect(output).not.toContain("Neither pnpm nor corepack is available on PATH");
+    expect(existsSync(markerFile)).toBe(true);
+    const marker = readFileSync(markerFile, "utf8").trim();
+    expect(marker).toBe("ok");
   });
 });
