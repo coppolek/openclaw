@@ -1044,13 +1044,44 @@ Example:
 
 OpenClaw can join Discord voice channels for realtime, continuous conversations. This is separate from voice message attachments.
 
-Requirements:
+### Setup checklist
 
-- Enable native commands (`commands.native` or `channels.discord.commands.native`).
-- Configure `channels.discord.voice`.
-- The bot needs Connect + Speak permissions in the target voice channel.
+1. **Enable voice-required bot capabilities in Developer Portal**
+   - Bot page → **Privileged Gateway Intents**
+     - **Message Content Intent** (required for reading commands/messages)
+     - **Server Members Intent** (required for role/user allowlist checks)
+   - Optional: **Presence Intent** only if you use bot presence workflows.
 
-Use the Discord-only native command `/vc join|leave|status` to control sessions. The command uses the account default agent and follows the same allowlist and group policy rules as other Discord commands.
+2. **Invite the bot with the right scopes and permissions**
+   - Scopes: `bot`, `applications.commands`
+   - Minimum channel permissions in target guild voice channels:
+     - **Connect**
+     - **Speak**
+     - **Read Message History**
+     - **Send Messages** (for slash command replies and status messages)
+     - **Use Voice Activity** (some guilds require it depending on bot activity settings)
+
+3. **Turn on Discord native commands**
+   - set `commands.native=true` (global) or `channels.discord.commands.native=true` (Discord only)
+   - restart gateway after first-time role changes
+
+4. **Configure voice in OpenClaw**
+   - `channels.discord.voice` must exist and be enabled.
+   - optional `autoJoin` can start in a channel at startup.
+   - optional `voice.model` lets you override LLM model for VC only.
+
+5. **Verify runtime controls**
+   - `/vc status` should show no session first.
+   - `/vc join` then `/vc leave` validates command plumbing.
+   - if join works once but drops immediately, check bot role hierarchy + voice channel permission overrides.
+
+Use `/vc join` with a voice/stage channel argument, then `/vc leave`.
+
+```bash
+/vc join channel:<voice-channel-id>
+/vc status
+/vc leave
+```
 
 Auto-join example:
 
@@ -1060,6 +1091,7 @@ Auto-join example:
     discord: {
       voice: {
         enabled: true,
+        model: "openai/gpt-5.4",
         autoJoin: [
           {
             guildId: "123456789012345678",
@@ -1070,7 +1102,7 @@ Auto-join example:
         decryptionFailureTolerance: 24,
         tts: {
           provider: "openai",
-          openai: { voice: "alloy" },
+          openai: { voice: "onyx" },
         },
       },
     },
@@ -1078,15 +1110,89 @@ Auto-join example:
 }
 ```
 
+#### Known-good starting defaults
+
+If you want to mirror a working baseline quickly, use the values below as a starter profile and tune as needed:
+
+```json5
+{
+  messages: {
+    tts: {
+      provider: "openai",
+      openai: {
+        model: "gpt-4o-mini-tts",
+        voice: "onyx",
+      },
+    },
+  },
+  tools: {
+    media: {
+      audio: {
+        enabled: true,
+        models: [{ provider: "openai", model: "gpt-4o-mini-transcribe" }],
+      },
+    },
+  },
+  channels: {
+    discord: {
+      voice: {
+        enabled: true,
+        model: "openai/gpt-4o",
+        daveEncryption: true,
+        decryptionFailureTolerance: 24,
+        tts: {
+          provider: "openai",
+          openai: {
+            voice: "onyx",
+          },
+        },
+      },
+    },
+  },
+}
+```
+
+Required env keys for this baseline:
+
+- `OPENAI_API_KEY` for the `openai/*` path (`tools.media.audio` and `openai` TTS path)
+- Optional: Codex OAuth profile auth if you switch `channels.discord.voice.model` to `openai-codex/*`.
+
+For latency-sensitive voice sessions, start with a smaller/faster response model:
+
+- If you already have Codex auth and want to use it here, `openai-codex/gpt-5.3-codex-spark` is often lower-latency.
+- Otherwise start with a fast OpenAI path such as `openai/gpt-5.4-mini` or your provider's lowest-latency compatible model.
+- If you use `openai-codex/*`, set up a valid Codex profile first (for example `openai-codex:<profile-alias>`) or this override will fail to resolve.
+- Keep TTS/STT at deterministic settings while you tune VC model latency (for example keep `gpt-4o-mini-transcribe` / `gpt-4o-mini-tts`).
+
 Notes:
 
 - `voice.tts` overrides `messages.tts` for voice playback only.
+- `voice.model` can be set to override the LLM used for VC responses (for example `openai/gpt-4o`). Leave unset to inherit the route/session default model.
 - Voice transcript turns derive owner status from Discord `allowFrom` (or `dm.allowFrom`); non-owner speakers cannot access owner-only tools (for example `gateway` and `cron`).
 - Voice is enabled by default; set `channels.discord.voice.enabled=false` to disable it.
 - `voice.daveEncryption` and `voice.decryptionFailureTolerance` pass through to `@discordjs/voice` join options.
 - `@discordjs/voice` defaults are `daveEncryption=true` and `decryptionFailureTolerance=24` if unset.
-- OpenClaw also watches receive decrypt failures and auto-recovers by leaving/rejoining the voice channel after repeated failures in a short window.
-- If receive logs repeatedly show `DecryptionFailed(UnencryptedWhenPassthroughDisabled)`, this may be the upstream `@discordjs/voice` receive bug tracked in [discord.js #11419](https://github.com/discordjs/discord.js/issues/11419).
+- OpenClaw watches receive-decrypt failures and auto-recovers by leaving/rejoining the voice channel when failures repeat.
+- If you see repeated `DecryptionFailed(UnencryptedWhenPassthroughDisabled)`, this often maps to upstream `@discordjs/voice` behavior tracked in [discord.js #11419](https://github.com/discordjs/discord.js/issues/11419).
+
+### Pipeline and credentials
+
+- Audio capture and STT:
+  - Captured PCM is converted to WAV and passed to OpenClaw runtime `mediaUnderstanding.transcribeAudioFile`.
+  - Transcription uses `tools.media.audio` models (for example `openai` + `gpt-4o-mini-transcribe`), not `voice.model`.
+  - `voice.model` does **not** affect STT.
+- Brain/response model:
+  - By default this uses the resolved route/session model (typically your active `agents.defaults.model.primary` chain).
+  - If configured, `channels.discord.voice.model` overrides only this VC LLM model (for example `openai/gpt-4o`), while everything else remains unchanged.
+- TTS:
+  - Response text is converted using `voice.tts` merged over `messages.tts` and then played back.
+  - Default example in this doc uses `openai` + `gpt-4o-mini-tts`.
+
+Required credentials by component:
+
+- LLM model path (for example `openai-codex/*`, `openai/*`): normal provider auth for that route (`OPENAI_API_KEY` for `openai/*`, Codex auth for `openai-codex/*`).
+- STT model path (`tools.media.audio`): provider-specific auth (for OpenAI audio model, `OPENAI_API_KEY`/`openai` provider config or profile).
+- TTS model path (`messages.tts` / `voice.tts`): provider-specific auth (`ELEVENLABS_API_KEY` or `OPENAI_API_KEY`, depending on provider).
 
 ## Voice messages
 

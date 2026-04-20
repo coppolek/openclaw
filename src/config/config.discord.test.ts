@@ -83,6 +83,23 @@ describe("config discord", () => {
     expect(cfg.execApprovals?.approvers).toEqual(["555"]);
   });
 
+  it("accepts discord voice model override field", () => {
+    const res = validateConfigObject({
+      channels: {
+        discord: {
+          voice: {
+            model: "openai-codex/gpt-5.4",
+          },
+        },
+      },
+    });
+
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.config.channels?.discord?.voice?.model).toBe("openai-codex/gpt-5.4");
+    }
+  });
+
   it("rejects numeric discord IDs that are not valid non-negative safe integers", () => {
     const cases = [106232522769186816, -1, 123.45];
     for (const id of cases) {
