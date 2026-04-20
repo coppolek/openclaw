@@ -861,6 +861,7 @@ function renderPinnedSection(
                         requestUpdate();
                       }}
                       title="Unpin"
+                      aria-label="Unpin"
                     >
                       ${icons.x}
                     </button>
@@ -1057,11 +1058,13 @@ export function renderChat(props: ChatProps) {
   };
   const isEmpty = chatItems.length === 0 && !props.loading;
 
+  const isStreaming = props.stream !== null;
   const thread = html`
     <div
       class="chat-thread"
       role="log"
       aria-live="polite"
+      aria-busy=${isStreaming ? "true" : "false"}
       @scroll=${props.onChatScroll}
       @click=${handleCodeBlockCopy}
     >

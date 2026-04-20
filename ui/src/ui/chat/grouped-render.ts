@@ -1268,6 +1268,7 @@ function renderGroupedMessage(
                 class="chat-tool-msg-summary"
                 type="button"
                 aria-expanded=${String(toolMessageExpanded)}
+                aria-label=${toolMessageExpanded ? "Collapse tool calls" : "Expand tool calls"}
                 @click=${() => opts.onToggleToolMessageExpanded?.(toolMessageDisclosureId)}
               >
                 <span class="chat-tool-msg-summary__icon">${icons.zap}</span>
