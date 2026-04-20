@@ -15,6 +15,7 @@ export type ControlUiBootstrapState = {
   localMediaPreviewRoots: string[];
   embedSandboxMode: ControlUiEmbedSandboxMode;
   allowExternalEmbedUrls: boolean;
+  mcpAppsEnabled: boolean;
 };
 
 export async function loadControlUiBootstrapConfig(state: ControlUiBootstrapState) {
@@ -59,6 +60,7 @@ export async function loadControlUiBootstrapConfig(state: ControlUiBootstrapStat
           ? "strict"
           : "scripts";
     state.allowExternalEmbedUrls = parsed.allowExternalEmbedUrls === true;
+    state.mcpAppsEnabled = parsed.mcpAppsEnabled === true;
   } catch {
     // Ignore bootstrap failures; UI will update identity after connecting.
   }

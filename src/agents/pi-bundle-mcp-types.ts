@@ -1,4 +1,9 @@
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type {
+  CallToolResult,
+  ListResourcesResult,
+  ListResourceTemplatesResult,
+  ReadResourceResult,
+} from "@modelcontextprotocol/sdk/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { AnyAgentTool } from "./tools/common.js";
 
@@ -21,6 +26,8 @@ export type McpCatalogTool = {
   description?: string;
   inputSchema: unknown;
   fallbackDescription: string;
+  uiResourceUri?: string;
+  uiVisibility?: Array<"model" | "app">;
 };
 
 export type McpToolCatalog = {
@@ -35,11 +42,18 @@ export type SessionMcpRuntime = {
   sessionKey?: string;
   workspaceDir: string;
   configFingerprint: string;
+  mcpAppsEnabled?: boolean;
   createdAt: number;
   lastUsedAt: number;
   getCatalog: () => Promise<McpToolCatalog>;
   markUsed: () => void;
   callTool: (serverName: string, toolName: string, input: unknown) => Promise<CallToolResult>;
+  listResources: (serverName: string, params?: { cursor?: string }) => Promise<ListResourcesResult>;
+  listResourceTemplates: (
+    serverName: string,
+    params?: { cursor?: string },
+  ) => Promise<ListResourceTemplatesResult>;
+  readResource: (serverName: string, uri: string) => Promise<ReadResourceResult>;
   dispose: () => Promise<void>;
 };
 
@@ -52,6 +66,7 @@ export type SessionMcpRuntimeManager = {
   }) => Promise<SessionMcpRuntime>;
   bindSessionKey: (sessionKey: string, sessionId: string) => void;
   resolveSessionId: (sessionKey: string) => string | undefined;
+  getExisting: (sessionId: string) => SessionMcpRuntime | undefined;
   disposeSession: (sessionId: string) => Promise<void>;
   disposeAll: () => Promise<void>;
   listSessionIds: () => string[];

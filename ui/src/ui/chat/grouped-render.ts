@@ -184,6 +184,11 @@ function extractImages(message: unknown): ImageBlock[] {
   return images;
 }
 
+function messageHasAssistantCanvas(message: unknown): boolean {
+  const normalized = normalizeMessage(message);
+  return normalized.content.some((item) => item.type === "canvas");
+}
+
 export function renderReadingIndicatorGroup(assistant?: AssistantIdentity, basePath?: string) {
   return html`
     <div class="chat-group assistant">
@@ -255,6 +260,7 @@ export function renderMessageGroup(
     canvasHostUrl?: string | null;
     embedSandboxMode?: EmbedSandboxMode;
     allowExternalEmbedUrls?: boolean;
+    mcpAppsEnabled?: boolean;
     contextWindow?: number | null;
     onDelete?: () => void;
   },
@@ -285,9 +291,15 @@ export function renderMessageGroup(
 
   // Aggregate usage/cost/model across all messages in the group
   const meta = extractGroupMeta(group, opts.contextWindow ?? null);
+  const hasAssistantCanvas =
+    normalizedRole === "assistant" &&
+    group.messages.some((item) => messageHasAssistantCanvas(item.message));
+  const groupClasses = ["chat-group", roleClass, hasAssistantCanvas ? "chat-group--canvas" : ""]
+    .filter(Boolean)
+    .join(" ");
 
   return html`
-    <div class="chat-group ${roleClass}">
+    <div class=${groupClasses}>
       ${renderAvatar(
         group.role,
         {
@@ -316,6 +328,8 @@ export function renderMessageGroup(
               localMediaPreviewRoots: opts.localMediaPreviewRoots,
               assistantAttachmentAuthToken: opts.assistantAttachmentAuthToken,
               embedSandboxMode: opts.embedSandboxMode,
+              allowExternalEmbedUrls: opts.allowExternalEmbedUrls,
+              mcpAppsEnabled: opts.mcpAppsEnabled,
             },
             opts.onOpenSidebar,
           ),
@@ -1062,6 +1076,7 @@ function renderInlineToolCards(
     canvasHostUrl?: string | null;
     embedSandboxMode?: EmbedSandboxMode;
     allowExternalEmbedUrls?: boolean;
+    mcpAppsEnabled?: boolean;
   },
 ) {
   return html`
@@ -1076,6 +1091,7 @@ function renderInlineToolCards(
           canvasHostUrl: opts.canvasHostUrl,
           embedSandboxMode: opts.embedSandboxMode ?? "scripts",
           allowExternalEmbedUrls: opts.allowExternalEmbedUrls ?? false,
+          mcpAppsEnabled: opts.mcpAppsEnabled ?? false,
         }),
       )}
     </div>
@@ -1160,6 +1176,7 @@ function renderGroupedMessage(
     assistantAttachmentAuthToken?: string | null;
     embedSandboxMode?: EmbedSandboxMode;
     allowExternalEmbedUrls?: boolean;
+    mcpAppsEnabled?: boolean;
   },
   onOpenSidebar?: (content: SidebarContent) => void,
 ) {
@@ -1320,6 +1337,7 @@ function renderGroupedMessage(
                               opts.canvasHostUrl,
                               opts.embedSandboxMode ?? "scripts",
                               opts.allowExternalEmbedUrls ?? false,
+                              opts.mcpAppsEnabled ?? false,
                             )
                           : renderInlineToolCards(toolCards, {
                               messageKey,
@@ -1329,6 +1347,7 @@ function renderGroupedMessage(
                               canvasHostUrl: opts.canvasHostUrl,
                               embedSandboxMode: opts.embedSandboxMode ?? "scripts",
                               allowExternalEmbedUrls: opts.allowExternalEmbedUrls ?? false,
+                              mcpAppsEnabled: opts.mcpAppsEnabled ?? false,
                             })
                         : nothing}
                     </div>
@@ -1357,6 +1376,7 @@ function renderGroupedMessage(
                     rawText: block.rawText ?? null,
                     canvasHostUrl: opts.canvasHostUrl,
                     embedSandboxMode: opts.embedSandboxMode ?? "scripts",
+                    mcpAppsEnabled: opts.mcpAppsEnabled ?? false,
                   })}
                   ${block.rawText ? renderRawOutputToggle(block.rawText) : nothing}`,
                 )}`
@@ -1383,6 +1403,7 @@ function renderGroupedMessage(
                   canvasHostUrl: opts.canvasHostUrl,
                   embedSandboxMode: opts.embedSandboxMode ?? "scripts",
                   allowExternalEmbedUrls: opts.allowExternalEmbedUrls ?? false,
+                  mcpAppsEnabled: opts.mcpAppsEnabled ?? false,
                 })
               : nothing}
           `}

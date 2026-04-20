@@ -60,6 +60,9 @@ function makeRuntime(
       content: [{ type: "text", text: toolName }],
       isError: false,
     }),
+    listResources: async () => ({ resources: [] }),
+    listResourceTemplates: async () => ({ resourceTemplates: [] }),
+    readResource: async () => ({ contents: [] }),
     dispose: async () => {},
   };
 }
@@ -69,6 +72,17 @@ afterEach(async () => {
 });
 
 describe("session MCP runtime", () => {
+  it("advertises MCP Apps support only when enabled", () => {
+    expect(__testing.buildMcpClientCapabilities(false)).toEqual({});
+    expect(__testing.buildMcpClientCapabilities(true)).toEqual({
+      extensions: {
+        "io.modelcontextprotocol/ui": {
+          mimeTypes: ["text/html;profile=mcp-app"],
+        },
+      },
+    });
+  });
+
   it("keeps colliding sanitized tool definitions stable across catalog order changes", async () => {
     const catalogA = [
       { toolName: "alpha?", description: "question" },
@@ -113,6 +127,218 @@ describe("session MCP runtime", () => {
         },
       },
     ]);
+  });
+
+  it("does not materialize app-only MCP Apps tools for the model", async () => {
+    const runtime: SessionMcpRuntime = {
+      sessionId: "session-app-tools",
+      sessionKey: "agent:test:session-app-tools",
+      workspaceDir: "/tmp",
+      configFingerprint: "fingerprint",
+      mcpAppsEnabled: true,
+      createdAt: 0,
+      lastUsedAt: 0,
+      markUsed: () => {},
+      getCatalog: async () => ({
+        version: 1,
+        generatedAt: 0,
+        servers: {
+          appServer: {
+            serverName: "appServer",
+            launchSummary: "app server",
+            toolCount: 2,
+          },
+        },
+        tools: [
+          {
+            serverName: "appServer",
+            safeServerName: "appServer",
+            toolName: "model_tool",
+            description: "Model-visible tool",
+            inputSchema: { type: "object", properties: {} },
+            fallbackDescription: "fallback",
+            uiResourceUri: "ui://app/view.html",
+          },
+          {
+            serverName: "appServer",
+            safeServerName: "appServer",
+            toolName: "app_tool",
+            description: "App-only tool",
+            inputSchema: { type: "object", properties: {} },
+            fallbackDescription: "fallback",
+            uiVisibility: ["app"],
+          },
+        ],
+      }),
+      callTool: async (_serverName, toolName) => ({
+        content: [{ type: "text", text: `${toolName} result` }],
+      }),
+      listResources: async () => ({ resources: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      readResource: async () => ({
+        contents: [
+          {
+            uri: "ui://app/view.html",
+            mimeType: "text/html;profile=mcp-app",
+            text: "<!doctype html><html><body>app</body></html>",
+          },
+        ],
+      }),
+      dispose: async () => {},
+    };
+
+    const materialized = await materializeBundleMcpToolsForRun({ runtime });
+    expect(materialized.tools.map((tool) => tool.name)).toEqual(["appServer__model_tool"]);
+
+    const result = await materialized.tools[0].execute("call-model-tool", { city: "NYC" });
+    const canvasContent = result.content.find(
+      (item) => item.type === "text" && "text" in item && item.text.includes('"mcpApp"'),
+    );
+    const canvasText = canvasContent && "text" in canvasContent ? canvasContent.text : undefined;
+    expect(canvasText).toBeTruthy();
+    const parsed = JSON.parse(canvasText!);
+    expect(parsed.mcpApp).toMatchObject({
+      serverName: "appServer",
+      toolName: "model_tool",
+      uiResourceUri: "ui://app/view.html",
+      sessionKey: "agent:test:session-app-tools",
+      toolInput: { city: "NYC" },
+    });
+    expect(parsed.mcpApp.toolResult).toMatchObject({
+      content: [{ type: "text", text: "model_tool result" }],
+    });
+  });
+
+  it("uses result-level MCP App resource URIs when present", async () => {
+    const readUris: string[] = [];
+    const runtime: SessionMcpRuntime = {
+      sessionId: "session-dynamic-app-tools",
+      sessionKey: "agent:test:session-dynamic-app-tools",
+      workspaceDir: "/tmp",
+      configFingerprint: "fingerprint",
+      mcpAppsEnabled: true,
+      createdAt: 0,
+      lastUsedAt: 0,
+      markUsed: () => {},
+      getCatalog: async () => ({
+        version: 1,
+        generatedAt: 0,
+        servers: {
+          appServer: {
+            serverName: "appServer",
+            launchSummary: "app server",
+            toolCount: 1,
+          },
+        },
+        tools: [
+          {
+            serverName: "appServer",
+            safeServerName: "appServer",
+            toolName: "dynamic_tool",
+            description: "Dynamic app tool",
+            inputSchema: { type: "object", properties: {} },
+            fallbackDescription: "fallback",
+          },
+        ],
+      }),
+      callTool: async () => ({
+        content: [{ type: "text", text: "dynamic result" }],
+        _meta: {
+          ui: {
+            resourceUri: "ui://app/dynamic.html",
+          },
+        },
+      }),
+      listResources: async () => ({ resources: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      readResource: async (_serverName, uri) => {
+        readUris.push(uri);
+        return {
+          contents: [
+            {
+              uri,
+              mimeType: "text/html;profile=mcp-app",
+              text: "<!doctype html><html><body>dynamic</body></html>",
+            },
+          ],
+        };
+      },
+      dispose: async () => {},
+    };
+
+    const materialized = await materializeBundleMcpToolsForRun({ runtime });
+    const result = await materialized.tools[0].execute("call-dynamic-tool", { city: "NYC" });
+    const canvasContent = result.content.find(
+      (item) => item.type === "text" && "text" in item && item.text.includes('"mcpApp"'),
+    );
+    const canvasText = canvasContent && "text" in canvasContent ? canvasContent.text : undefined;
+    expect(readUris).toEqual(["ui://app/dynamic.html"]);
+    expect(canvasText).toBeTruthy();
+    expect(JSON.parse(canvasText!).mcpApp).toMatchObject({
+      serverName: "appServer",
+      toolName: "dynamic_tool",
+      uiResourceUri: "ui://app/dynamic.html",
+      sessionKey: "agent:test:session-dynamic-app-tools",
+    });
+  });
+
+  it("does not fetch MCP Apps views unless enabled", async () => {
+    const runtime: SessionMcpRuntime = {
+      sessionId: "session-app-tools-disabled",
+      sessionKey: "agent:test:session-app-tools-disabled",
+      workspaceDir: "/tmp",
+      configFingerprint: "fingerprint",
+      mcpAppsEnabled: false,
+      createdAt: 0,
+      lastUsedAt: 0,
+      markUsed: () => {},
+      getCatalog: async () => ({
+        version: 1,
+        generatedAt: 0,
+        servers: {
+          appServer: {
+            serverName: "appServer",
+            launchSummary: "app server",
+            toolCount: 2,
+          },
+        },
+        tools: [
+          {
+            serverName: "appServer",
+            safeServerName: "appServer",
+            toolName: "model_tool",
+            description: "Model-visible tool",
+            inputSchema: { type: "object", properties: {} },
+            fallbackDescription: "fallback",
+            uiResourceUri: "ui://app/view.html",
+          },
+          {
+            serverName: "appServer",
+            safeServerName: "appServer",
+            toolName: "app_tool",
+            description: "App-only tool",
+            inputSchema: { type: "object", properties: {} },
+            fallbackDescription: "fallback",
+            uiVisibility: ["app"],
+          },
+        ],
+      }),
+      callTool: async (_serverName, toolName) => ({
+        content: [{ type: "text", text: `${toolName} result` }],
+      }),
+      listResources: async () => ({ resources: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      readResource: async () => {
+        throw new Error("readResource should not be called");
+      },
+      dispose: async () => {},
+    };
+
+    const materialized = await materializeBundleMcpToolsForRun({ runtime });
+    expect(materialized.tools.map((tool) => tool.name)).toEqual(["appServer__model_tool"]);
+
+    const result = await materialized.tools[0].execute("call-model-tool", { city: "NYC" });
+    expect(result.content).toEqual([{ type: "text", text: "model_tool result" }]);
   });
 
   it("reuses repeated materialization and recreates after explicit disposal", async () => {

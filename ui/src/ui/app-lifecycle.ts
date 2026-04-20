@@ -31,6 +31,7 @@ type LifecycleHost = {
   localMediaPreviewRoots: string[];
   embedSandboxMode: "strict" | "scripts" | "trusted";
   allowExternalEmbedUrls: boolean;
+  mcpAppsEnabled: boolean;
   chatHasAutoScrolled: boolean;
   chatManualRefreshInFlight: boolean;
   chatLoading: boolean;

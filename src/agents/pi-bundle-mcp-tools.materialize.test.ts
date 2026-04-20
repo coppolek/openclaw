@@ -47,6 +47,9 @@ function makeToolRuntime(
       content: [{ type: "text", text: params.resultText ?? "FROM-BUNDLE" }],
       isError: false,
     }),
+    listResources: async () => ({ resources: [] }),
+    listResourceTemplates: async () => ({ resourceTemplates: [] }),
+    readResource: async () => ({ contents: [] }),
     dispose: async () => {},
   };
 }

@@ -32,6 +32,15 @@
   align-items: flex-end;
 }
 
+.chat-group.chat-group--canvas .chat-group-messages {
+  width: 100%;
+  max-width: min(1200px, calc(100% - 52px));
+}
+
+.chat-group.chat-group--canvas .chat-bubble {
+  width: 100%;
+}
+
 .chat-group.user .chat-group-footer {
   justify-content: flex-end;
 }
@@ -487,6 +496,10 @@ img.chat-avatar {
 
   .chat-group-messages {
     max-width: 82%;
+  }
+
+  .chat-group.chat-group--canvas .chat-group-messages {
+    max-width: 100%;
   }
 }
 
