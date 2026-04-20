@@ -475,6 +475,9 @@ async function applyMessageSendingHook(params: {
       payloadSummary: {
         ...params.payloadSummary,
         text: sendingResult.content,
+        ...(params.payloadSummary.hookContent === undefined
+          ? {}
+          : { hookContent: sendingResult.content }),
       },
     };
   } catch {
