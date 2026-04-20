@@ -590,6 +590,9 @@ describe("gateway server sessions", () => {
 
   test("sessions.create can start the first agent turn from an initial task", async () => {
     await createSessionStoreDir();
+    testState.agentsConfig = {
+      list: [{ id: "ops", default: true }],
+    };
     const { ws } = await openClient();
 
     const created = await rpcReq<{

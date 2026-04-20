@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = {
+  totalPendingReplies: 0,
+  logInfo: vi.fn(),
   logWarn: vi.fn(),
   disposeAgentHarnesses: vi.fn(async () => undefined),
 };
@@ -20,12 +22,17 @@ vi.mock("../hooks/gmail-watcher.js", () => ({
   stopGmailWatcher: vi.fn(async () => undefined),
 }));
 
+vi.mock("../auto-reply/reply/dispatcher-registry.js", () => ({
+  getTotalPendingReplies: () => mocks.totalPendingReplies,
+}));
+
 vi.mock("../agents/harness/registry.js", () => ({
   disposeRegisteredAgentHarnesses: mocks.disposeAgentHarnesses,
 }));
 
 vi.mock("../logging/subsystem.js", () => ({
   createSubsystemLogger: vi.fn(() => ({
+    info: mocks.logInfo,
     warn: mocks.logWarn,
   })),
 }));
@@ -58,7 +65,14 @@ function createGatewayCloseTestDeps(
     heartbeatUnsub: null,
     transcriptUnsub: null,
     lifecycleUnsub: null,
-    chatRunState: { clear: vi.fn() },
+    chatRunState: { clear: vi.fn(), abortedRuns: new Map() },
+    chatRunBuffers: new Map(),
+    chatDeltaSentAt: new Map(),
+    chatDeltaLastBroadcastLen: new Map(),
+    removeChatRun: vi.fn(),
+    agentRunSeq: new Map(),
+    nodeSendToSession: vi.fn(),
+    chatAbortControllers: new Map(),
     clients: new Set<GatewayCloseClient>(),
     configReloader: { stop: vi.fn(async () => undefined) },
     wss: {
@@ -76,6 +90,8 @@ function createGatewayCloseTestDeps(
 describe("createGatewayCloseHandler", () => {
   beforeEach(() => {
     vi.useRealTimers();
+    mocks.totalPendingReplies = 0;
+    mocks.logInfo.mockClear();
     mocks.logWarn.mockClear();
     mocks.disposeAgentHarnesses.mockClear();
   });
@@ -83,42 +99,101 @@ describe("createGatewayCloseHandler", () => {
   it("unsubscribes lifecycle listeners during shutdown", async () => {
     const lifecycleUnsub = vi.fn();
     const stopTaskRegistryMaintenance = vi.fn();
-    const close = createGatewayCloseHandler({
-      bonjourStop: null,
-      tailscaleCleanup: null,
-      canvasHost: null,
-      canvasHostServer: null,
-      stopChannel: vi.fn(async () => undefined),
-      pluginServices: null,
-      cron: { stop: vi.fn() },
-      heartbeatRunner: { stop: vi.fn() } as never,
-      updateCheckStop: null,
-      stopTaskRegistryMaintenance,
-      nodePresenceTimers: new Map(),
-      broadcast: vi.fn(),
-      tickInterval: setInterval(() => undefined, 60_000),
-      healthInterval: setInterval(() => undefined, 60_000),
-      dedupeCleanup: setInterval(() => undefined, 60_000),
-      mediaCleanup: null,
-      agentUnsub: null,
-      heartbeatUnsub: null,
-      transcriptUnsub: null,
-      lifecycleUnsub,
-      chatRunState: { clear: vi.fn() },
-      clients: new Set<GatewayCloseClient>(),
-      configReloader: { stop: vi.fn(async () => undefined) },
-      wss: { close: (cb: () => void) => cb() } as never,
-      httpServer: {
-        close: (cb: (err?: Error | null) => void) => cb(null),
-        closeIdleConnections: vi.fn(),
-      } as never,
-    });
+    const close = createGatewayCloseHandler(
+      createGatewayCloseTestDeps({
+        lifecycleUnsub,
+        stopTaskRegistryMaintenance,
+      }),
+    );
 
     await close({ reason: "test shutdown" });
 
     expect(lifecycleUnsub).toHaveBeenCalledTimes(1);
     expect(stopTaskRegistryMaintenance).toHaveBeenCalledTimes(1);
     expect(mocks.disposeAgentHarnesses).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for pending replies to settle before shutdown when a drain budget is provided", async () => {
+    vi.useFakeTimers();
+    mocks.totalPendingReplies = 1;
+
+    const close = createGatewayCloseHandler(createGatewayCloseTestDeps());
+    const closePromise = close({ reason: "test shutdown", drainTimeoutMs: 200 });
+
+    await vi.advanceTimersByTimeAsync(100);
+    mocks.totalPendingReplies = 0;
+    await vi.advanceTimersByTimeAsync(100);
+    await closePromise;
+
+    expect(
+      mocks.logInfo.mock.calls.some(([message]) =>
+        String(message).includes("waiting for 1 reply(ies) to settle before shutdown"),
+      ),
+    ).toBe(true);
+    expect(
+      mocks.logInfo.mock.calls.some(([message]) =>
+        String(message).includes("pending replies settled after"),
+      ),
+    ).toBe(true);
+  });
+
+  it("aborts active chat runs when reply drain times out during shutdown", async () => {
+    vi.useFakeTimers();
+
+    const controller = new AbortController();
+    const broadcast = vi.fn();
+    const nodeSendToSession = vi.fn();
+    const chatAbortControllers = new Map([
+      [
+        "run-1",
+        {
+          controller,
+          sessionId: "run-1",
+          sessionKey: "session-1",
+          startedAtMs: Date.now(),
+          expiresAtMs: Date.now() + 60_000,
+        },
+      ],
+    ]);
+    const close = createGatewayCloseHandler(
+      createGatewayCloseTestDeps({
+        broadcast,
+        nodeSendToSession,
+        chatRunBuffers: new Map([["run-1", "partial reply"]]),
+        chatAbortControllers,
+      }),
+    );
+
+    const closePromise = close({ reason: "test shutdown", drainTimeoutMs: 100 });
+    await vi.advanceTimersByTimeAsync(100);
+    await closePromise;
+
+    expect(controller.signal.aborted).toBe(true);
+    expect(chatAbortControllers.size).toBe(0);
+    expect(
+      mocks.logWarn.mock.calls.some(([message]) =>
+        String(message).includes("reply drain timeout after 100ms with 1 chat run(s) still active"),
+      ),
+    ).toBe(true);
+    expect(
+      mocks.logWarn.mock.calls.some(([message]) =>
+        String(message).includes("aborted 1 active chat run(s) during shutdown"),
+      ),
+    ).toBe(true);
+    expect(
+      mocks.logInfo.mock.calls.some(([message]) =>
+        String(message).includes("pending replies settled after shutdown abort cleanup"),
+      ),
+    ).toBe(true);
+    expect(broadcast).toHaveBeenCalledWith(
+      "chat",
+      expect.objectContaining({ runId: "run-1", state: "aborted", stopReason: "shutdown" }),
+    );
+    expect(nodeSendToSession).toHaveBeenCalledWith(
+      "session-1",
+      "chat",
+      expect.objectContaining({ runId: "run-1", state: "aborted", stopReason: "shutdown" }),
+    );
   });
 
   it("terminates lingering websocket clients when websocket close exceeds the grace window", async () => {
@@ -183,39 +258,17 @@ describe("createGatewayCloseHandler", () => {
     const closeAllConnections = vi.fn(() => {
       closeCallback?.(null);
     });
-    const close = createGatewayCloseHandler({
-      bonjourStop: null,
-      tailscaleCleanup: null,
-      canvasHost: null,
-      canvasHostServer: null,
-      stopChannel: vi.fn(async () => undefined),
-      pluginServices: null,
-      cron: { stop: vi.fn() },
-      heartbeatRunner: { stop: vi.fn() } as never,
-      updateCheckStop: null,
-      stopTaskRegistryMaintenance: null,
-      nodePresenceTimers: new Map(),
-      broadcast: vi.fn(),
-      tickInterval: setInterval(() => undefined, 60_000),
-      healthInterval: setInterval(() => undefined, 60_000),
-      dedupeCleanup: setInterval(() => undefined, 60_000),
-      mediaCleanup: null,
-      agentUnsub: null,
-      heartbeatUnsub: null,
-      transcriptUnsub: null,
-      lifecycleUnsub: null,
-      chatRunState: { clear: vi.fn() },
-      clients: new Set(),
-      configReloader: { stop: vi.fn(async () => undefined) },
-      wss: { close: (cb: () => void) => cb() } as never,
-      httpServer: {
-        close: (cb: (err?: Error | null) => void) => {
-          closeCallback = cb;
-        },
-        closeAllConnections,
-        closeIdleConnections: vi.fn(),
-      } as never,
-    });
+    const close = createGatewayCloseHandler(
+      createGatewayCloseTestDeps({
+        httpServer: {
+          close: (cb: (err?: Error | null) => void) => {
+            closeCallback = cb;
+          },
+          closeAllConnections,
+          closeIdleConnections: vi.fn(),
+        } as never,
+      }),
+    );
 
     const closePromise = close({ reason: "test shutdown" });
     await vi.advanceTimersByTimeAsync(HTTP_CLOSE_GRACE_MS);
@@ -233,37 +286,15 @@ describe("createGatewayCloseHandler", () => {
   it("fails shutdown when http server close still hangs after force close", async () => {
     vi.useFakeTimers();
 
-    const close = createGatewayCloseHandler({
-      bonjourStop: null,
-      tailscaleCleanup: null,
-      canvasHost: null,
-      canvasHostServer: null,
-      stopChannel: vi.fn(async () => undefined),
-      pluginServices: null,
-      cron: { stop: vi.fn() },
-      heartbeatRunner: { stop: vi.fn() } as never,
-      updateCheckStop: null,
-      stopTaskRegistryMaintenance: null,
-      nodePresenceTimers: new Map(),
-      broadcast: vi.fn(),
-      tickInterval: setInterval(() => undefined, 60_000),
-      healthInterval: setInterval(() => undefined, 60_000),
-      dedupeCleanup: setInterval(() => undefined, 60_000),
-      mediaCleanup: null,
-      agentUnsub: null,
-      heartbeatUnsub: null,
-      transcriptUnsub: null,
-      lifecycleUnsub: null,
-      chatRunState: { clear: vi.fn() },
-      clients: new Set(),
-      configReloader: { stop: vi.fn(async () => undefined) },
-      wss: { close: (cb: () => void) => cb() } as never,
-      httpServer: {
-        close: () => undefined,
-        closeAllConnections: vi.fn(),
-        closeIdleConnections: vi.fn(),
-      } as never,
-    });
+    const close = createGatewayCloseHandler(
+      createGatewayCloseTestDeps({
+        httpServer: {
+          close: () => undefined,
+          closeAllConnections: vi.fn(),
+          closeIdleConnections: vi.fn(),
+        } as never,
+      }),
+    );
 
     const closePromise = close({ reason: "test shutdown" });
     const closeExpectation = expect(closePromise).rejects.toThrow(
