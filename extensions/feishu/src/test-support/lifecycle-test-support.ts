@@ -88,7 +88,9 @@ export function createImmediateInboundDebounce() {
           params.onError?.(err, [item]);
         }
       },
-      flushKey: async () => {},
+      flushKey: async () => false,
+      flushAll: async () => 0,
+      unregister: () => {},
     }),
   };
 }
@@ -421,7 +423,7 @@ export async function setupFeishuMessageReceiveLifecycleHandler(params: {
     resolveDebounceText: params.resolveDebounceText,
     hasProcessedMessage: vi.fn(async () => false),
     recordProcessedMessage: vi.fn(async () => true),
-  });
+  }).handler;
 }
 
 export async function setupFeishuLifecycleHandler(params: {

@@ -39,6 +39,9 @@ function createRuntimeStub(stateDir?: string): PluginRuntime {
         resolveInboundDebounceMs: () => 0,
         createInboundDebouncer: () => ({
           enqueue: async () => {},
+          flushKey: async () => false,
+          flushAll: async () => 0,
+          unregister: () => {},
         }),
       },
     },
@@ -121,10 +124,11 @@ function createConsentInvokeHarness(params: {
     conversationId: params.pendingConversationId ?? "19:victim@thread.v2",
     consentCardActivityId: params.consentCardActivityId,
   });
-  const handler = registerMSTeamsHandlers(
+  const { handler: rawHandler } = registerMSTeamsHandlers(
     createActivityHandler(),
     createDeps(),
-  ) as MSTeamsActivityHandler & {
+  );
+  const handler = rawHandler as MSTeamsActivityHandler & {
     run: NonNullable<MSTeamsActivityHandler["run"]>;
   };
   const { context, sendActivity, updateActivity } = createInvokeContext({
@@ -382,7 +386,7 @@ describe("msteams file consent invoke FS fallback", () => {
     const handler = registerMSTeamsHandlers(
       createActivityHandler(),
       createDeps(),
-    ) as MSTeamsActivityHandler & {
+    ).handler as MSTeamsActivityHandler & {
       run: NonNullable<MSTeamsActivityHandler["run"]>;
     };
 
@@ -432,7 +436,7 @@ describe("msteams file consent invoke FS fallback", () => {
     const handler = registerMSTeamsHandlers(
       createActivityHandler(),
       createDeps(),
-    ) as MSTeamsActivityHandler & {
+    ).handler as MSTeamsActivityHandler & {
       run: NonNullable<MSTeamsActivityHandler["run"]>;
     };
 

@@ -3,18 +3,18 @@ import { resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
 import {
   buildPendingHistoryContextFromMap,
   clearHistoryEntriesIfEnabled,
-  dispatchReplyFromConfigWithSettledDispatcher,
   DEFAULT_GROUP_HISTORY_LIMIT,
-  logInboundDrop,
+  dispatchReplyFromConfigWithSettledDispatcher,
   evaluateSenderGroupAccessForPolicy,
   filterSupplementalContextItems,
+  formatAllowlistMatchMeta,
+  type HistoryEntry,
+  logInboundDrop,
   recordPendingHistoryEntryIfEnabled,
   resolveChannelContextVisibilityMode,
   resolveDualTextControlCommandGate,
   resolveInboundSessionEnvelopeContext,
   shouldIncludeSupplementalContext,
-  formatAllowlistMatchMeta,
-  type HistoryEntry,
 } from "../../runtime-api.js";
 import {
   buildMSTeamsAttachmentPlaceholder,
@@ -945,7 +945,7 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
     },
   });
 
-  return async function handleTeamsMessage(context: MSTeamsTurnContext) {
+  const handleTeamsMessage = async (context: MSTeamsTurnContext) => {
     const activity = context.activity;
     const attachments = Array.isArray(activity.attachments)
       ? (activity.attachments as unknown as MSTeamsAttachmentLike[])
@@ -969,5 +969,10 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
       wasMentioned,
       implicitMentionKinds,
     });
+  };
+
+  return {
+    handleTeamsMessage,
+    unregisterDebouncer: inboundDebouncer.unregister,
   };
 }

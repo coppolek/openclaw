@@ -704,6 +704,7 @@ export async function attachWebInboxToSocket(
   return {
     close: async () => {
       try {
+        debouncer.unregister();
         detachMessagesUpsert();
         detachConnectionUpdate();
         closeInboundMonitorSocket(sock);
