@@ -133,6 +133,12 @@ export const FIELD_HELP: Record<string, string> = {
     "Optional HTTP response security headers applied by the gateway process itself. Prefer setting these at your reverse proxy when TLS terminates there.",
   "gateway.http.securityHeaders.strictTransportSecurity":
     "Value for the Strict-Transport-Security response header. Set only on HTTPS origins that you fully control; use false to explicitly disable.",
+  "gateway.nodes":
+    "Node-specific gateway controls for browser routing, pairing policy, and command allow/deny shaping. Keep pairing behavior explicit and narrowly scoped when enabling automation.",
+  "gateway.nodes.pairing":
+    "Node pairing policy settings that can reduce manual approval for tightly scoped trusted networks. Use only with explicit CIDR/IP allowlists you control.",
+  "gateway.nodes.pairing.autoApproveCidrs":
+    "Opt-in CIDR/IP allowlist for auto-approving first-time node-role device pairing with no requested scopes. Operator, browser, control UI, and any role, scope, or metadata upgrade pairing still require manual approval.",
   "gateway.remote.url": "Remote Gateway WebSocket URL (ws:// or wss://).",
   "gateway.remote.token":
     "Bearer token used to authenticate this client to a remote gateway in token-auth deployments. Store via secret/env substitution and rotate alongside remote gateway auth changes.",
