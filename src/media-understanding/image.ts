@@ -8,6 +8,7 @@ import {
 } from "../agents/model-auth.js";
 import { normalizeModelRef } from "../agents/model-selection.js";
 import { ensureOpenClawModelsJson } from "../agents/models-config.js";
+import { registerProviderStreamForModel } from "../agents/provider-stream.js";
 import { resolveProviderRequestCapabilities } from "../agents/provider-attribution.js";
 import {
   coerceImageAssistantText,
@@ -246,6 +247,11 @@ export async function describeImagesWithModel(
   }
 
   const context = buildImageContext(prompt, params.images);
+  registerProviderStreamForModel({
+    model,
+    cfg: params.cfg,
+    agentDir: params.agentDir,
+  });
   const controller = new AbortController();
   const timeout =
     typeof params.timeoutMs === "number" &&
