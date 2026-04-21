@@ -272,6 +272,7 @@ describe("runDaemonRestart health checks", () => {
   });
 
   it("fails restart when gateway remains unhealthy after the full timeout", async () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("linux");
     const { formatCliCommand } = await import("../command-format.js");
     const unhealthy: RestartHealthSnapshot = {
       healthy: false,
