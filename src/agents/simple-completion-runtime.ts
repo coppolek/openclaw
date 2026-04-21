@@ -6,6 +6,7 @@ import { DEFAULT_PROVIDER } from "./defaults.js";
 import {
   applyLocalNoAuthHeaderOverride,
   getApiKeyForModel,
+  isNonSecretApiKeyMarker,
   type ResolvedProviderAuth,
 } from "./model-auth.js";
 import { splitTrailingAuthProfile } from "./model-ref-profile.js";
@@ -15,6 +16,7 @@ import {
   resolveModelRefFromString,
 } from "./model-selection.js";
 import { resolveModel } from "./pi-embedded-runner/model.js";
+import { getModelProviderRequestTransport } from "./provider-request-config.js";
 
 type SimpleCompletionAuthStorage = {
   setRuntimeApiKey: (provider: string, apiKey: string) => void;
@@ -126,6 +128,18 @@ function hasMissingApiKeyAllowance(params: {
   return Boolean(params.allowMissingApiKeyModes?.includes(params.mode));
 }
 
+function shouldUseRequestAuthenticatedSimpleCompletion(params: {
+  model: Model<Api>;
+  auth: ResolvedProviderAuth;
+}): boolean {
+  const apiKey = params.auth.apiKey?.trim();
+  if (!apiKey || !isNonSecretApiKeyMarker(apiKey)) {
+    return false;
+  }
+  const requestTransport = getModelProviderRequestTransport(params.model);
+  return Boolean(requestTransport?.auth || requestTransport?.headers);
+}
+
 export async function prepareSimpleCompletionModel(params: {
   cfg: OpenClawConfig | undefined;
   provider: string;
@@ -172,7 +186,10 @@ export async function prepareSimpleCompletionModel(params: {
 
   let resolvedApiKey = rawApiKey;
   let resolvedModel = resolved.model;
-  if (rawApiKey) {
+  if (
+    rawApiKey &&
+    !shouldUseRequestAuthenticatedSimpleCompletion({ model: resolved.model, auth })
+  ) {
     const runtimeCredential = await setRuntimeApiKeyForCompletion({
       authStorage: resolved.authStorage,
       model: resolved.model,
@@ -186,6 +203,8 @@ export async function prepareSimpleCompletionModel(params: {
         baseUrl: runtimeBaseUrl,
       };
     }
+  } else if (shouldUseRequestAuthenticatedSimpleCompletion({ model: resolved.model, auth })) {
+    resolvedApiKey = undefined;
   }
 
   const resolvedAuth: ResolvedProviderAuth = {

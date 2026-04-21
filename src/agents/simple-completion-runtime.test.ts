@@ -1,11 +1,16 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
+  completeMock: vi.fn(),
   resolveModelMock: vi.fn(),
   getApiKeyForModelMock: vi.fn(),
   applyLocalNoAuthHeaderOverrideMock: vi.fn(),
   setRuntimeApiKeyMock: vi.fn(),
   resolveCopilotApiTokenMock: vi.fn(),
+}));
+
+vi.mock("@mariozechner/pi-ai", () => ({
+  complete: hoisted.completeMock,
 }));
 
 vi.mock("./pi-embedded-runner/model.js", () => ({
@@ -15,6 +20,8 @@ vi.mock("./pi-embedded-runner/model.js", () => ({
 vi.mock("./model-auth.js", () => ({
   getApiKeyForModel: hoisted.getApiKeyForModelMock,
   applyLocalNoAuthHeaderOverride: hoisted.applyLocalNoAuthHeaderOverrideMock,
+  isNonSecretApiKeyMarker: (value: string) =>
+    value === "custom-local" || value === "plamo-request-auth",
 }));
 
 vi.mock("./github-copilot-token.js", () => ({
@@ -28,6 +35,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  hoisted.completeMock.mockReset();
   hoisted.resolveModelMock.mockReset();
   hoisted.getApiKeyForModelMock.mockReset();
   hoisted.applyLocalNoAuthHeaderOverrideMock.mockReset();
@@ -57,6 +65,7 @@ beforeEach(() => {
     source: "cache:/tmp/copilot-token.json",
     baseUrl: "https://api.individual.githubcopilot.com",
   });
+  hoisted.completeMock.mockResolvedValue("ok");
 });
 
 describe("prepareSimpleCompletionModel", () => {
@@ -336,6 +345,52 @@ describe("prepareSimpleCompletionModel", () => {
       expect.objectContaining({
         model: expect.objectContaining({
           headers: expect.objectContaining({ Authorization: null }),
+        }),
+      }),
+    );
+  });
+
+  it("omits synthetic request-auth markers from simple completion auth", async () => {
+    const requestTransportSymbol = Symbol.for("openclaw.modelProviderRequestTransport");
+    hoisted.resolveModelMock.mockReturnValueOnce({
+      model: {
+        provider: "plamo",
+        id: "plamo-3.0-prime-beta",
+        api: "openai-completions",
+        baseUrl: "https://proxy.example.test/v1",
+        headers: {
+          "X-Proxy-Token": "proxy-token",
+        },
+        [requestTransportSymbol]: {
+          headers: {
+            "X-Proxy-Token": "proxy-token",
+          },
+        },
+      },
+      authStorage: {
+        setRuntimeApiKey: hoisted.setRuntimeApiKeyMock,
+      },
+      modelRegistry: {},
+    });
+    hoisted.getApiKeyForModelMock.mockResolvedValueOnce({
+      apiKey: "plamo-request-auth",
+      source: "models.providers.plamo.request (synthetic request auth)",
+      mode: "api-key",
+    });
+
+    const result = await prepareSimpleCompletionModel({
+      cfg: undefined,
+      provider: "plamo",
+      modelId: "plamo-3.0-prime-beta",
+    });
+
+    expect(hoisted.setRuntimeApiKeyMock).not.toHaveBeenCalled();
+    expect(result).toEqual(
+      expect.objectContaining({
+        auth: expect.objectContaining({
+          apiKey: undefined,
+          source: "models.providers.plamo.request (synthetic request auth)",
+          mode: "api-key",
         }),
       }),
     );
