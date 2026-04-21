@@ -3413,6 +3413,7 @@ public struct CronJob: Codable, Sendable {
     public let payload: AnyCodable
     public let delivery: AnyCodable?
     public let failurealert: AnyCodable?
+    public let prehook: [String: AnyCodable]?
     public let state: [String: AnyCodable]
 
     public init(
@@ -3431,6 +3432,7 @@ public struct CronJob: Codable, Sendable {
         payload: AnyCodable,
         delivery: AnyCodable?,
         failurealert: AnyCodable?,
+        prehook: [String: AnyCodable]?,
         state: [String: AnyCodable])
     {
         self.id = id
@@ -3448,6 +3450,7 @@ public struct CronJob: Codable, Sendable {
         self.payload = payload
         self.delivery = delivery
         self.failurealert = failurealert
+        self.prehook = prehook
         self.state = state
     }
 
@@ -3467,6 +3470,7 @@ public struct CronJob: Codable, Sendable {
         case payload
         case delivery
         case failurealert = "failureAlert"
+        case prehook = "preHook"
         case state
     }
 }
@@ -3524,6 +3528,7 @@ public struct CronAddParams: Codable, Sendable {
     public let payload: AnyCodable
     public let delivery: AnyCodable?
     public let failurealert: AnyCodable?
+    public let prehook: [String: AnyCodable]?
 
     public init(
         name: String,
@@ -3537,7 +3542,8 @@ public struct CronAddParams: Codable, Sendable {
         wakemode: AnyCodable,
         payload: AnyCodable,
         delivery: AnyCodable?,
-        failurealert: AnyCodable?)
+        failurealert: AnyCodable?,
+        prehook: [String: AnyCodable]?)
     {
         self.name = name
         self.agentid = agentid
@@ -3551,6 +3557,7 @@ public struct CronAddParams: Codable, Sendable {
         self.payload = payload
         self.delivery = delivery
         self.failurealert = failurealert
+        self.prehook = prehook
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -3566,6 +3573,7 @@ public struct CronAddParams: Codable, Sendable {
         case payload
         case delivery
         case failurealert = "failureAlert"
+        case prehook = "preHook"
     }
 }
 

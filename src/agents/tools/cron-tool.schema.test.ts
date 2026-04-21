@@ -39,6 +39,7 @@ describe("CronToolSchema", () => {
         "failureAlert",
         "name",
         "payload",
+        "preHook",
         "schedule",
         "sessionKey",
         "sessionTarget",
@@ -58,6 +59,7 @@ describe("CronToolSchema", () => {
         "failureAlert",
         "name",
         "payload",
+        "preHook",
         "schedule",
         "sessionKey",
         "sessionTarget",
@@ -134,6 +136,18 @@ describe("CronToolSchema", () => {
     expect(keysAt(CronToolSchema as Record<string, unknown>, "job.failureAlert")).toEqual(
       ["accountId", "after", "channel", "cooldownMs", "mode", "to"].toSorted(),
     );
+  });
+
+  it("patch.preHook uses plain object type for OpenAPI 3.0 compat", () => {
+    const root = (CronToolSchema as Record<string, unknown>).properties as
+      | Record<string, { properties?: Record<string, unknown> }>
+      | undefined;
+    const patchProps = root?.patch?.properties as
+      | Record<string, { type?: unknown; description?: string }>
+      | undefined;
+    const schema = patchProps?.preHook;
+    expect(schema?.type).toBe("object");
+    expect(schema?.description).toMatch(/false/i);
   });
 
   it("job.failureAlert uses plain object type for OpenAPI 3.0 compat", () => {
