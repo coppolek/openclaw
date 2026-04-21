@@ -1,5 +1,5 @@
 ---
-summary: "Generate videos from text, images, or existing videos using 14 provider backends"
+summary: "Generate videos from text, images, or existing videos using 15 provider backends"
 read_when:
   - Generating videos via the agent
   - Configuring video generation providers and models
@@ -9,7 +9,7 @@ title: "Video Generation"
 
 # Video Generation
 
-OpenClaw agents can generate videos from text prompts, reference images, or existing videos. Fourteen provider backends are supported, each with different model options, input modes, and feature sets. The agent picks the right provider automatically based on your configuration and available API keys.
+OpenClaw agents can generate videos from text prompts, reference images, or existing videos. Fifteen provider backends are supported, each with different model options, input modes, and feature sets. The agent picks the right provider automatically based on your configuration and available API keys.
 
 <Note>
 The `video_generate` tool only appears when at least one video-generation provider is available. If you do not see it in your agent tools, set a provider API key or configure `agents.defaults.videoGenerationModel`.
@@ -87,6 +87,7 @@ Duplicate prevention: if a video task is already `queued` or `running` for the c
 | ComfyUI               | `workflow`                      | Yes  | 1 image                                              | No               | `COMFY_API_KEY` or `COMFY_CLOUD_API_KEY` |
 | fal                   | `fal-ai/minimax/video-01-live`  | Yes  | 1 image                                              | No               | `FAL_KEY`                                |
 | Google                | `veo-3.1-fast-generate-preview` | Yes  | 1 image                                              | 1 video          | `GEMINI_API_KEY`                         |
+| KlingAI               | `kling-v3`                      | Yes  | 1 image                                              | No               | `KLING_API_KEY`                          |
 | MiniMax               | `MiniMax-Hailuo-2.3`            | Yes  | 1 image                                              | No               | `MINIMAX_API_KEY`                        |
 | OpenAI                | `sora-2`                        | Yes  | 1 image                                              | 1 video          | `OPENAI_API_KEY`                         |
 | Qwen                  | `wan2.6-t2v`                    | Yes  | Yes (remote URL)                                     | Yes (remote URL) | `QWEN_API_KEY`                           |
@@ -112,6 +113,7 @@ and the shared live sweep.
 | ComfyUI  | Yes        | Yes            | No             | Not in the shared sweep; workflow-specific coverage lives with Comfy tests                                                               |
 | fal      | Yes        | Yes            | No             | `generate`, `imageToVideo`                                                                                                               |
 | Google   | Yes        | Yes            | Yes            | `generate`, `imageToVideo`; shared `videoToVideo` skipped because the current buffer-backed Gemini/Veo sweep does not accept that input  |
+| KlingAI  | Yes        | Yes            | No             | Not in the shared sweep                                                                                                                  |
 | MiniMax  | Yes        | Yes            | No             | `generate`, `imageToVideo`                                                                                                               |
 | OpenAI   | Yes        | Yes            | Yes            | `generate`, `imageToVideo`; shared `videoToVideo` skipped because this org/input path currently needs provider-side inpaint/remix access |
 | Qwen     | Yes        | Yes            | Yes            | `generate`, `imageToVideo`; `videoToVideo` skipped because this provider needs remote `http(s)` video URLs                               |
@@ -259,6 +261,7 @@ entries.
 | ComfyUI               | Workflow-driven local or cloud execution. Supports text-to-video and image-to-video through the configured graph.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | fal                   | Uses queue-backed flow for long-running jobs. Single image reference only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | Google                | Uses Gemini/Veo. Supports one image or one video reference.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| KlingAI               | Uses async submit/poll task flow. Supports text-to-video and single-image reference flows.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | MiniMax               | Single image reference only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | OpenAI                | Only `size` override is forwarded. Other style overrides (`aspectRatio`, `resolution`, `audio`, `watermark`) are ignored with a warning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Qwen                  | Same DashScope backend as Alibaba. Reference inputs must be remote `http(s)` URLs; local files are rejected upfront.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -373,6 +376,7 @@ openclaw config set agents.defaults.videoGenerationModel.primary "qwen/wan2.6-t2
 - [ComfyUI](/providers/comfy)
 - [fal](/providers/fal)
 - [Google (Gemini)](/providers/google)
+- [KlingAI](/providers/klingai)
 - [MiniMax](/providers/minimax)
 - [OpenAI](/providers/openai)
 - [Qwen](/providers/qwen)
