@@ -9,6 +9,7 @@ import type {
 } from "openclaw/plugin-sdk/sandbox";
 import { createWritableRenameTargetResolver } from "openclaw/plugin-sdk/sandbox";
 import { writeFileWithinRoot } from "openclaw/plugin-sdk/infra-runtime";
+import { sameFileIdentity } from "../../../src/infra/file-identity.js";
 import type { OpenShellFsBridgeContext, OpenShellSandboxBackend } from "./backend.types.js";
 import { movePathWithCopyFallback } from "./mirror.js";
 
@@ -436,17 +437,4 @@ function normalizeOpenedReadablePath(openedPath: string): string {
     ? openedPath.slice(0, -deletedSuffix.length)
     : openedPath;
   return path.resolve(withoutDeletedSuffix);
-}
-
-function sameFileIdentity(left: fs.Stats, right: fs.Stats): boolean {
-  if (left.ino !== right.ino) {
-    return false;
-  }
-  if (left.ino === 0 || right.ino === 0) {
-    return false;
-  }
-  if (left.dev === 0 || right.dev === 0) {
-    return false;
-  }
-  return left.dev === right.dev;
 }

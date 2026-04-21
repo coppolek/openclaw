@@ -201,6 +201,22 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
+function cloneStatWithDev<T extends nodeFs.Stats | nodeFs.BigIntStats>(
+  stat: T,
+  dev: number | bigint,
+): T {
+  return Object.defineProperty(
+    Object.create(Object.getPrototypeOf(stat), Object.getOwnPropertyDescriptors(stat)),
+    "dev",
+    {
+      value: dev,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+    },
+  ) as T;
+}
+
 function createMirrorBackendMock(): OpenShellSandboxBackend {
   return {
     id: "openshell",
@@ -377,6 +393,48 @@ describe("openshell fs bridges", () => {
       expect(readlinkSpy).toHaveBeenCalled();
     } finally {
       readlinkSpy.mockRestore();
+    }
+  });
+
+  it("accepts win32 fallback when path stats report an unknown device id", async () => {
+    const workspaceDir = await makeTempDir("openclaw-openshell-fs-");
+    const targetPath = path.join(workspaceDir, "subdir", "secret.txt");
+    await fs.mkdir(path.join(workspaceDir, "subdir"), { recursive: true });
+    await fs.writeFile(targetPath, "inside", "utf8");
+
+    const backend = createMirrorBackendMock();
+    const sandbox = createSandboxTestContext({
+      overrides: {
+        backendId: "openshell",
+        workspaceDir,
+        agentWorkspaceDir: workspaceDir,
+        containerWorkdir: "/sandbox",
+      },
+    });
+
+    const { createOpenShellFsBridge } = await import("./fs-bridge.js");
+    const bridge = createOpenShellFsBridge({ sandbox, backend });
+    const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+    const readlinkSpy = vi.spyOn(fs, "readlink").mockRejectedValue(new Error("fd path unavailable"));
+    const originalLstat = fs.lstat.bind(fs);
+    const lstatSpy = vi.spyOn(fs, "lstat").mockImplementation(async (...args) => {
+      const stat = await originalLstat(...args);
+      if (args[0] === targetPath) {
+        return cloneStatWithDev(stat, 0);
+      }
+      return stat;
+    });
+
+    try {
+      await expect(bridge.readFile({ filePath: "subdir/secret.txt" })).resolves.toEqual(
+        Buffer.from("inside"),
+      );
+      expect(readlinkSpy).toHaveBeenCalled();
+      expect(lstatSpy).toHaveBeenCalledWith(targetPath);
+    } finally {
+      lstatSpy.mockRestore();
+      readlinkSpy.mockRestore();
+      platformSpy.mockRestore();
     }
   });
 
