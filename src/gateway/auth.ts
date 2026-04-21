@@ -484,7 +484,8 @@ async function authorizeGatewayConnectCore(
   }
 
   if (auth.mode === "password") {
-    const password = connectAuth?.password;
+    // Rabbit's clawdbot-gateway QR schema carries the shared secret in `token`.
+    const password = connectAuth?.password ?? connectAuth?.token;
     if (!auth.password) {
       return { ok: false, reason: "password_missing_config" };
     }
