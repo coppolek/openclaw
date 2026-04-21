@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import type { VoiceCallConfig } from "./config.js";
-import type { CallManagerContext } from "./manager/context.js";
+import type { CallManagerContext, CallManagerHooks } from "./manager/context.js";
 import { processEvent as processManagerEvent } from "./manager/events.js";
 import { getCallByProviderCallId as getCallByProviderCallIdFromMaps } from "./manager/lookup.js";
 import {
@@ -66,10 +66,22 @@ export class CallManager {
   >();
   private maxDurationTimers = new Map<CallId, NodeJS.Timeout>();
   private initialMessageInFlight = new Set<CallId>();
+  private hooks: CallManagerHooks;
 
-  constructor(config: VoiceCallConfig, storePath?: string) {
+  constructor(config: VoiceCallConfig, storePath?: string, hooks: CallManagerHooks = {}) {
     this.config = config;
     this.storePath = resolveDefaultStoreBase(config, storePath);
+    this.hooks = hooks;
+  }
+
+  /**
+   * Replace the hook bag used by the manager. Lets the runtime install the
+   * post-call relay hook after the manager is constructed but before the
+   * provider attaches, without forcing a constructor cycle change on every
+   * caller of `new CallManager()`.
+   */
+  setHooks(hooks: CallManagerHooks): void {
+    this.hooks = { ...this.hooks, ...hooks };
   }
 
   /**
@@ -262,6 +274,7 @@ export class CallManager {
       onCallAnswered: (call) => {
         this.maybeSpeakInitialMessageOnAnswered(call);
       },
+      onCallEnded: this.hooks.onCallEnded,
     };
   }
 
@@ -299,6 +312,18 @@ export class CallManager {
     // is actually available; otherwise speak immediately on answered.
     const mode = (call.metadata?.mode as string | undefined) ?? "conversation";
     if (mode === "conversation") {
+      // Realtime conversations own their greeting path end-to-end: the
+      // realtime handler consumes `metadata.initialMessage`, builds greeting
+      // instructions, and fires `triggerGreeting` over the WebSocket once the
+      // bridge is ready. The legacy `speakInitialMessage` path posts a
+      // `<Say>` TwiML via Twilio's REST API, which races the
+      // `<Connect><Stream>` TwiML returned by the realtime short-circuit.
+      // When the `<Say>` POST wins, Twilio plays it instead of opening the
+      // stream, killing the realtime WS handshake. Skip the legacy path here
+      // so the realtime handler is the single owner of the opening turn.
+      if (this.config.realtime.enabled) {
+        return;
+      }
       const shouldWaitForStreamConnect =
         this.shouldDeferConversationInitialMessageUntilStreamConnect();
       if (shouldWaitForStreamConnect) {

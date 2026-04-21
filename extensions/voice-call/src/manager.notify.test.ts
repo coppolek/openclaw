@@ -253,6 +253,100 @@ describe("CallManager notify and mapping", () => {
     expectFirstPlayTtsText(provider, "Stream hello");
   });
 
+  it("skips the legacy initial-message path for realtime conversations", async () => {
+    const { manager, provider } = await createManagerHarness(
+      { realtime: { enabled: true, provider: "openai" } },
+      new FakeProvider("twilio"),
+    );
+
+    const callId = await initiateCallWithMessage(
+      manager,
+      "+15550000010",
+      "Tell Nana dinner is at 6pm.",
+      "conversation",
+    );
+    await answerCall(manager, callId, "evt-realtime-answered");
+
+    // The realtime handler owns the greeting path for realtime conversations;
+    // the manager must not fire `playTts` via REST API, which would inject a
+    // `<Say>` TwiML and kill the realtime WebSocket handshake.
+    expect(provider.playTtsCalls).toHaveLength(0);
+    // The initialMessage metadata must be preserved so the realtime handler
+    // can read it when the stream "start" frame arrives (order between the
+    // status callback and the WS upgrade is not guaranteed).
+    const call = requireCall(manager, callId);
+    expect(call.metadata).toEqual(
+      expect.objectContaining({ initialMessage: "Tell Nana dinner is at 6pm." }),
+    );
+  });
+
+  it("fires onCallEnded hook with a terminal call record after finalizeCall", async () => {
+    const { manager } = await createManagerHarness();
+
+    const callEndedHandler = vi.fn();
+    manager.setHooks({ onCallEnded: callEndedHandler });
+
+    const { callId } = await manager.initiateCall("+15550000012");
+    await answerCall(manager, callId, "evt-hook-answered");
+
+    manager.processEvent({
+      id: "evt-hook-ended",
+      type: "call.ended",
+      callId,
+      providerCallId: "call-uuid",
+      timestamp: Date.now(),
+      reason: "hangup-user",
+    });
+
+    expect(callEndedHandler).toHaveBeenCalledTimes(1);
+    const [terminalCall] = callEndedHandler.mock.calls[0] as [ReturnType<typeof manager.getCall>];
+    expect(terminalCall).toBeDefined();
+    expect(terminalCall?.callId).toBe(callId);
+    expect(terminalCall?.endReason).toBe("hangup-user");
+    expect(terminalCall?.endedAt).toBeDefined();
+  });
+
+  it("still finalizes the call when onCallEnded hook throws", async () => {
+    const { manager } = await createManagerHarness();
+    const callEndedHandler = vi.fn(() => {
+      throw new Error("hook boom");
+    });
+    manager.setHooks({ onCallEnded: callEndedHandler });
+
+    const { callId } = await manager.initiateCall("+15550000013");
+    await answerCall(manager, callId, "evt-hook-throw-answered");
+
+    expect(() =>
+      manager.processEvent({
+        id: "evt-hook-throw-ended",
+        type: "call.ended",
+        callId,
+        providerCallId: "call-uuid",
+        timestamp: Date.now(),
+        reason: "hangup-user",
+      }),
+    ).not.toThrow();
+
+    expect(callEndedHandler).toHaveBeenCalledTimes(1);
+    // Call should be removed from active set even when the hook throws.
+    expect(manager.getCall(callId)).toBeUndefined();
+  });
+
+  it("still speaks initial message in notify mode when realtime is enabled", async () => {
+    // realtime + notify is an odd combination, but the gate should only apply
+    // to conversation mode: notify's TwiML `<Say>` payload is the canonical
+    // delivery path and doesn't race a realtime stream.
+    const { manager, provider } = await createManagerHarness(
+      { realtime: { enabled: true, provider: "openai" } },
+      new FakeProvider("twilio"),
+    );
+
+    const callId = await initiateCallWithMessage(manager, "+15550000011", "Notify text", "notify");
+    await answerCall(manager, callId, "evt-realtime-notify");
+
+    expectFirstPlayTtsText(provider, "Notify text");
+  });
+
   it("prevents concurrent initial-message replays while first playback is in flight", async () => {
     const provider = new DelayedPlayTtsProvider("twilio");
     const { manager } = await createManagerHarness({ streaming: { enabled: true } }, provider);
