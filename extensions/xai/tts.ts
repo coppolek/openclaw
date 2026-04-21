@@ -20,10 +20,8 @@ export function normalizeXaiTtsBaseUrl(baseUrl?: string): string {
 }
 
 export function isValidXaiTtsVoice(voice: string, baseUrl?: string): voice is XaiTtsVoice {
-  const isCustom =
-    baseUrl != null
-      ? normalizeXaiTtsBaseUrl(baseUrl) !== XAI_BASE_URL
-      : normalizeXaiTtsBaseUrl(process.env.XAI_BASE_URL) !== XAI_BASE_URL;
+  const normalized = normalizeXaiTtsBaseUrl(baseUrl ?? process.env.XAI_BASE_URL);
+  const isCustom = normalized !== XAI_BASE_URL && !normalized.includes("api.grok.x.ai");
   if (isCustom) {
     return true;
   }
