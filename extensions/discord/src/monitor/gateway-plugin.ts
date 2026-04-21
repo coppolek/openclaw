@@ -12,6 +12,7 @@ import {
 } from "openclaw/plugin-sdk/proxy-capture";
 import { danger } from "openclaw/plugin-sdk/runtime-env";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
+import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 import * as undici from "undici";
 import * as ws from "ws";
@@ -21,7 +22,9 @@ const DISCORD_GATEWAY_BOT_URL = "https://discord.com/api/v10/gateway/bot";
 const DEFAULT_DISCORD_GATEWAY_URL = "wss://gateway.discord.gg/";
 const DISCORD_GATEWAY_INFO_TIMEOUT_MS = 10_000;
 
-type DiscordGatewayMetadataResponse = Pick<Response, "ok" | "status" | "text">;
+type DiscordGatewayMetadataResponse = Pick<Response, "ok" | "status" | "text"> & {
+  release?: () => Promise<void>;
+};
 type DiscordGatewayFetchInit = Record<string, unknown> & {
   headers?: Record<string, string>;
 };
@@ -29,9 +32,27 @@ type DiscordGatewayFetch = (
   input: string,
   init?: DiscordGatewayFetchInit,
 ) => Promise<DiscordGatewayMetadataResponse>;
+type DiscordGatewayFetchCapture = Parameters<typeof fetchWithSsrFGuard>[0]["capture"];
 
 type DiscordGatewayMetadataError = Error & { transient?: boolean };
 type DiscordGatewayWebSocketCtor = new (url: string, options?: { agent?: unknown }) => ws.WebSocket;
+type FirstHeartbeatTimeoutState = {
+  firstHeartbeatTimeout?: ReturnType<typeof setTimeout>;
+};
+
+async function fetchDiscordGatewayMetadataWithGuard(
+  input: string,
+  init?: DiscordGatewayFetchInit,
+  capture: DiscordGatewayFetchCapture = false,
+): Promise<DiscordGatewayMetadataResponse> {
+  const { response, release } = await fetchWithSsrFGuard({
+    url: input,
+    init: init as RequestInit | undefined,
+    capture,
+    auditContext: "discord-gateway-metadata",
+  });
+  return Object.assign(response, { release });
+}
 
 export function resolveDiscordGatewayIntents(
   intentsConfig?: import("openclaw/plugin-sdk/config-runtime").DiscordIntentsConfig,
@@ -141,6 +162,8 @@ async function fetchDiscordGatewayInfo(params: {
       transient: true,
       cause: error,
     });
+  } finally {
+    await response.release?.();
   }
   const summary = summarizeGatewayResponseBody(body);
   const transient = isTransientDiscordGatewayResponse(response.status, body);
@@ -264,9 +287,10 @@ function createGatewayPlugin(params: {
         clearInterval(this.heartbeatInterval);
         this.heartbeatInterval = undefined;
       }
-      if (this.firstHeartbeatTimeout !== undefined) {
-        clearTimeout(this.firstHeartbeatTimeout);
-        this.firstHeartbeatTimeout = undefined;
+      const heartbeatState = this as FirstHeartbeatTimeoutState;
+      if (heartbeatState.firstHeartbeatTimeout !== undefined) {
+        clearTimeout(heartbeatState.firstHeartbeatTimeout);
+        heartbeatState.firstHeartbeatTimeout = undefined;
       }
       super.connect(resume);
     }
@@ -384,19 +408,16 @@ export function createDiscordGatewayPlugin(params: {
     return createGatewayPlugin({
       options,
       fetchImpl: async (input, init) => {
-        const response = await fetch(input, init as RequestInit);
-        if (!debugProxySettings.enabled) {
-          captureHttpExchange({
-            url: input,
-            method: (init?.method as string | undefined) ?? "GET",
-            requestHeaders: init?.headers as Headers | Record<string, string> | undefined,
-            requestBody: (init as RequestInit & { body?: BodyInit | null })?.body ?? null,
-            response,
-            flowId: randomUUID(),
-            meta: { subsystem: "discord-gateway-metadata" },
-          });
-        }
-        return response;
+        return fetchDiscordGatewayMetadataWithGuard(
+          input,
+          init,
+          debugProxySettings.enabled
+            ? {
+                flowId: randomUUID(),
+                meta: { subsystem: "discord-gateway-metadata" },
+              }
+            : false,
+        );
       },
       runtime: params.runtime,
       testing: params.__testing
@@ -450,7 +471,7 @@ export function createDiscordGatewayPlugin(params: {
     params.runtime.error?.(danger(`discord: invalid gateway proxy: ${String(err)}`));
     return createGatewayPlugin({
       options,
-      fetchImpl: (input, init) => fetch(input, init as RequestInit),
+      fetchImpl: fetchDiscordGatewayMetadataWithGuard,
       runtime: params.runtime,
       testing: params.__testing
         ? {
