@@ -28,7 +28,7 @@
       "choiceLabel": "OpenAI API key",
       "groupId": "openai",
       "groupLabel": "OpenAI",
-      "groupHint": "Codex OAuth + API key",
+      "groupHint": "API key only (use separate OpenAI Codex for OAuth)",
       "optionKey": "openaiApiKey",
       "cliFlag": "--openai-api-key",
       "cliOption": "--openai-api-key <key>",
