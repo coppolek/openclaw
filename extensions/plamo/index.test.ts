@@ -960,7 +960,7 @@ describe("plamo provider plugin", () => {
     });
   });
 
-  it("does not inject bearer auth when top-level auth headers are configured", async () => {
+  it("keeps top-level auth headers while still injecting bearer auth when api key is available", async () => {
     const { provider, catalog } = await loadPlamoCatalog();
 
     let resolveRequest:
@@ -1049,7 +1049,7 @@ describe("plamo provider plugin", () => {
 
     const request = await requestSeen;
     expect(request.headers["x-proxy-token"]).toBe("proxy-token");
-    expect(request.headers.authorization).toBeUndefined();
+    expect(request.headers.authorization).toBe("Bearer test-key");
   });
 
   it("uses PLAMO_API_KEY for native transport requests when options.apiKey is absent", async () => {

@@ -396,7 +396,7 @@ describe("prepareSimpleCompletionModel", () => {
     );
   });
 
-  it("omits real api keys when request transport headers already authenticate the model", async () => {
+  it("keeps real api keys when auth-like request headers are additive", async () => {
     const requestTransportSymbol = Symbol.for("openclaw.modelProviderRequestTransport");
     hoisted.resolveModelMock.mockReturnValueOnce({
       model: {
@@ -430,11 +430,11 @@ describe("prepareSimpleCompletionModel", () => {
       modelId: "plamo-3.0-prime-beta",
     });
 
-    expect(hoisted.setRuntimeApiKeyMock).not.toHaveBeenCalled();
+    expect(hoisted.setRuntimeApiKeyMock).toHaveBeenCalledWith("plamo", "sk-real-key");
     expect(result).toEqual(
       expect.objectContaining({
         auth: expect.objectContaining({
-          apiKey: undefined,
+          apiKey: "sk-real-key",
           source: "env:PLAMO_API_KEY",
           mode: "api-key",
         }),
@@ -528,7 +528,7 @@ describe("prepareSimpleCompletionModel", () => {
     );
   });
 
-  it("omits real api keys when auth is carried by model headers alone", async () => {
+  it("keeps real api keys when auth-like model headers are additive", async () => {
     hoisted.resolveModelMock.mockReturnValueOnce({
       model: {
         provider: "plamo",
@@ -537,6 +537,51 @@ describe("prepareSimpleCompletionModel", () => {
         baseUrl: "https://proxy.example.test/v1",
         headers: {
           Authorization: "Bearer proxy-token",
+        },
+      },
+      authStorage: {
+        setRuntimeApiKey: hoisted.setRuntimeApiKeyMock,
+      },
+      modelRegistry: {},
+    });
+    hoisted.getApiKeyForModelMock.mockResolvedValueOnce({
+      apiKey: "sk-real-key",
+      source: "env:PLAMO_API_KEY",
+      mode: "api-key",
+    });
+
+    const result = await prepareSimpleCompletionModel({
+      cfg: undefined,
+      provider: "plamo",
+      modelId: "plamo-3.0-prime-beta",
+    });
+
+    expect(hoisted.setRuntimeApiKeyMock).toHaveBeenCalledWith("plamo", "sk-real-key");
+    expect(result).toEqual(
+      expect.objectContaining({
+        auth: expect.objectContaining({
+          apiKey: "sk-real-key",
+          source: "env:PLAMO_API_KEY",
+          mode: "api-key",
+        }),
+      }),
+    );
+  });
+
+  it("omits real api keys when request auth explicitly replaces provider auth", async () => {
+    const requestTransportSymbol = Symbol.for("openclaw.modelProviderRequestTransport");
+    hoisted.resolveModelMock.mockReturnValueOnce({
+      model: {
+        provider: "plamo",
+        id: "plamo-3.0-prime-beta",
+        api: "openai-completions",
+        baseUrl: "https://proxy.example.test/v1",
+        [requestTransportSymbol]: {
+          auth: {
+            mode: "header",
+            headerName: "X-Proxy-Token",
+            value: "proxy-token",
+          },
         },
       },
       authStorage: {
