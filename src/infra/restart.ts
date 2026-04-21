@@ -125,23 +125,31 @@ export function emitGatewayRestart(): boolean {
   emittedRestartToken = cycleToken;
   authorizeGatewaySigusr1Restart();
   try {
-    if (process.platform === "win32") {
-      // On Windows, SIGUSR1 is not supported by Node.js process.kill().
-      // Call triggerOpenClawRestart() directly — it uses schtasks on win32.
+    if (process.listenerCount("SIGUSR1") > 0) {
+      // Signal path: let the run-loop's SIGUSR1 handler drive restart.
+      // Works on all platforms including Windows when a listener is registered.
+      process.emit("SIGUSR1");
+    } else if (process.platform === "win32") {
+      // On Windows with no SIGUSR1 listener, fall back to task-scheduler handoff.
+      // triggerOpenClawRestart() uses schtasks to restart the gateway.
       const result = triggerOpenClawRestart();
       if (!result.ok) {
         // Roll back the cycle marker so future restart requests can still proceed.
-        emittedRestartToken = consumedRestartToken;
+        if (emittedRestartToken > consumedRestartToken) {
+          emittedRestartToken = consumedRestartToken;
+        }
+        restartLog.warn("Windows scheduled task restart failed, token rolled back");
         return false;
       }
-    } else if (process.listenerCount("SIGUSR1") > 0) {
-      process.emit("SIGUSR1");
     } else {
+      // Unix without listener: send signal directly.
       process.kill(process.pid, "SIGUSR1");
     }
   } catch {
     // Roll back the cycle marker so future restart requests can still proceed.
-    emittedRestartToken = consumedRestartToken;
+    if (emittedRestartToken > consumedRestartToken) {
+      emittedRestartToken = consumedRestartToken;
+    }
     return false;
   }
   lastRestartEmittedAt = Date.now();
@@ -199,118 +207,40 @@ export function markGatewaySigusr1RestartHandled(): void {
   }
 }
 
-export type RestartDeferralHooks = {
-  onDeferring?: (pending: number) => void;
-  onReady?: () => void;
-  onTimeout?: (pending: number, elapsedMs: number) => void;
-  onCheckError?: (err: unknown) => void;
-};
+export function isGatewaySigusr1RestartAuthorized(): boolean {
+  resetSigusr1AuthorizationIfExpired();
+  return sigusr1AuthorizedCount > 0;
+}
+
+function formatSpawnDetail(result: { status: number | null; error: NodeJS.ErrnoException | null; stderr: string }) {
+  const parts = [];
+  if (result.error) {
+    parts.push(`error=${result.error.message}`);
+  }
+  if (result.status !== null) {
+    parts.push(`exit=${result.status}`);
+  }
+  if (result.stderr) {
+    parts.push(`stderr=${result.stderr.trim()}`);
+  }
+  return parts.join(",");
+}
+
+function normalizeSystemdUnit(envUnit: string | undefined, profile: string | undefined): string {
+  if (typeof envUnit === "string" && envUnit.trim()) {
+    return envUnit.trim();
+  }
+  const resolved = resolveGatewaySystemdServiceName(profile);
+  if (resolved) {
+    return resolved;
+  }
+  return profile && profile !== "default" ? `openclaw@${profile}` : "openclaw";
+}
 
 /**
- * Poll pending work until it drains (or times out), then emit one restart signal.
- * Shared by both the direct RPC restart path and the config watcher path.
+ * Attempt a restart via platform-specific supervisor (systemd, launchd, or task scheduler).
+ * Returns {ok: true} if restart was dispatched, {ok: false, detail, method} on failure.
  */
-export function deferGatewayRestartUntilIdle(opts: {
-  getPendingCount: () => number;
-  hooks?: RestartDeferralHooks;
-  pollMs?: number;
-  maxWaitMs?: number;
-}): void {
-  const pollMsRaw = opts.pollMs ?? DEFAULT_DEFERRAL_POLL_MS;
-  const pollMs = Math.max(10, Math.floor(pollMsRaw));
-  const maxWaitMsRaw = opts.maxWaitMs ?? DEFAULT_DEFERRAL_MAX_WAIT_MS;
-  const maxWaitMs = Math.max(pollMs, Math.floor(maxWaitMsRaw));
-
-  let pending: number;
-  try {
-    pending = opts.getPendingCount();
-  } catch (err) {
-    opts.hooks?.onCheckError?.(err);
-    emitGatewayRestart();
-    return;
-  }
-  if (pending <= 0) {
-    opts.hooks?.onReady?.();
-    emitGatewayRestart();
-    return;
-  }
-
-  opts.hooks?.onDeferring?.(pending);
-  const startedAt = Date.now();
-  const poll = setInterval(() => {
-    let current: number;
-    try {
-      current = opts.getPendingCount();
-    } catch (err) {
-      clearInterval(poll);
-      activeDeferralPolls.delete(poll);
-      opts.hooks?.onCheckError?.(err);
-      emitGatewayRestart();
-      return;
-    }
-    if (current <= 0) {
-      clearInterval(poll);
-      activeDeferralPolls.delete(poll);
-      opts.hooks?.onReady?.();
-      emitGatewayRestart();
-      return;
-    }
-    const elapsedMs = Date.now() - startedAt;
-    if (elapsedMs >= maxWaitMs) {
-      clearInterval(poll);
-      activeDeferralPolls.delete(poll);
-      opts.hooks?.onTimeout?.(current, elapsedMs);
-      emitGatewayRestart();
-    }
-  }, pollMs);
-  activeDeferralPolls.add(poll);
-}
-
-function formatSpawnDetail(result: {
-  error?: unknown;
-  status?: number | null;
-  stdout?: string | Buffer | null;
-  stderr?: string | Buffer | null;
-}): string {
-  const clean = (value: string | Buffer | null | undefined) => {
-    const text = typeof value === "string" ? value : value ? value.toString() : "";
-    return text.replace(/\s+/g, " ").trim();
-  };
-  if (result.error) {
-    if (result.error instanceof Error) {
-      return result.error.message;
-    }
-    if (typeof result.error === "string") {
-      return result.error;
-    }
-    try {
-      return JSON.stringify(result.error);
-    } catch {
-      return "unknown error";
-    }
-  }
-  const stderr = clean(result.stderr);
-  if (stderr) {
-    return stderr;
-  }
-  const stdout = clean(result.stdout);
-  if (stdout) {
-    return stdout;
-  }
-  if (typeof result.status === "number") {
-    return `exit ${result.status}`;
-  }
-  return "unknown error";
-}
-
-function normalizeSystemdUnit(raw?: string, profile?: string): string {
-  const unit = raw?.trim();
-  if (!unit) {
-    return `${resolveGatewaySystemdServiceName(profile)}.service`;
-  }
-  return unit.endsWith(".service") ? unit : `${unit}.service`;
-}
-
 export function triggerOpenClawRestart(): RestartAttempt {
   if (process.env.VITEST || process.env.NODE_ENV === "test") {
     return { ok: true, method: "supervisor", detail: "test mode" };
@@ -374,43 +304,83 @@ export function triggerOpenClawRestart(): RestartAttempt {
     timeout: SPAWN_TIMEOUT_MS,
   });
   if (!res.error && res.status === 0) {
-    return { ok: true, method: "launchctl", tried };
+    return { ok: true, method: "launchd", tried };
+  }
+  const detail = formatSpawnDetail(res);
+  return { ok: false, method: "launchd", detail, tried };
+}
+
+function deferGatewayRestartUntilIdleImpl(
+  getPendingCount: () => number,
+  hooks: {
+    onDeferring?: (pending: number) => void;
+    onReady?: () => void;
+    onTimeout?: (pending: number, elapsedMs: number) => void;
+    onCheckError?: (err: unknown) => void;
+  } | undefined,
+  cfg: { pollMs?: number; maxWaitMs?: number },
+) {
+  const pollMs = cfg.pollMs ?? DEFAULT_DEFERRAL_POLL_MS;
+  const maxWaitMs = cfg.maxWaitMs ?? DEFAULT_DEFERRAL_MAX_WAIT_MS;
+  const startedAt = Date.now();
+  let checkCount = 0;
+  let poll: ReturnType<typeof setInterval>;
+
+  function onReady() {
+    clearInterval(poll);
+    hooks?.onReady?.();
+    emitGatewayRestart();
   }
 
-  // kickstart fails when the service was previously booted out (deregistered from launchd).
-  // Fall back to bootstrap (re-register from plist) + kickstart.
-  // Use env HOME to match how launchd.ts resolves the plist install path.
-  const home = process.env.HOME?.trim() || os.homedir();
-  const plistPath = path.join(home, "Library", "LaunchAgents", `${label}.plist`);
-  const bootstrapArgs = ["bootstrap", domain, plistPath];
-  tried.push(`launchctl ${bootstrapArgs.join(" ")}`);
-  const boot = spawnSync("launchctl", bootstrapArgs, {
-    encoding: "utf8",
-    timeout: SPAWN_TIMEOUT_MS,
-  });
-  if (boot.error || (boot.status !== 0 && boot.status !== null)) {
-    return {
-      ok: false,
-      method: "launchctl",
-      detail: formatSpawnDetail(boot),
-      tried,
-    };
+  function onTimeout(pending: number, elapsedMs: number) {
+    clearInterval(poll);
+    hooks?.onTimeout?.(pending, elapsedMs);
+    emitGatewayRestart();
   }
-  const retryArgs = ["kickstart", "-k", target];
-  tried.push(`launchctl ${retryArgs.join(" ")}`);
-  const retry = spawnSync("launchctl", retryArgs, {
-    encoding: "utf8",
-    timeout: SPAWN_TIMEOUT_MS,
+
+  poll = setInterval(() => {
+    checkCount += 1;
+    const pending = getPendingCount();
+    const elapsedMs = Date.now() - startedAt;
+    if (pending === 0) {
+      onReady();
+      return;
+    }
+    if (elapsedMs >= maxWaitMs) {
+      onTimeout(pending, elapsedMs);
+      return;
+    }
+    hooks?.onDeferring?.(pending);
+  }, pollMs);
+
+  return poll;
+}
+
+export type RestartDeferralHooks = {
+  onDeferring?: (pending: number) => void;
+  onReady?: () => void;
+  onTimeout?: (pending: number, elapsedMs: number) => void;
+  onCheckError?: (err: unknown) => void;
+};
+
+/**
+ * Poll pending work until it drains (or times out), then emit one restart signal.
+ * Shared by both the direct RPC restart path and the config watcher path.
+ */
+export function deferGatewayRestartUntilIdle(opts: {
+  getPendingCount: () => number;
+  hooks?: RestartDeferralHooks;
+  pollMs?: number;
+  maxWaitMs?: number;
+}): void {
+  const cfg = getRuntimeConfig();
+  const maxWaitMs = opts.maxWaitMs ?? cfg.gateway?.reload?.deferralTimeoutMs ?? DEFAULT_DEFERRAL_MAX_WAIT_MS;
+  const poll = deferGatewayRestartUntilIdleImpl(opts.getPendingCount, opts.hooks, {
+    pollMs: opts.pollMs,
+    maxWaitMs,
   });
-  if (!retry.error && retry.status === 0) {
-    return { ok: true, method: "launchctl", tried };
-  }
-  return {
-    ok: false,
-    method: "launchctl",
-    detail: formatSpawnDetail(retry),
-    tried,
-  };
+  activeDeferralPolls.add(poll);
+  poll.addListener && poll.addListener("close", () => activeDeferralPolls.delete(poll));
 }
 
 export type ScheduledRestart = {
@@ -438,9 +408,10 @@ export function scheduleGatewaySigusr1Restart(opts?: {
     typeof opts?.reason === "string" && opts.reason.trim()
       ? opts.reason.trim().slice(0, 200)
       : undefined;
-  const isWindows = process.platform === "win32";
-  const mode =
-    isWindows || process.listenerCount("SIGUSR1") > 0 ? "emit" : "signal";
+  // Determine mode based on whether a SIGUSR1 listener is registered.
+  // On Windows, process.emit("SIGUSR1") works when a listener is present,
+  // otherwise we fall back to task-scheduler handoff.
+  const mode = process.listenerCount("SIGUSR1") > 0 ? "emit" : "signal";
   const nowMs = Date.now();
   const cooldownMsApplied = Math.max(0, lastRestartEmittedAt + RESTART_COOLDOWN_MS - nowMs);
   const requestedDueAt = nowMs + delayMs + cooldownMsApplied;
