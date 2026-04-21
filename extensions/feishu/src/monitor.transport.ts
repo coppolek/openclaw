@@ -91,53 +91,85 @@ export async function monitorWebSocket({
 }: MonitorTransportParams): Promise<void> {
   const log = runtime?.log ?? console.log;
   const error = runtime?.error ?? console.error;
-  log(`feishu[${accountId}]: starting WebSocket connection...`);
 
-  const wsClient = await createFeishuWSClient(account);
-  wsClients.set(accountId, wsClient);
+  const initialDelayMs = 2_000;
+  const maxDelayMs = 60_000;
+  let retryDelay = initialDelayMs;
 
-  return new Promise((resolve, reject) => {
-    let cleanedUp = false;
+  const isAborted = () => abortSignal?.aborted === true;
 
-    const cleanup = () => {
-      if (cleanedUp) {
+  while (!isAborted()) {
+    log(`feishu[${accountId}]: starting WebSocket connection...`);
+
+    let wsClient: Lark.WSClient;
+    try {
+      wsClient = await createFeishuWSClient(account);
+    } catch (err) {
+      error(`feishu[${accountId}]: failed to create WebSocket client: ${String(err)}`);
+      if (isAborted()) {
         return;
       }
-      cleanedUp = true;
-      abortSignal?.removeEventListener("abort", handleAbort);
-      try {
-        wsClient.close();
-      } catch (err) {
-        error(`feishu[${accountId}]: error closing WebSocket client: ${String(err)}`);
-      } finally {
+      log(`feishu[${accountId}]: retrying in ${retryDelay}ms...`);
+      await sleepAbortable(retryDelay, abortSignal);
+      retryDelay = Math.min(retryDelay * 2, maxDelayMs);
+      continue;
+    }
+
+    wsClients.set(accountId, wsClient);
+    let closedByAbort = false;
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        function handleAbort() {
+          closedByAbort = true;
+          try {
+            wsClient.close();
+          } catch {}
+          wsClients.delete(accountId);
+          botOpenIds.delete(accountId);
+          botNames.delete(accountId);
+          resolve();
+        }
+
+        if (isAborted()) {
+          handleAbort();
+          return;
+        }
+
+        abortSignal?.addEventListener("abort", handleAbort, { once: true });
+
+        try {
+          void wsClient.start({ eventDispatcher });
+          log(`feishu[${accountId}]: WebSocket client started`);
+        } catch (err) {
+          abortSignal?.removeEventListener("abort", handleAbort);
+          reject(err);
+        }
+      });
+
+      // Normal close — reset backoff
+      retryDelay = initialDelayMs;
+    } catch (err) {
+      error(`feishu[${accountId}]: WebSocket error: ${String(err)}`);
+    } finally {
+      if (!closedByAbort) {
+        try {
+          wsClient.close();
+        } catch {}
         wsClients.delete(accountId);
         botOpenIds.delete(accountId);
         botNames.delete(accountId);
       }
-    };
-
-    function handleAbort() {
-      log(`feishu[${accountId}]: abort signal received, stopping`);
-      cleanup();
-      resolve();
     }
 
-    if (abortSignal?.aborted) {
-      cleanup();
-      resolve();
+    if (isAborted()) {
       return;
     }
 
-    abortSignal?.addEventListener("abort", handleAbort, { once: true });
-
-    try {
-      void wsClient.start({ eventDispatcher });
-      log(`feishu[${accountId}]: WebSocket client started`);
-    } catch (err) {
-      cleanup();
-      reject(err);
-    }
-  });
+    log(`feishu[${accountId}]: reconnecting in ${retryDelay}ms...`);
+    await sleepAbortable(retryDelay, abortSignal);
+    retryDelay = Math.min(retryDelay * 2, maxDelayMs);
+  }
 }
 
 export async function monitorWebhook({
@@ -287,5 +319,23 @@ export async function monitorWebhook({
       abortSignal?.removeEventListener("abort", handleAbort);
       reject(err);
     });
+  });
+}
+
+function sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
