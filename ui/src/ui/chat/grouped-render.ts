@@ -205,25 +205,35 @@ export function renderStreamingGroup(
   onOpenSidebar?: (content: SidebarContent) => void,
   assistant?: AssistantIdentity,
   basePath?: string,
+  message?: unknown,
+  showReasoning = false,
 ) {
   const timestamp = new Date(startedAt).toLocaleTimeString([], {
     hour: "numeric",
     minute: "2-digit",
   });
   const name = assistant?.name ?? "Assistant";
+  const streamingMessage =
+    message && typeof message === "object"
+      ? {
+          role: "assistant",
+          timestamp: startedAt,
+          ...(message as Record<string, unknown>),
+        }
+      : {
+          role: "assistant",
+          content: [{ type: "text", text }],
+          timestamp: startedAt,
+        };
 
   return html`
     <div class="chat-group assistant">
       ${renderAvatar("assistant", assistant, basePath)}
       <div class="chat-group-messages">
         ${renderGroupedMessage(
-          {
-            role: "assistant",
-            content: [{ type: "text", text }],
-            timestamp: startedAt,
-          },
+          streamingMessage,
           `stream:${startedAt}`,
-          { isStreaming: true, showReasoning: false },
+          { isStreaming: true, showReasoning },
           onOpenSidebar,
         )}
         <div class="chat-group-footer">

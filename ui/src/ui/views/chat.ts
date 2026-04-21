@@ -885,6 +885,8 @@ export function renderChat(props: ChatProps) {
                 props.onOpenSidebar,
                 assistantIdentity,
                 props.basePath,
+                "message" in item ? item.message : undefined,
+                showReasoning,
               );
             }
             if (item.kind === "group") {
