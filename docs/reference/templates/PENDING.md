@@ -8,7 +8,9 @@ read_when:
 
 # PENDING.md Template
 
-`PENDING.md` is an optional workspace file for tracking **cross-session commitments** that should survive session resets, compaction, or multi-day execution boundaries.
+`PENDING.md` is an optional workspace file for tracking **cross-session
+commitments** that should survive session resets, compaction, or multi-day
+execution boundaries.
 
 It is especially useful for commitments such as:
 
@@ -17,11 +19,13 @@ It is especially useful for commitments such as:
 - manual review tasks with deadlines
 - long-running workflows coordinated across multiple sessions
 
-This file is **user-maintained** and lives in the workspace, following OpenClaw's "workspace as private memory" model.
+This file is **user-maintained** and lives in the workspace, following
+OpenClaw's "workspace as private memory" model.
 
-> **Note:** `PENDING.md` is a **community workspace pattern**, not a built-in runtime feature.
-> It does not replace Background Tasks, Cron Jobs, Standing Orders, or `HEARTBEAT.md`.
-> Instead, it complements them by recording commitments that need to remain visible across session boundaries.
+> **Note:** `PENDING.md` is a **community workspace pattern**, not a built-in
+> runtime feature. It does not replace Background Tasks, Cron Jobs, Standing
+> Orders, or `HEARTBEAT.md`. Instead, it complements them by recording
+> commitments that need to remain visible across session boundaries.
 
 ## When to Use PENDING.md
 
@@ -133,15 +137,17 @@ If you prefer a lighter format, this also works:
 - **Notes**: Rate-limited API, resumes nightly via cron
 ```
 
-The key requirement is that entries remain easy for both the user and the agent to read and update.
+The key requirement is that entries remain easy for both the user and the
+agent to read and update.
 
 ## HEARTBEAT.md Integration
 
-A common pattern is to have `HEARTBEAT.md` periodically inspect `PENDING.md` and alert the user when an item is overdue.
+A common pattern is to have `HEARTBEAT.md` periodically inspect `PENDING.md`
+and alert the user when an item is overdue.
 
 **Example `HEARTBEAT.md` task:**
 
-```markdown
+```md
 tasks:
 
 - name: pending-tasks-check
@@ -149,7 +155,7 @@ tasks:
   prompt: |
     Read PENDING.md if it exists.
     Check each pending item's deadline against the current time.
-    If any item is overdue and not completed, report the overdue items to the user.
+    If any item is overdue and not completed, report the overdue items.
     If all items are on-track, reply HEARTBEAT_OK.
 ```
 
@@ -192,6 +198,8 @@ This separation avoids overloading any single mechanism.
 - `PENDING.md` is **optional**.
 - It is **not auto-injected** into context.
 - The agent must **explicitly read it** when needed.
-- The file is intended to remain **transparent, editable, and local** to the workspace.
+- The file is intended to remain **transparent, editable, and local** to the
+  workspace.
 
-This makes it a good fit for OpenClaw's local-first, operator-controlled workflow model.
+This makes it a good fit for OpenClaw's local-first, operator-controlled
+workflow model.
