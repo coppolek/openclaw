@@ -7,9 +7,12 @@ import {
   sendMediaWithLeadingCaption,
 } from "openclaw/plugin-sdk/reply-payload";
 import { logVerbose, shouldLogVerbose } from "openclaw/plugin-sdk/runtime-env";
+import {
+  looksLikePdfArchiveCandidate,
+  maybeShoarchiveOutboundPdf,
+} from "openclaw/plugin-sdk/shoarchive";
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 import { loadWebMedia } from "../media.js";
-import { looksLikePdfArchiveCandidate, maybeShoarchiveOutboundPdf } from "../pdf-shoarchive.js";
 import { newConnectionId } from "../reconnect.js";
 import { formatError } from "../session.js";
 import { convertMarkdownTables, sleep } from "../text-runtime.js";

@@ -4,6 +4,10 @@ import { resolveMarkdownTableMode } from "openclaw/plugin-sdk/config-runtime";
 import { generateSecureUuid } from "openclaw/plugin-sdk/core";
 import { normalizePollInput, type PollInput } from "openclaw/plugin-sdk/media-runtime";
 import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
+import {
+  looksLikePdfArchiveCandidate,
+  maybeShoarchiveOutboundPdf,
+} from "openclaw/plugin-sdk/shoarchive";
 import { getChildLogger } from "openclaw/plugin-sdk/text-runtime";
 import { redactIdentifier } from "openclaw/plugin-sdk/text-runtime";
 import { convertMarkdownTables } from "openclaw/plugin-sdk/text-runtime";
@@ -15,7 +19,6 @@ import {
 import { getRegisteredWhatsAppConnectionController } from "./connection-controller-registry.js";
 import type { ActiveWebListener, ActiveWebSendOptions } from "./inbound/types.js";
 import { loadOutboundMediaFromUrl } from "./outbound-media.runtime.js";
-import { looksLikePdfArchiveCandidate, maybeShoarchiveOutboundPdf } from "./pdf-shoarchive.js";
 import { markdownToWhatsApp, toWhatsappJid } from "./text-runtime.js";
 
 const outboundLog = createSubsystemLogger("gateway/channels/whatsapp").child("outbound");

@@ -34,7 +34,7 @@ vi.mock("../media.js", () => ({
   loadWebMedia: vi.fn(),
 }));
 
-vi.mock("../pdf-shoarchive.js", () => ({
+vi.mock("openclaw/plugin-sdk/shoarchive", () => ({
   looksLikePdfArchiveCandidate: hoisted.looksLikePdfArchiveCandidate,
   maybeShoarchiveOutboundPdf: hoisted.maybeShoarchiveOutboundPdf,
 }));
