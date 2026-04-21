@@ -13,6 +13,11 @@
       "label": "Dreaming Frequency",
       "placeholder": "0 3 * * *",
       "help": "Optional cron cadence for the full dreaming sweep (light, REM, then deep)."
+    },
+    "dreaming.staggerMs": {
+      "label": "Dreaming Stagger (ms)",
+      "placeholder": "300000",
+      "help": "Optional deterministic random stagger window in ms for the dreaming cron schedule. Prevents multiple instances from firing at the exact same time. Unset uses the cron service default (5 min for top-of-hour schedules)."
     }
   },
   "configSchema": {
@@ -34,6 +39,10 @@
           },
           "verboseLogging": {
             "type": "boolean"
+          },
+          "staggerMs": {
+            "type": "integer",
+            "minimum": 0
           },
           "storage": {
             "type": "object",
