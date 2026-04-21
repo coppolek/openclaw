@@ -15,7 +15,10 @@ import {
   type Usage,
 } from "@mariozechner/pi-ai";
 import { convertMessages } from "@mariozechner/pi-ai/openai-completions";
-import { resolveEnvApiKey } from "openclaw/plugin-sdk/provider-auth-runtime";
+import {
+  isNonSecretApiKeyMarker,
+  resolveEnvApiKey,
+} from "openclaw/plugin-sdk/provider-auth-runtime";
 import {
   buildGuardedModelFetch,
   resolveModelRequestAuthMode,
@@ -767,7 +770,11 @@ function resolvePlamoApiKey(model: RuntimeModel, options: RuntimeOptions): strin
   if (requestAuthMode === "authorization-bearer" || requestAuthMode === "header") {
     return undefined;
   }
-  return options?.apiKey || resolveEnvApiKey(model.provider)?.apiKey || undefined;
+  const explicitApiKey = options?.apiKey?.trim();
+  if (explicitApiKey && !isNonSecretApiKeyMarker(explicitApiKey)) {
+    return explicitApiKey;
+  }
+  return resolveEnvApiKey(model.provider)?.apiKey || undefined;
 }
 
 function hasAuthorizationHeader(headers: Record<string, string>): boolean {

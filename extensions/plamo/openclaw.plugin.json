@@ -2,6 +2,7 @@
   "id": "plamo",
   "enabledByDefault": true,
   "providers": ["plamo"],
+  "nonSecretAuthMarkers": ["plamo-request-auth"],
   "modelSupport": {
     "modelPrefixes": ["plamo-"]
   },

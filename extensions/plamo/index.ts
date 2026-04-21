@@ -15,7 +15,11 @@ import {
   PLAMO_OPENAI_COMPAT,
 } from "./model-definitions.js";
 import { applyPlamoConfig, PLAMO_DEFAULT_MODEL_REF } from "./onboard.js";
-import { buildPlamoCatalog } from "./provider-catalog.js";
+import {
+  buildPlamoCatalog,
+  hasConfiguredPlamoRequestAuth,
+  PLAMO_REQUEST_AUTH_MARKER,
+} from "./provider-catalog.js";
 import { createPlamoToolCallWrapper, sanitizePlamoReplayHistory } from "./stream.js";
 
 const PROVIDER_ID = "plamo";
@@ -91,6 +95,14 @@ export default defineSingleProviderPluginEntry({
     catalog: {
       run: buildPlamoCatalog,
     },
+    resolveSyntheticAuth: ({ providerConfig }) =>
+      hasConfiguredPlamoRequestAuth(providerConfig?.request)
+        ? {
+            apiKey: PLAMO_REQUEST_AUTH_MARKER,
+            source: "models.providers.plamo.request (synthetic request auth)",
+            mode: "api-key" as const,
+          }
+        : undefined,
     ...OPENAI_COMPATIBLE_REPLAY_HOOKS,
     sanitizeReplayHistory: ({ messages }) => sanitizePlamoReplayHistory(messages),
     normalizeToolSchemas: ({ tools }) =>

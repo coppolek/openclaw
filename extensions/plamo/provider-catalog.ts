@@ -4,6 +4,7 @@ import type { ModelProviderConfig } from "openclaw/plugin-sdk/provider-model-sha
 import { buildPlamoCatalogModels, PLAMO_BASE_URL } from "./model-definitions.js";
 
 const PROVIDER_ID = "plamo";
+export const PLAMO_REQUEST_AUTH_MARKER = "plamo-request-auth";
 
 export function buildPlamoProvider(): ModelProviderConfig {
   return {
@@ -23,7 +24,7 @@ function resolveExplicitPlamoProviderConfig(ctx: ProviderCatalogContext) {
   )?.[1];
 }
 
-function hasConfiguredPlamoRequestAuth(request: unknown): boolean {
+export function hasConfiguredPlamoRequestAuth(request: unknown): boolean {
   if (!request || typeof request !== "object") {
     return false;
   }

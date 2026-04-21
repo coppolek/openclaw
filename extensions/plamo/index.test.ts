@@ -10,6 +10,7 @@ import { attachModelProviderRequestTransport } from "../../src/agents/provider-r
 import { resolveProviderPluginChoice } from "../../src/plugins/provider-wizard.js";
 import { registerSingleProviderPlugin } from "../../test/helpers/plugins/plugin-registration.js";
 import plamoPlugin from "./index.js";
+import { PLAMO_REQUEST_AUTH_MARKER } from "./provider-catalog.js";
 import { createPlamoToolCallWrapper, normalizePlamoToolMarkupInMessage } from "./stream.js";
 
 const fetchWithSsrFGuardMock = vi.hoisted(() => vi.fn());
@@ -198,6 +199,60 @@ describe("plamo provider plugin", () => {
         modelId: "gpt-5.4",
       } as never),
     ).toBe(false);
+  });
+
+  it("exposes synthetic auth for request-authenticated PLaMo configs", async () => {
+    const provider = await registerSingleProviderPlugin(plamoPlugin);
+
+    expect(
+      provider.resolveSyntheticAuth?.({
+        provider: "plamo",
+        providerConfig: {
+          api: "openai-completions",
+          baseUrl: "https://proxy.example.test/v1",
+          request: {
+            auth: {
+              mode: "header",
+              headerName: "X-Proxy-Token",
+              value: {
+                source: "env",
+                provider: "default",
+                id: "PLAMO_PROXY_TOKEN",
+              },
+            },
+          },
+          models: [],
+        },
+      } as never),
+    ).toEqual({
+      apiKey: PLAMO_REQUEST_AUTH_MARKER,
+      source: "models.providers.plamo.request (synthetic request auth)",
+      mode: "api-key",
+    });
+
+    expect(
+      provider.resolveSyntheticAuth?.({
+        provider: "plamo",
+        providerConfig: {
+          api: "openai-completions",
+          baseUrl: "https://proxy.example.test/v1",
+          request: {
+            headers: {
+              "X-Proxy-Token": {
+                source: "env",
+                provider: "default",
+                id: "PLAMO_PROXY_TOKEN",
+              },
+            },
+          },
+          models: [],
+        },
+      } as never),
+    ).toEqual({
+      apiKey: PLAMO_REQUEST_AUTH_MARKER,
+      source: "models.providers.plamo.request (synthetic request auth)",
+      mode: "api-key",
+    });
   });
 
   it("builds the static PLaMo model catalog", async () => {
@@ -1087,6 +1142,98 @@ describe("plamo provider plugin", () => {
       model: "plamo-3.0-prime-beta",
       stream: true,
     });
+  });
+
+  it("does not inject bearer auth for synthetic request-auth markers", async () => {
+    const { provider, catalog } = await loadPlamoCatalog();
+
+    let resolveRequest:
+      | ((value: {
+          headers: Record<string, string | string[] | undefined>;
+          body: Record<string, unknown>;
+        }) => void)
+      | null = null;
+    const requestSeen = new Promise<{
+      headers: Record<string, string | string[] | undefined>;
+      body: Record<string, unknown>;
+    }>((resolve) => {
+      resolveRequest = resolve;
+    });
+
+    const server = createServer((req, res) => {
+      const chunks: string[] = [];
+      req.setEncoding("utf8");
+      req.on("data", (chunk) => chunks.push(chunk));
+      req.on("end", () => {
+        resolveRequest?.({
+          headers: req.headers,
+          body: JSON.parse(chunks.join("")) as Record<string, unknown>,
+        });
+        res.writeHead(200, { "Content-Type": "text/event-stream" });
+        res.write(
+          `data: ${JSON.stringify({
+            id: "chatcmpl-synthetic-request-auth",
+            choices: [{ index: 0, delta: { content: "ok" } }],
+          })}\n\n`,
+        );
+        res.write(
+          `data: ${JSON.stringify({
+            id: "chatcmpl-synthetic-request-auth",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          })}\n\n`,
+        );
+        res.end("data: [DONE]\n\n");
+      });
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      server.close();
+      throw new Error("expected tcp server address");
+    }
+
+    const [model] = catalog.provider.models;
+    const wrapped = createWrappedPlamoStream(provider);
+    const stream = await wrapped(
+      {
+        ...model,
+        provider: "plamo",
+        api: "openai-completions",
+        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+        headers: {
+          "X-Proxy-Token": "proxy-token",
+        },
+      } as never,
+      {
+        systemPrompt: "system prompt",
+        messages: [{ role: "user", content: "こんにちは" }],
+      } as never,
+      {
+        apiKey: PLAMO_REQUEST_AUTH_MARKER,
+      } as never,
+    );
+
+    let result: Awaited<ReturnType<typeof stream.result>> | undefined;
+    try {
+      for await (const _event of stream) {
+        // Drain the stream so the request completes.
+      }
+      result = await stream.result();
+    } finally {
+      server.close();
+    }
+
+    expect(result).toMatchObject({
+      stopReason: "stop",
+      content: [{ type: "text", text: "ok" }],
+    });
+
+    const request = await requestSeen;
+    expect(request.headers["x-proxy-token"]).toBe("proxy-token");
+    expect(request.headers.authorization).toBeUndefined();
   });
 
   it("normalizes zero-argument tool schemas on the native transport path", async () => {
