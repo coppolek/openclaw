@@ -9,6 +9,7 @@ import { getCachedPluginJitiLoader, type PluginJitiLoaderCache } from "./jiti-lo
 import { loadPluginManifestRegistry } from "./manifest-registry.js";
 import { tryNativeRequireJavaScriptModule } from "./native-module-require.js";
 import { resolvePluginCacheInputs, type PluginSourceRoots } from "./roots.js";
+import { shouldPreferNativeJiti } from "./sdk-alias.js";
 
 const CONTRACT_API_EXTENSIONS = [".js", ".mjs", ".cjs", ".ts", ".mts", ".cts"] as const;
 const CURRENT_MODULE_PATH = fileURLToPath(import.meta.url);
@@ -49,6 +50,7 @@ function getJiti(modulePath: string) {
     cache: jitiLoaders,
     modulePath,
     importerUrl: import.meta.url,
+    tryNative: shouldPreferNativeJiti(modulePath),
   });
 }
 
