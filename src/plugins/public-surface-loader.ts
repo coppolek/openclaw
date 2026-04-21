@@ -184,8 +184,10 @@ export function loadBundledPluginPublicArtifactModuleSync<T extends object>(para
     }
     // Defensive: verify loaded module is accessible (handles proxy with null target like #62844)
     // If the module is a Proxy with null/undefined target, property access will throw
+    // Use Object.getPrototypeOf to trigger the proxy's get trap, not just the has trap.
+    // This catches the exact failure mode from #62844 where accessing a property throws.
     try {
-      Reflect.has(loaded as object, "constructor");
+      Object.getPrototypeOf(loaded);
     } catch {
       loadedPublicSurfaceModules.delete(location.modulePath);
       throw new Error(
