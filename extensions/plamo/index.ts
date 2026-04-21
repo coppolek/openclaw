@@ -15,7 +15,7 @@ import {
   PLAMO_OPENAI_COMPAT,
 } from "./model-definitions.js";
 import { applyPlamoConfig, PLAMO_DEFAULT_MODEL_REF } from "./onboard.js";
-import { buildPlamoProvider } from "./provider-catalog.js";
+import { buildPlamoCatalog } from "./provider-catalog.js";
 import { createPlamoToolCallWrapper, sanitizePlamoReplayHistory } from "./stream.js";
 
 const PROVIDER_ID = "plamo";
@@ -89,8 +89,7 @@ export default defineSingleProviderPluginEntry({
       },
     ],
     catalog: {
-      buildProvider: buildPlamoProvider,
-      allowExplicitBaseUrl: true,
+      run: buildPlamoCatalog,
     },
     ...OPENAI_COMPATIBLE_REPLAY_HOOKS,
     sanitizeReplayHistory: ({ messages }) => sanitizePlamoReplayHistory(messages),
