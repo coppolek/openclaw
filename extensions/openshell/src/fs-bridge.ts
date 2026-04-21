@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import path from "node:path";
 import type {
   SandboxFsBridge,
@@ -51,15 +52,15 @@ class OpenShellFsBridge implements SandboxFsBridge {
   }): Promise<Buffer> {
     const target = this.resolveTarget(params);
     const hostPath = this.requireHostPath(target);
-    const opened = await openPinnedReadableFile({
+    const handle = await openPinnedReadableFile({
       absolutePath: hostPath,
       rootPath: target.mountHostRoot,
       containerPath: target.containerPath,
     });
     try {
-      return await readReadableFileDescriptor(opened.fd);
+      return (await handle.readFile()) as Buffer;
     } finally {
-      await closeReadableFileDescriptor(opened.fd);
+      await handle.close();
     }
   }
 
@@ -361,7 +362,7 @@ async function openPinnedReadableFile(params: {
   absolutePath: string;
   rootPath: string;
   containerPath: string;
-}): Promise<{ fd: number }> {
+}): Promise<FileHandle> {
   const canonicalRoot = await fsPromises
     .realpath(params.rootPath)
     .catch(() => path.resolve(params.rootPath));
@@ -375,28 +376,28 @@ async function openPinnedReadableFile(params: {
     fs.constants.O_RDONLY |
     (typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0) |
     openCloseOnExecFlag;
-  const fd = fs.openSync(params.absolutePath, openReadFlags);
+  const handle = await fsPromises.open(params.absolutePath, openReadFlags);
   try {
-    const openedStat = fs.fstatSync(fd);
+    const openedStat = await handle.stat();
     if (!openedStat.isFile()) {
       throw new Error(`Sandbox boundary checks failed; cannot read files: ${params.containerPath}`);
     }
     if (openedStat.nlink > 1) {
       throw new Error(`Sandbox boundary checks failed; cannot read files: ${params.containerPath}`);
     }
-    const resolvedPath = await resolveOpenedReadablePath(fd);
+    const resolvedPath = await resolveOpenedReadablePath(handle.fd);
     if (resolvedPath !== null) {
       if (!isPathInside(canonicalRoot, resolvedPath)) {
         throw new Error(`Sandbox boundary checks failed; cannot read files: ${params.containerPath}`);
       }
-      return { fd };
+      return handle;
     }
     if (!sameFileIdentity(preOpenCheck.stat, openedStat)) {
       throw new Error(`Sandbox boundary checks failed; cannot read files: ${params.containerPath}`);
     }
-    return { fd };
+    return handle;
   } catch (error) {
-    fs.closeSync(fd);
+    await handle.close();
     throw error;
   }
 }
@@ -447,28 +448,4 @@ function sameFileIdentity(left: fs.Stats, right: fs.Stats): boolean {
   const leftDevUnknown = left.dev === 0;
   const rightDevUnknown = right.dev === 0;
   return process.platform === "win32" && (leftDevUnknown || rightDevUnknown);
-}
-
-async function closeReadableFileDescriptor(fd: number): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    fs.close(fd, (error) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve();
-    });
-  });
-}
-
-async function readReadableFileDescriptor(fd: number): Promise<Buffer> {
-  return await new Promise<Buffer>((resolve, reject) => {
-    fs.readFile(fd, (error, data) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve(data);
-    });
-  });
 }

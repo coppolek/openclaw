@@ -327,25 +327,27 @@ describe("openshell fs bridges", () => {
 
     const { createOpenShellFsBridge } = await import("./fs-bridge.js");
     const bridge = createOpenShellFsBridge({ sandbox, backend });
-    const originalOpenSync = nodeFs.openSync.bind(nodeFs);
+    const originalOpen = fs.open.bind(fs);
     const targetPath = path.join(workspaceDir, "subdir", "secret.txt");
     let swapped = false;
-    const openSyncSpy = vi.spyOn(nodeFs, "openSync").mockImplementation((filePath, flags, mode) => {
+    const openSpy = vi.spyOn(fs, "open").mockImplementation(async (filePath, flags, mode) => {
       if (!swapped && filePath === targetPath) {
         swapped = true;
         nodeFs.rmSync(path.join(workspaceDir, "subdir"), { recursive: true, force: true });
         nodeFs.symlinkSync(outsideDir, path.join(workspaceDir, "subdir"));
       }
-      return originalOpenSync(filePath, flags, mode);
+      return typeof mode === "number"
+        ? await originalOpen(filePath, flags, mode)
+        : await originalOpen(filePath, flags);
     });
 
     try {
       await expect(bridge.readFile({ filePath: "subdir/secret.txt" })).rejects.toThrow(
         "Sandbox boundary checks failed",
       );
-      expect(openSyncSpy).toHaveBeenCalled();
+      expect(openSpy).toHaveBeenCalled();
     } finally {
-      openSyncSpy.mockRestore();
+      openSpy.mockRestore();
     }
   });
 
