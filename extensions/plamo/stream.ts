@@ -24,6 +24,7 @@ import {
   resolveModelRequestAuthMode,
 } from "openclaw/plugin-sdk/provider-http-runtime";
 import { normalizeOpenAICompatibleToolParameters } from "openclaw/plugin-sdk/provider-tools";
+import { hasConfiguredPlamoAuthHeaders } from "./provider-catalog.js";
 
 const PLAMO_BEGIN_TOOL_REQUEST = "<|plamo:begin_tool_request:plamo|>";
 const PLAMO_END_TOOL_REQUEST = "<|plamo:end_tool_request:plamo|>";
@@ -800,7 +801,7 @@ function buildRequestHeaders(
     ...(model as { headers?: Record<string, string> }).headers,
     ...options?.headers,
   };
-  if (!apiKey || hasAuthorizationHeader(headers)) {
+  if (!apiKey || hasConfiguredPlamoAuthHeaders(headers) || hasAuthorizationHeader(headers)) {
     return headers;
   }
   return {

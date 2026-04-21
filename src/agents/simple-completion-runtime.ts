@@ -6,7 +6,6 @@ import { DEFAULT_PROVIDER } from "./defaults.js";
 import {
   applyLocalNoAuthHeaderOverride,
   getApiKeyForModel,
-  isNonSecretApiKeyMarker,
   type ResolvedProviderAuth,
 } from "./model-auth.js";
 import { splitTrailingAuthProfile } from "./model-ref-profile.js";
@@ -136,14 +135,7 @@ function hasMissingApiKeyAllowance(params: {
   return Boolean(params.allowMissingApiKeyModes?.includes(params.mode));
 }
 
-function shouldUseRequestAuthenticatedSimpleCompletion(params: {
-  model: Model<Api>;
-  auth: ResolvedProviderAuth;
-}): boolean {
-  const apiKey = params.auth.apiKey?.trim();
-  if (!apiKey || !isNonSecretApiKeyMarker(apiKey)) {
-    return false;
-  }
+function shouldUseRequestAuthenticatedSimpleCompletion(params: { model: Model<Api> }): boolean {
   const requestTransport = getModelProviderRequestTransport(params.model);
   return (
     Boolean(requestTransport?.auth || requestTransport?.headers) ||
@@ -209,10 +201,7 @@ export async function prepareSimpleCompletionModel(params: {
 
   let resolvedApiKey = rawApiKey;
   let resolvedModel = resolved.model;
-  if (
-    rawApiKey &&
-    !shouldUseRequestAuthenticatedSimpleCompletion({ model: resolved.model, auth })
-  ) {
+  if (rawApiKey && !shouldUseRequestAuthenticatedSimpleCompletion({ model: resolved.model })) {
     const runtimeCredential = await setRuntimeApiKeyForCompletion({
       authStorage: resolved.authStorage,
       model: resolved.model,
@@ -226,7 +215,7 @@ export async function prepareSimpleCompletionModel(params: {
         baseUrl: runtimeBaseUrl,
       };
     }
-  } else if (shouldUseRequestAuthenticatedSimpleCompletion({ model: resolved.model, auth })) {
+  } else if (shouldUseRequestAuthenticatedSimpleCompletion({ model: resolved.model })) {
     resolvedApiKey = undefined;
   }
 
