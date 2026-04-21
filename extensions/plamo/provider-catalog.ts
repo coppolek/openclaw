@@ -5,6 +5,14 @@ import { buildPlamoCatalogModels, PLAMO_BASE_URL } from "./model-definitions.js"
 
 const PROVIDER_ID = "plamo";
 export const PLAMO_REQUEST_AUTH_MARKER = "plamo-request-auth";
+const PLAMO_AUTH_HEADER_NAMES = new Set([
+  "authorization",
+  "proxy-authorization",
+  "x-proxy-token",
+  "x-auth-token",
+  "x-api-key",
+  "api-key",
+]);
 
 export function buildPlamoProvider(): ModelProviderConfig {
   return {
@@ -31,7 +39,10 @@ export function hasConfiguredPlamoRequestAuth(request: unknown): boolean {
   const headers = (request as { headers?: unknown }).headers;
   if (headers && typeof headers === "object" && !Array.isArray(headers)) {
     for (const [headerName, headerValue] of Object.entries(headers)) {
-      if (headerName.trim().length > 0 && hasConfiguredSecretInput(headerValue)) {
+      if (
+        PLAMO_AUTH_HEADER_NAMES.has(headerName.trim().toLowerCase()) &&
+        hasConfiguredSecretInput(headerValue)
+      ) {
         return true;
       }
     }

@@ -253,6 +253,26 @@ describe("plamo provider plugin", () => {
       source: "models.providers.plamo.request (synthetic request auth)",
       mode: "api-key",
     });
+
+    expect(
+      provider.resolveSyntheticAuth?.({
+        provider: "plamo",
+        providerConfig: {
+          api: "openai-completions",
+          baseUrl: "https://proxy.example.test/v1",
+          request: {
+            headers: {
+              "X-Tenant": {
+                source: "env",
+                provider: "default",
+                id: "PLAMO_TENANT",
+              },
+            },
+          },
+          models: [],
+        },
+      } as never),
+    ).toBeUndefined();
   });
 
   it("builds the static PLaMo model catalog", async () => {
@@ -359,6 +379,40 @@ describe("plamo provider plugin", () => {
         baseUrl: "https://proxy.example.test/v1",
       },
     });
+  });
+
+  it("does not keep the PLaMo catalog available for non-auth request headers alone", async () => {
+    const provider = await registerSingleProviderPlugin(plamoPlugin);
+    const catalog = await provider.catalog!.run({
+      config: {
+        models: {
+          providers: {
+            plamo: {
+              baseUrl: "https://proxy.example.test/v1",
+              request: {
+                headers: {
+                  "X-Tenant": {
+                    source: "env",
+                    provider: "default",
+                    id: "PLAMO_TENANT",
+                  },
+                },
+              },
+              models: [],
+            },
+          },
+        },
+      },
+      env: {},
+      resolveProviderApiKey: () => ({ apiKey: undefined }),
+      resolveProviderAuth: () => ({
+        apiKey: undefined,
+        mode: "none",
+        source: "none",
+      }),
+    } as never);
+
+    expect(catalog).toBeNull();
   });
 
   it("resolves forward-compat PLaMo model ids even when the local catalog has no template row", async () => {
