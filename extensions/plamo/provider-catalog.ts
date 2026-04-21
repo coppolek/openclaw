@@ -27,6 +27,14 @@ function hasConfiguredPlamoRequestAuth(request: unknown): boolean {
   if (!request || typeof request !== "object") {
     return false;
   }
+  const headers = (request as { headers?: unknown }).headers;
+  if (headers && typeof headers === "object" && !Array.isArray(headers)) {
+    for (const [headerName, headerValue] of Object.entries(headers)) {
+      if (headerName.trim().length > 0 && hasConfiguredSecretInput(headerValue)) {
+        return true;
+      }
+    }
+  }
   const auth = (request as { auth?: unknown }).auth;
   if (!auth || typeof auth !== "object") {
     return false;

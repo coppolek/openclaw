@@ -267,6 +267,45 @@ describe("plamo provider plugin", () => {
     });
   });
 
+  it("keeps the PLaMo catalog available when proxy auth is supplied via request headers", async () => {
+    const provider = await registerSingleProviderPlugin(plamoPlugin);
+    const catalog = await provider.catalog!.run({
+      config: {
+        models: {
+          providers: {
+            plamo: {
+              baseUrl: "https://proxy.example.test/v1",
+              request: {
+                headers: {
+                  "X-Proxy-Token": {
+                    source: "env",
+                    provider: "default",
+                    id: "PLAMO_PROXY_TOKEN",
+                  },
+                },
+              },
+              models: [],
+            },
+          },
+        },
+      },
+      env: {},
+      resolveProviderApiKey: () => ({ apiKey: undefined }),
+      resolveProviderAuth: () => ({
+        apiKey: undefined,
+        mode: "none",
+        source: "none",
+      }),
+    } as never);
+
+    expect(catalog).toMatchObject({
+      provider: {
+        api: "openai-completions",
+        baseUrl: "https://proxy.example.test/v1",
+      },
+    });
+  });
+
   it("resolves forward-compat PLaMo model ids even when the local catalog has no template row", async () => {
     const provider = await registerSingleProviderPlugin(plamoPlugin);
     const resolved = provider.resolveDynamicModel?.(
