@@ -7,6 +7,7 @@ import type { MessageGroup } from "../types/chat-types.ts";
 import { buildChatItems, type BuildChatItemsProps } from "./build-chat-items.ts";
 import {
   renderMessageGroup,
+  renderStreamingGroup,
   resetAssistantAttachmentAvailabilityCacheForTest,
 } from "./grouped-render.ts";
 import { normalizeMessage } from "./message-normalizer.ts";
@@ -481,6 +482,23 @@ describe("grouped chat rendering", () => {
 
     const image = container.querySelector<HTMLImageElement>(".chat-message-image");
     expect(image?.getAttribute("src")).toBe("data:image/png;base64,cG5n");
+  });
+
+  it("renders assistant reasoning-only messages when reasoning is visible", () => {
+    const container = document.createElement("div");
+    renderAssistantMessage(
+      container,
+      {
+        role: "assistant",
+        content: [{ type: "thinking", thinking: "Plan A" }],
+        timestamp: Date.now(),
+      },
+      { showReasoning: true, showToolCalls: false },
+    );
+
+    expect(container.querySelector(".chat-bubble")).not.toBeNull();
+    expect(container.querySelector(".chat-thinking")).not.toBeNull();
+    expect(container.textContent).toContain("Plan A");
   });
 
   it("renders canvas-only [embed] shortcodes inside the assistant bubble", () => {
@@ -1094,5 +1112,102 @@ describe("grouped chat rendering", () => {
         kind: "markdown",
       }),
     );
+  });
+
+  it("keeps structured streaming assistant messages with their message payload", () => {
+    const streamMessage = {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "Reasoning:\nInspecting state" },
+        { type: "text", text: "Structured reply" },
+      ],
+      timestamp: 1,
+    };
+
+    const items = buildChatItems({
+      sessionKey: "main",
+      messages: [],
+      toolMessages: [],
+      streamSegments: [],
+      stream: streamMessage,
+      streamStartedAt: 1,
+      showToolCalls: true,
+    });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: "stream",
+      message: streamMessage,
+      text: "Structured reply",
+    });
+  });
+
+  it("adds thinking-only streaming assistant messages to the timeline", () => {
+    const streamMessage = {
+      role: "assistant",
+      content: [{ type: "thinking", thinking: "Reasoning:\nCalculating simple arithmetic" }],
+      timestamp: 1,
+    };
+
+    const items = buildChatItems({
+      sessionKey: "main",
+      messages: [],
+      toolMessages: [],
+      streamSegments: [],
+      stream: streamMessage,
+      streamStartedAt: 1,
+      showToolCalls: true,
+    });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: "stream",
+      message: streamMessage,
+      text: "",
+    });
+  });
+
+  it("preserves reasoning for structured streaming messages and keeps plain text fallback", () => {
+    const container = document.createElement("div");
+
+    render(
+      renderStreamingGroup(
+        "Structured reply",
+        1,
+        undefined,
+        { name: "OpenClaw", avatar: null },
+        undefined,
+        {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "Plan A" },
+            { type: "text", text: "Structured reply" },
+          ],
+          timestamp: 1,
+        },
+        true,
+      ),
+      container,
+    );
+
+    expect(container.querySelector(".chat-thinking")).not.toBeNull();
+    expect(container.textContent).toContain("Plan A");
+    expect(container.textContent).toContain("Structured reply");
+
+    render(
+      renderStreamingGroup(
+        "Plain fallback",
+        2,
+        undefined,
+        { name: "OpenClaw", avatar: null },
+        undefined,
+        undefined,
+        true,
+      ),
+      container,
+    );
+
+    expect(container.querySelector(".chat-thinking")).toBeNull();
+    expect(container.textContent).toContain("Plain fallback");
   });
 });
