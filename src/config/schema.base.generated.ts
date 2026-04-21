@@ -5131,6 +5131,9 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                       },
                     ],
                   },
+                  dangerouslyAllowUnsandboxedSubagentSpawn: {
+                    type: "boolean",
+                  },
                   scope: {
                     anyOf: [
                       {
@@ -6464,6 +6467,9 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                           const: "all",
                         },
                       ],
+                    },
+                    dangerouslyAllowUnsandboxedSubagentSpawn: {
+                      type: "boolean",
                     },
                     scope: {
                       anyOf: [
@@ -25872,6 +25878,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       help: "DANGEROUS break-glass override that allows sandbox Docker network mode container:<id>. This joins another container namespace and weakens sandbox isolation.",
       tags: ["security", "access", "storage", "advanced"],
     },
+    "agents.defaults.sandbox.dangerouslyAllowUnsandboxedSubagentSpawn": {
+      label: "Sandbox Allow Unsandboxed Subagent Spawn",
+      help: "DANGEROUS break-glass override that allows sandboxed agents to spawn unsandboxed subagents via sessions_spawn. This can allow sandbox escapes through child agent processes.",
+      tags: ["security", "access", "advanced"],
+    },
     "commands.native": {
       label: "Native Commands",
       help: "Registers native slash/menu commands with channels that support command registration (Discord, Slack, Telegram). Keep enabled for discoverability unless you intentionally run text-only command workflows.",
@@ -26939,6 +26950,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       label: "Agent Sandbox Docker Allow Container Namespace Join",
       help: "Per-agent DANGEROUS override for container namespace joins in sandbox Docker network mode.",
       tags: ["security", "access", "storage", "advanced"],
+    },
+    "agents.list[].sandbox.dangerouslyAllowUnsandboxedSubagentSpawn": {
+      label: "Agent Sandbox Allow Unsandboxed Subagent Spawn",
+      help: "Per-agent DANGEROUS override that allows this sandboxed agent to spawn unsandboxed subagents.",
+      tags: ["security", "access", "advanced"],
     },
     "discovery.mdns.mode": {
       label: "mDNS Discovery Mode",
