@@ -85,6 +85,7 @@ import {
 import { createPluginRegistry, type PluginRecord, type PluginRegistry } from "./registry.js";
 import { resolvePluginCacheInputs } from "./roots.js";
 import {
+  getActivePluginCoreGatewayMethodNames,
   getActivePluginRegistry,
   getActivePluginRegistryKey,
   getActivePluginRuntimeSubagentMode,
@@ -630,6 +631,16 @@ function buildActivationMetadataHash(params: {
     .digest("hex");
 }
 
+function createSyntheticCoreGatewayHandlers(
+  methodNames: readonly string[],
+): Record<string, GatewayRequestHandler> {
+  return Object.fromEntries(
+    methodNames.map(
+      (methodName) => [methodName, () => undefined] satisfies [string, GatewayRequestHandler],
+    ),
+  );
+}
+
 function hasExplicitCompatibilityInputs(options: PluginLoadOptions): boolean {
   return (
     options.config !== undefined ||
@@ -690,6 +701,7 @@ function resolvePluginLoadCacheContext(options: PluginLoadOptions = {}) {
     shouldActivate: options.activate !== false,
     shouldLoadModules: options.loadModules !== false,
     runtimeSubagentMode,
+    coreGatewayMethodNames,
     cacheKey,
   };
 }
@@ -708,24 +720,47 @@ function getCompatibleActivePluginRegistry(
   if (!activeCacheKey) {
     return undefined;
   }
+  const activeRuntimeSubagentMode = getActivePluginRuntimeSubagentMode();
   const loadContext = resolvePluginLoadCacheContext(options);
   if (loadContext.cacheKey === activeCacheKey) {
     return activeRegistry;
   }
-  if (
-    loadContext.runtimeSubagentMode === "default" &&
-    getActivePluginRuntimeSubagentMode() === "gateway-bindable"
-  ) {
-    const gatewayBindableCacheKey = resolvePluginLoadCacheContext({
-      ...options,
-      runtimeOptions: {
-        ...options.runtimeOptions,
-        allowGatewaySubagentBinding: true,
-      },
-    }).cacheKey;
-    if (gatewayBindableCacheKey === activeCacheKey) {
+  const activeCoreGatewayMethodNames = getActivePluginCoreGatewayMethodNames();
+  const tryCompatibleVariant = (variant: PluginLoadOptions): PluginRegistry | undefined => {
+    if (resolvePluginLoadCacheContext(variant).cacheKey === activeCacheKey) {
       return activeRegistry;
     }
+    if (
+      activeRuntimeSubagentMode !== "gateway-bindable" ||
+      variant.coreGatewayHandlers !== undefined ||
+      activeCoreGatewayMethodNames.length === 0
+    ) {
+      return undefined;
+    }
+    return resolvePluginLoadCacheContext({
+      ...variant,
+      coreGatewayHandlers: createSyntheticCoreGatewayHandlers(activeCoreGatewayMethodNames),
+    }).cacheKey === activeCacheKey
+      ? activeRegistry
+      : undefined;
+  };
+  const directVariant = tryCompatibleVariant(options);
+  if (directVariant) {
+    return directVariant;
+  }
+  if (
+    loadContext.runtimeSubagentMode === "default" &&
+    activeRuntimeSubagentMode === "gateway-bindable"
+  ) {
+    return (
+      tryCompatibleVariant({
+        ...options,
+        runtimeOptions: {
+          ...options.runtimeOptions,
+          allowGatewaySubagentBinding: true,
+        },
+      }) ?? undefined
+    );
   }
   return undefined;
 }
@@ -1412,8 +1447,15 @@ function activatePluginRegistry(
   cacheKey: string,
   runtimeSubagentMode: "default" | "explicit" | "gateway-bindable",
   workspaceDir?: string,
+  coreGatewayMethodNames?: readonly string[],
 ): void {
-  setActivePluginRegistry(registry, cacheKey, runtimeSubagentMode, workspaceDir);
+  setActivePluginRegistry(
+    registry,
+    cacheKey,
+    runtimeSubagentMode,
+    workspaceDir,
+    coreGatewayMethodNames,
+  );
   initializeGlobalHookRunner(registry);
 }
 
@@ -1438,6 +1480,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
     shouldLoadModules,
     cacheKey,
     runtimeSubagentMode,
+    coreGatewayMethodNames,
   } = resolvePluginLoadCacheContext(options);
   const logger = options.logger ?? defaultLogger();
   const validateOnly = options.mode === "validate";
@@ -1464,6 +1507,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
           cacheKey,
           runtimeSubagentMode,
           options.workspaceDir,
+          coreGatewayMethodNames,
         );
       }
       return cached.registry;
@@ -2357,7 +2401,13 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
       });
     }
     if (shouldActivate) {
-      activatePluginRegistry(registry, cacheKey, runtimeSubagentMode, options.workspaceDir);
+      activatePluginRegistry(
+        registry,
+        cacheKey,
+        runtimeSubagentMode,
+        options.workspaceDir,
+        coreGatewayMethodNames,
+      );
     }
     return registry;
   } finally {
