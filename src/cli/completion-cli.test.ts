@@ -18,6 +18,29 @@ function createCompletionProgram(): Command {
   gateway.command("status").description("Show gateway status").option("--json", "JSON output");
   gateway.command("restart").description("Restart gateway");
 
+  const wiki = program.command("wiki").description("Wiki commands");
+  wiki
+    .command("ingest")
+    .description("Ingest a local file into the wiki sources folder")
+    .argument("<path>", "Local file path to ingest")
+    .option("--title <title>", "Override the source title");
+
+  const models = program.command("models").description("Model commands");
+  models
+    .command("set-profile")
+    .description("Set the auth profile")
+    .argument("<value>", "Auth profile ids (e.g. anthropic:default)");
+
+  const tags = program.command("tags").description("Tag commands");
+  tags.command("add").description("Add entries").argument("<entries...>", "Entries to add");
+
+  const maybe = program.command("maybe").description("Optional positional commands");
+  maybe
+    .command("take")
+    .description("Take optional values")
+    .argument("[first]", "First optional arg")
+    .argument("[second]", "Second optional arg");
+
   return program;
 }
 
@@ -29,6 +52,28 @@ describe("completion-cli", () => {
     expect(script).toContain("(status) _openclaw_gateway_status ;;");
     expect(script).toContain("(restart) _openclaw_gateway_restart ;;");
     expect(script).toContain("--force[Force the action]");
+  });
+
+  it("adds zsh positional file completion for nested leaf commands", () => {
+    const script = getCompletionScript("zsh", createCompletionProgram());
+
+    expect(script).toContain("_openclaw_wiki_ingest()");
+    expect(script).toContain('"1:Local file path to ingest:_files"');
+    expect(script).toContain('"--title[Override the source title]"');
+  });
+
+  it("escapes zsh positional descriptions and keeps positional arity semantics", () => {
+    const script = getCompletionScript("zsh", createCompletionProgram());
+
+    expect(script).toContain("_openclaw_models_set_profile()");
+    expect(script).toContain('"1:Auth profile ids (e.g. anthropic\\:default):"');
+
+    expect(script).toContain("_openclaw_tags_add()");
+    expect(script).toContain('"*:Entries to add:"');
+
+    expect(script).toContain("_openclaw_maybe_take()");
+    expect(script).toContain('"1::First optional arg:"');
+    expect(script).toContain('"2::Second optional arg:"');
   });
 
   it("defers zsh registration until compinit is available", async () => {

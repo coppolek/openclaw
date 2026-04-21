@@ -184,18 +184,23 @@ fi
   return script;
 }
 
+function escapeZshDescription(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/'/g, "'\\''")
+    .replace(/:/g, "\\:")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]");
+}
+
 function generateZshArgs(cmd: Command): string {
   return (cmd.options || [])
     .map((opt) => {
       const flags = opt.flags.split(/[ ,|]+/);
       const name = flags.find((f) => f.startsWith("--")) || flags[0];
       const short = flags.find((f) => f.startsWith("-") && !f.startsWith("--"));
-      const desc = opt.description
-        .replace(/\\/g, "\\\\")
-        .replace(/"/g, '\\"')
-        .replace(/'/g, "'\\''")
-        .replace(/\[/g, "\\[")
-        .replace(/\]/g, "\\]");
+      const desc = escapeZshDescription(opt.description);
       if (short) {
         return `"(${name} ${short})"{${name},${short}}"[${desc}]"`;
       }
@@ -204,9 +209,36 @@ function generateZshArgs(cmd: Command): string {
     .join(" \\\n    ");
 }
 
+function generateZshArgumentAction(argName: string, argDescription: string): string {
+  const hint = `${argName} ${argDescription}`.toLowerCase();
+  if (/\b(path|paths|file|files|dir|dirs|directory|directories|folder|folders)\b/.test(hint)) {
+    return "_files";
+  }
+  return "";
+}
+
+function generateZshPositionals(cmd: Command): string {
+  return cmd.registeredArguments
+    .map((arg, index) => {
+      const description = escapeZshDescription(arg.description || arg.name());
+      const position = arg.variadic
+        ? arg.required
+          ? "*:"
+          : "*::"
+        : arg.required
+          ? `${index + 1}:`
+          : `${index + 1}::`;
+      const action = generateZshArgumentAction(arg.name(), arg.description || "");
+      return `"${position}${description}${action ? `:${action}` : ":"}"`;
+    })
+    .join(" \\\n    ");
+}
+
 function generateZshSubcmdList(cmd: Command): string {
   const list = cmd.commands
     .map((c) => {
+      // These specs are single-quoted in zsh, so keep the narrower inline escaping here
+      // instead of reusing escapeZshDescription, which would over-escape double quotes.
       const desc = c
         .description()
         .replace(/\\/g, "\\\\")
@@ -254,10 +286,13 @@ ${funcName}() {
         continue;
       }
 
+      const positionalArgs = generateZshPositionals(cmd);
+      const zshSpecs = [generateZshArgs(cmd), positionalArgs].filter(Boolean).join(" \\\n    ");
+
       segments.push(`
 ${funcName}() {
   _arguments -C \\
-    ${generateZshArgs(cmd)}
+    ${zshSpecs}
 }
 `);
     }
