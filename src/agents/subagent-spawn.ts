@@ -286,6 +286,37 @@ function summarizeError(err: unknown): string {
   return "error";
 }
 
+/**
+ * True when any loaded channel plugin has registered the `subagent_spawning`
+ * hook, which is required to create a thread-bound subagent session. When
+ * this returns false (e.g. webchat, CLI, or a channel plugin that does not
+ * expose thread bindings), `mode="session"` is not reachable.
+ */
+function hasSubagentThreadBindingHook(
+  hookRunner: SubagentLifecycleHookRunner | null | undefined,
+): boolean {
+  return hookRunner?.hasHooks("subagent_spawning") === true;
+}
+
+function buildThreadBindingUnavailableError(mode: SpawnSubagentMode): string {
+  // #67400: the previous message told users "thread=true is unavailable"
+  // with no guidance for recovery, which combined with the `mode="session"
+  // requires thread=true` gate to create a documentation-visible deadlock
+  // where neither branch succeeded and neither hinted at the right next step.
+  if (mode === "session") {
+    return (
+      'sessions_spawn(mode="session") is only available on channels that expose thread bindings (e.g. Discord threads, Slack threads, Telegram forum topics). ' +
+      "This agent is not running on a channel that registered the required plugin hook. " +
+      'Use mode="run" for one-shot subagent work, or sessions_send(sessionKey=...) to keep talking to a persistent session without thread binding.'
+    );
+  }
+  return (
+    "thread=true is only available on channels that expose thread bindings (e.g. Discord threads, Slack threads, Telegram forum topics). " +
+    "This agent is not running on a channel that registered the required plugin hook. " +
+    "Retry without thread=true, or re-run sessions_spawn from a channel that supports threads."
+  );
+}
+
 async function ensureThreadBindingForSubagentSpawn(params: {
   hookRunner: SubagentLifecycleHookRunner | null;
   childSessionKey: string;
@@ -303,11 +334,10 @@ async function ensureThreadBindingForSubagentSpawn(params: {
   { status: "ok"; deliveryOrigin?: DeliveryContext } | { status: "error"; error: string }
 > {
   const hookRunner = params.hookRunner;
-  if (!hookRunner?.hasHooks("subagent_spawning")) {
+  if (!hookRunner || !hasSubagentThreadBindingHook(hookRunner)) {
     return {
       status: "error",
-      error:
-        "thread=true is unavailable because no channel plugin registered subagent_spawning hooks.",
+      error: buildThreadBindingUnavailableError(params.mode),
     };
   }
 
@@ -385,10 +415,24 @@ export async function spawnSubagentDirect(
     requestedMode: params.mode,
     threadRequested: requestThreadBinding,
   });
+  const hookRunner = subagentSpawnDeps.getGlobalHookRunner();
   if (spawnMode === "session" && !requestThreadBinding) {
+    // #67400: surface the channel-capability constraint eagerly. If this
+    // channel cannot provide the required thread-binding hook, telling the
+    // user to retry with thread=true is a dead end -- the `thread=true`
+    // path will just reject with its own error. Collapse both failure
+    // modes into one actionable message when we already know the outcome.
+    if (!hasSubagentThreadBindingHook(hookRunner)) {
+      return {
+        status: "error",
+        error: buildThreadBindingUnavailableError("session"),
+      };
+    }
     return {
       status: "error",
-      error: 'mode="session" requires thread=true so the subagent can stay bound to a thread.',
+      error:
+        'sessions_spawn(mode="session") requires thread=true so the subagent can stay bound to a channel thread. ' +
+        'Retry with { mode: "session", thread: true } to bind to the current thread, or use mode="run" for one-shot work.',
     };
   }
   const cleanup =
@@ -398,7 +442,11 @@ export async function spawnSubagentDirect(
         ? params.cleanup
         : "keep";
   const expectsCompletionMessage = params.expectsCompletionMessage !== false;
-  const hookRunner = subagentSpawnDeps.getGlobalHookRunner();
+  // hookRunner is declared earlier (line 418) for the mode="session" capability
+  // probe in the #67400 / #69079 diagnostic path; reuse that declaration.
+  // requesterOrigin / childSessionOrigin are declared below via the shared
+  // resolveRequesterOriginForChild helper (upstream path), so no redeclaration
+  // is needed here.
   const cfg = loadSubagentConfig();
 
   // When agent omits runTimeoutSeconds, use the config default.

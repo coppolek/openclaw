@@ -49,6 +49,7 @@ import {
   type SessionBindingRecord,
 } from "../infra/outbound/session-binding-service.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import {
   isSubagentSessionKey,
   normalizeAgentId,
@@ -979,10 +980,38 @@ export async function spawnAcpDirect(
     threadRequested: requestThreadBinding,
   });
   if (spawnMode === "session" && !requestThreadBinding) {
+    // #67400: the previous message stopped at "requires thread=true" without
+    // naming the alternative. Retry with `thread=true` only succeeds on a
+    // channel that exposes thread bindings (Discord/Slack/Telegram topics);
+    // on webchat/CLI the `thread=true` path fails with a separate binding
+    // error. Make the fallback path explicit so callers on any channel have
+    // a viable next step.
+    //
+    // Additional #67400 parity with spawnSubagentDirect: when NO channel plugin
+    // has registered the `subagent_spawning` hook (e.g. pure webchat / CLI
+    // deployments), `thread=true` cannot be satisfied later. Probe the runner
+    // up front and collapse the two-step dead-end ("retry with thread=true" →
+    // "thread=true is unavailable") into one actionable message pointing at
+    // `mode="run"` directly. (Global probe; in mixed deployments where some
+    // but not all channels have the hook, the probe can still return true —
+    // that broader channel-scoped case is tracked for follow-up.)
+    const hookRunner = getGlobalHookRunner();
+    if (hookRunner?.hasHooks("subagent_spawning") !== true) {
+      return createAcpSpawnFailure({
+        status: "error",
+        errorCode: "thread_required",
+        error:
+          'sessions_spawn(runtime="acp", mode="session") is only available on channels that expose thread bindings (e.g. Discord threads, Slack threads, Telegram forum topics). ' +
+          "This agent is not running on a channel that registered the required plugin hook. " +
+          'Use mode="run" for one-shot ACP work.',
+      });
+    }
     return createAcpSpawnFailure({
       status: "error",
       errorCode: "thread_required",
-      error: 'mode="session" requires thread=true so the ACP session can stay bound to a thread.',
+      error:
+        'sessions_spawn(runtime="acp", mode="session") requires thread=true so the ACP session can stay bound to a channel thread. ' +
+        'Retry with { mode: "session", thread: true } on a channel that exposes threads (e.g. Discord, Slack, Telegram topics), or use mode="run" for one-shot work.',
     });
   }
 
