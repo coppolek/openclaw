@@ -378,6 +378,34 @@ describe("openshell fs bridges", () => {
     }
   });
 
+  it("rejects hardlinked files inside the sandbox root", async () => {
+    const workspaceDir = await makeTempDir("openclaw-openshell-fs-");
+    const outsideDir = await makeTempDir("openclaw-openshell-outside-");
+    await fs.mkdir(path.join(workspaceDir, "subdir"), { recursive: true });
+    await fs.writeFile(path.join(outsideDir, "secret.txt"), "outside", "utf8");
+    await fs.link(
+      path.join(outsideDir, "secret.txt"),
+      path.join(workspaceDir, "subdir", "secret.txt"),
+    );
+
+    const backend = createMirrorBackendMock();
+    const sandbox = createSandboxTestContext({
+      overrides: {
+        backendId: "openshell",
+        workspaceDir,
+        agentWorkspaceDir: workspaceDir,
+        containerWorkdir: "/sandbox",
+      },
+    });
+
+    const { createOpenShellFsBridge } = await import("./fs-bridge.js");
+    const bridge = createOpenShellFsBridge({ sandbox, backend });
+
+    await expect(bridge.readFile({ filePath: "subdir/secret.txt" })).rejects.toThrow(
+      "Sandbox boundary checks failed",
+    );
+  });
+
   it("maps agent mount paths when the sandbox workspace is read-only", async () => {
     const workspaceDir = await makeTempDir("openclaw-openshell-fs-");
     const agentWorkspaceDir = await makeTempDir("openclaw-openshell-agent-");

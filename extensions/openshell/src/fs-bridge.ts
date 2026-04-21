@@ -370,13 +370,18 @@ async function openPinnedReadableFile(params: {
     canonicalRoot,
     containerPath: params.containerPath,
   });
+  const openCloseOnExecFlag = (fs.constants as Record<string, number>).O_CLOEXEC ?? 0;
   const openReadFlags =
     fs.constants.O_RDONLY |
-    (typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0);
+    (typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0) |
+    openCloseOnExecFlag;
   const fd = fs.openSync(params.absolutePath, openReadFlags);
   try {
     const openedStat = fs.fstatSync(fd);
     if (!openedStat.isFile()) {
+      throw new Error(`Sandbox boundary checks failed; cannot read files: ${params.containerPath}`);
+    }
+    if (openedStat.nlink > 1) {
       throw new Error(`Sandbox boundary checks failed; cannot read files: ${params.containerPath}`);
     }
     const resolvedPath = await resolveOpenedReadablePath(fd);
@@ -406,7 +411,7 @@ async function resolvePreOpenReadablePath(params: {
     throw new Error(`Sandbox path escapes allowed mounts; cannot access: ${params.containerPath}`);
   }
   const stat = await fsPromises.lstat(resolvedPath);
-  if (!stat.isFile()) {
+  if (!stat.isFile() || stat.nlink > 1) {
     throw new Error(`Sandbox boundary checks failed; cannot read files: ${params.containerPath}`);
   }
   return { resolvedPath, stat };
