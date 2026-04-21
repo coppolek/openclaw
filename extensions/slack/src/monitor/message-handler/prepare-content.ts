@@ -14,6 +14,80 @@ export type SlackResolvedMessageContent = {
   effectiveDirectMedia: SlackMediaResult[] | null;
 };
 
+const SLACK_USER_MENTION_TOKEN_RE = /<@([A-Z0-9]+)(?:\|([^>]+))?>/g;
+
+async function normalizeSlackInboundMentions(
+  text: string,
+  params?: {
+    botUserId?: string;
+    resolveUserName?: (userId: string) => Promise<{ name?: string }>;
+  },
+): Promise<string> {
+  if (!text.includes("<@")) {
+    return text;
+  }
+
+  const matches = [...text.matchAll(SLACK_USER_MENTION_TOKEN_RE)];
+  if (matches.length === 0) {
+    return text;
+  }
+
+  const botUserId = normalizeOptionalString(params?.botUserId);
+  const resolveUserName = params?.resolveUserName;
+  const resolvedNames = new Map<string, string | null>();
+  if (resolveUserName) {
+    const uniqueIds = [
+      ...new Set(
+        matches
+          .map((match) => match[1] ?? "")
+          .filter((userId) => Boolean(userId) && normalizeOptionalString(userId) !== botUserId),
+      ),
+    ];
+    await Promise.all(
+      uniqueIds.map(async (userId) => {
+        try {
+          const resolved = normalizeOptionalString((await resolveUserName(userId))?.name);
+          resolvedNames.set(userId, resolved ?? null);
+        } catch {
+          resolvedNames.set(userId, null);
+        }
+      }),
+    );
+  }
+
+  return text.replaceAll(
+    SLACK_USER_MENTION_TOKEN_RE,
+    (token, userId: string, inlineLabel: string | undefined) => {
+      if (normalizeOptionalString(userId) === botUserId) {
+        return token;
+      }
+      const resolvedName = normalizeOptionalString(resolvedNames.get(userId) ?? undefined);
+      if (resolvedName) {
+        return `@${resolvedName}`;
+      }
+      const normalizedInlineLabel = normalizeOptionalString(inlineLabel);
+      if (normalizedInlineLabel) {
+        return `@${normalizedInlineLabel}`;
+      }
+      return token;
+    },
+  );
+}
+
+async function normalizeOptionalSlackInboundText(
+  text: string | undefined,
+  params?: {
+    botUserId?: string;
+    resolveUserName?: (userId: string) => Promise<{ name?: string }>;
+  },
+): Promise<string | undefined> {
+  const normalizedText = normalizeOptionalString(text);
+  if (!normalizedText) {
+    return undefined;
+  }
+  return await normalizeSlackInboundMentions(normalizedText, params);
+}
+
 function filterInheritedParentFiles(params: {
   files: SlackFile[] | undefined;
   isThreadReply: boolean;
@@ -42,7 +116,9 @@ export async function resolveSlackMessageContent(params: {
   threadStarter: SlackThreadStarter | null;
   isBotMessage: boolean;
   botToken: string;
+  botUserId?: string;
   mediaMaxBytes: number;
+  resolveUserName?: (userId: string) => Promise<{ name?: string }>;
 }): Promise<SlackResolvedMessageContent | null> {
   const ownFiles = filterInheritedParentFiles({
     files: params.message.files,
@@ -90,11 +166,33 @@ export async function resolveSlackMessageContent(params: {
           .join("\n")
       : undefined;
 
+  const normalizedMessageText = await normalizeOptionalSlackInboundText(
+    params.message.text,
+    {
+      botUserId: params.botUserId,
+      resolveUserName: params.resolveUserName,
+    },
+  );
+  const normalizedAttachmentText = await normalizeOptionalSlackInboundText(
+    attachmentContent?.text,
+    {
+      botUserId: params.botUserId,
+      resolveUserName: params.resolveUserName,
+    },
+  );
+  const normalizedBotAttachmentText = await normalizeOptionalSlackInboundText(
+    botAttachmentText,
+    {
+      botUserId: params.botUserId,
+      resolveUserName: params.resolveUserName,
+    },
+  );
+
   const rawBody =
     [
-      normalizeOptionalString(params.message.text),
-      attachmentContent?.text,
-      botAttachmentText,
+      normalizedMessageText,
+      normalizedAttachmentText,
+      normalizedBotAttachmentText,
       mediaPlaceholder,
       fileOnlyPlaceholder,
     ]

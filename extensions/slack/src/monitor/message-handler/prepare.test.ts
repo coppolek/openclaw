@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ResolvedSlackAccount } from "../../accounts.js";
 import type { SlackMessageEvent } from "../../types.js";
 import type { SlackMonitorContext } from "../context.js";
+import { resolveSlackMessageContent } from "./prepare-content.js";
 import { prepareSlackMessage } from "./prepare.js";
 import {
   createInboundSlackTestContext,
@@ -235,6 +236,118 @@ describe("slack prepareSlackMessage inbound contract", () => {
 
     expect(prepared).toBeTruthy();
     expect(prepared!.ctxPayload.RawBody).toContain("[Forwarded message from Bob]\nForwarded hello");
+  });
+
+  it("renders inbound Slack user mentions to readable names in RawBody and BodyForAgent", async () => {
+    const slackCtx = createInboundSlackCtx({
+      cfg: {
+        channels: { slack: { enabled: true } },
+      } as OpenClawConfig,
+    });
+    slackCtx.resolveUserName = async (userId) =>
+      ({ name: userId === "U2" ? "Bek" : userId === "U3" ? "Ava" : undefined }) as any;
+
+    const prepared = await prepareMessageWith(
+      slackCtx,
+      defaultAccount,
+      createSlackMessage({
+        text: "hi <@U2> and <@U3|fallback-name> and <@U4>",
+      }),
+    );
+
+    expect(prepared).toBeTruthy();
+    expect(prepared!.ctxPayload.RawBody).toBe("hi @Bek and @Ava and <@U4>");
+    expect(prepared!.ctxPayload.BodyForAgent).toBe("hi @Bek and @Ava and <@U4>");
+  });
+
+  it("skips mention resolution when the message contains no Slack mentions", async () => {
+    const resolveUserName = vi.fn(async () => ({ name: "Bek" }) as any);
+    const resolved = await resolveSlackMessageContent({
+      message: createSlackMessage({
+        text: "hi there",
+      }),
+      isThreadReply: false,
+      threadStarter: null,
+      isBotMessage: false,
+      botToken: "token",
+      mediaMaxBytes: 1024,
+      resolveUserName,
+    });
+
+    expect(resolved).toBeTruthy();
+    expect(resolved!.rawBody).toBe("hi there");
+    expect(resolveUserName).not.toHaveBeenCalled();
+  });
+
+  it("keeps other mentions resolvable when one user lookup fails", async () => {
+    const slackCtx = createInboundSlackCtx({
+      cfg: {
+        channels: { slack: { enabled: true } },
+      } as OpenClawConfig,
+    });
+    slackCtx.resolveUserName = async (userId) => {
+      if (userId === "U2") {
+        throw new Error("lookup failed");
+      }
+      return ({ name: userId === "U3" ? "Ava" : undefined }) as any;
+    };
+
+    const prepared = await prepareMessageWith(
+      slackCtx,
+      defaultAccount,
+      createSlackMessage({
+        text: "hi <@U2|bek-fallback> and <@U3> and <@U4>",
+      }),
+    );
+
+    expect(prepared).toBeTruthy();
+    expect(prepared!.ctxPayload.RawBody).toBe("hi @bek-fallback and @Ava and <@U4>");
+    expect(prepared!.ctxPayload.BodyForAgent).toBe("hi @bek-fallback and @Ava and <@U4>");
+  });
+
+  it("keeps bot mentions unchanged while normalizing user mentions", async () => {
+    const slackCtx = createInboundSlackCtx({
+      cfg: {
+        channels: { slack: { enabled: true } },
+      } as OpenClawConfig,
+    });
+    slackCtx.botUserId = "BOT";
+    slackCtx.resolveUserName = async (userId) =>
+      ({ name: userId === "U2" ? "Bek" : userId === "BOT" ? "OpenClaw" : undefined }) as any;
+
+    const prepared = await prepareMessageWith(
+      slackCtx,
+      defaultAccount,
+      createSlackMessage({
+        text: "<@BOT> hi <@U2>",
+      }),
+    );
+
+    expect(prepared).toBeTruthy();
+    expect(prepared!.ctxPayload.RawBody).toBe("<@BOT> hi @Bek");
+    expect(prepared!.ctxPayload.BodyForAgent).toBe("<@BOT> hi @Bek");
+  });
+
+  it("keeps generated file placeholders unchanged while normalizing user-authored text", async () => {
+    const slackCtx = createInboundSlackCtx({
+      cfg: {
+        channels: { slack: { enabled: true } },
+      } as OpenClawConfig,
+    });
+    slackCtx.resolveUserName = async (userId) =>
+      ({ name: userId === "U2" ? "Bek" : userId === "U3" ? "Ava" : undefined }) as any;
+
+    const prepared = await prepareMessageWith(
+      slackCtx,
+      defaultAccount,
+      createSlackMessage({
+        text: "hi <@U2>",
+        files: [{ name: "<@U3>.png" }],
+      }),
+    );
+
+    expect(prepared).toBeTruthy();
+    expect(prepared!.ctxPayload.RawBody).toBe("hi @Bek\n[Slack file: <@U3>.png]");
   });
 
   it("ignores non-forward attachments when no direct text/files are present", async () => {
