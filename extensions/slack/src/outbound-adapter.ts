@@ -29,6 +29,7 @@ import {
 import { compileSlackInteractiveReplies } from "./interactive-replies.js";
 import { SLACK_TEXT_LIMIT } from "./limits.js";
 import type { SlackSendIdentity } from "./send.js";
+import { resolveSlackThreadTsValue } from "./thread-ts.js";
 
 const SLACK_MAX_BLOCKS = 50;
 type SlackSendFn = typeof import("./send.runtime.js").sendMessageSlack;
@@ -119,8 +120,10 @@ async function sendSlackOutboundMessage(params: {
   const send =
     resolveOutboundSendDep<SlackSendFn>(params.deps, "slack") ??
     (await loadSlackSendRuntime()).sendMessageSlack;
-  const threadTs =
-    params.replyToId ?? (params.threadId != null ? String(params.threadId) : undefined);
+  const threadTs = resolveSlackThreadTsValue({
+    replyToId: params.replyToId,
+    threadId: params.threadId,
+  });
   const hookResult = await applySlackMessageSendingHooks({
     cfg: params.cfg,
     to: params.to,
