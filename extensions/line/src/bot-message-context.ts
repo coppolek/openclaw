@@ -189,18 +189,55 @@ const STICKER_PACKAGES: Record<string, string> = {
   "11539": "Moon",
 };
 
+function sanitizeStickerKeyword(s: string): string {
+  return s
+    .replace(/\p{C}/gu, "")
+    .replace(/[{}<>`]/g, "")
+    .trim()
+    .slice(0, 50);
+}
+
 function describeStickerKeywords(sticker: StickerEventMessage): string {
   const keywords = (sticker as StickerEventMessage & { keywords?: string[] }).keywords;
   if (keywords && keywords.length > 0) {
-    return keywords.slice(0, 3).join(", ");
+    return keywords.slice(0, 3).map(sanitizeStickerKeyword).join(", ");
   }
 
   const stickerText = (sticker as StickerEventMessage & { text?: string }).text;
   if (stickerText) {
-    return stickerText;
+    return sanitizeStickerKeyword(stickerText);
   }
 
   return "";
+}
+
+function formatStickerInboundContext(sticker: StickerEventMessage): string {
+  const packageName = STICKER_PACKAGES[sticker.packageId] ?? "sticker";
+  const keywords = describeStickerKeywords(sticker);
+  const keywordList = (sticker as StickerEventMessage & { keywords?: string[] }).keywords ?? [];
+  const resourceType = normalizeOptionalString(
+    (sticker as StickerEventMessage & { stickerResourceType?: string }).stickerResourceType,
+  );
+
+  const segments = [
+    `channel=line`,
+    `package_id=${sticker.packageId}`,
+    `sticker_id=${sticker.stickerId}`,
+    `set=${packageName}`,
+    ...(resourceType ? [`resource_type=${resourceType}`] : []),
+    ...(keywordList.length > 0
+      ? [`keywords=${keywordList.slice(0, 5).map(sanitizeStickerKeyword).join("|")}`]
+      : []),
+  ];
+
+  if (keywords) {
+    return [
+      `[User sent a ${packageName} sticker: ${keywords}]`,
+      `[StickerInfo ${segments.join(" ")}]`,
+    ].join("\n");
+  }
+
+  return [`[User sent a ${packageName} sticker]`, `[StickerInfo ${segments.join(" ")}]`].join("\n");
 }
 
 function extractMessageText(message: MessageEvent["message"]): string {
@@ -219,14 +256,7 @@ function extractMessageText(message: MessageEvent["message"]): string {
     );
   }
   if (message.type === "sticker") {
-    const sticker = message;
-    const packageName = STICKER_PACKAGES[sticker.packageId] ?? "sticker";
-    const keywords = describeStickerKeywords(sticker);
-
-    if (keywords) {
-      return `[Sent a ${packageName} sticker: ${keywords}]`;
-    }
-    return `[Sent a ${packageName} sticker]`;
+    return formatStickerInboundContext(message);
   }
   return "";
 }
@@ -500,6 +530,18 @@ export async function buildLineMessageContext(params: BuildLineMessageContextPar
     verboseLog: { kind: "inbound", mediaCount: allMedia.length },
     inboundHistory,
   });
+
+  // Attach structured sticker info for received sticker messages (parallel to existing text description).
+  if (message.type === "sticker") {
+    const sticker = message;
+    const keywords = (sticker as StickerEventMessage & { keywords?: string[] }).keywords;
+    ctxPayload.StickerInfo = {
+      raw: `${sticker.packageId}:${sticker.stickerId}`,
+      keywords: keywords ?? [],
+      description: extractMessageText(message),
+      channel: "line",
+    };
+  }
 
   return {
     ctxPayload,

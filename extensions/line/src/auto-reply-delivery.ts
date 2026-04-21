@@ -1,9 +1,13 @@
 import type { messagingApi } from "@line/bot-sdk";
 import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
+import { parseReplyDirectives } from "openclaw/plugin-sdk/reply-runtime";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
+import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import type { FlexContainer } from "./flex-templates.js";
 import type { ProcessedLineMessage } from "./markdown-to-line.js";
 import type { SendLineReplyChunksParams } from "./reply-chunks.js";
+import { createStickerMessage } from "./send.js";
+import { parseLineStickerRaw } from "./sticker-utils.js";
 import type { LineChannelData, LineTemplateMessagePayload } from "./types.js";
 
 export type LineAutoReplyDeps = {
@@ -49,8 +53,23 @@ export async function deliverLineAutoReply(params: {
   textLimit: number;
   deps: LineAutoReplyDeps;
 }): Promise<{ replyTokenUsed: boolean }> {
-  const { payload, lineData, replyToken, accountId, to, textLimit, deps } = params;
+  const { lineData, replyToken, accountId, to, textLimit, deps } = params;
+  const parsedDirectives = parseReplyDirectives(params.payload.text ?? "");
+  const payload: ReplyPayload = {
+    ...params.payload,
+    text: parsedDirectives.text ?? params.payload.text,
+    sticker: params.payload.sticker ?? parsedDirectives.sticker,
+    mediaUrl: params.payload.mediaUrl ?? parsedDirectives.mediaUrl,
+    mediaUrls: params.payload.mediaUrls?.length
+      ? params.payload.mediaUrls
+      : parsedDirectives.mediaUrls?.length
+        ? parsedDirectives.mediaUrls
+        : undefined,
+  };
   let replyTokenUsed = params.replyTokenUsed;
+
+  const stickerSendErrorText = "[Sticker send error]";
+  const stickerInvalidFormatText = "[Sticker send error: invalid sticker format]";
 
   const pushLineMessages = async (messages: messagingApi.Message[]): Promise<void> => {
     if (messages.length === 0) {
@@ -90,6 +109,71 @@ export async function deliverLineAutoReply(params: {
       await pushLineMessages(remaining);
     }
   };
+  const mediaUrls = resolveSendableOutboundReplyParts(payload).mediaUrls;
+  const hasTextContent = Boolean(payload.text?.trim());
+  const hasLineRichContent = Boolean(
+    lineData.flexMessage ?? lineData.templateMessage ?? lineData.location,
+  );
+
+  // Sticker-only sending policy: if a valid sticker is present, send only the sticker (drop text).
+  // payload.sticker comes from the common STICKER: directive parser.
+  if (payload.sticker) {
+    const safeRaw = payload.sticker.raw.replace(/[\r\n\t]/g, " ");
+    logVerbose(`line: sticker directive received (raw: ${safeRaw})`);
+    const parsed = parseLineStickerRaw(payload.sticker.raw);
+    if (parsed) {
+      logVerbose(
+        `line: sending sticker (packageId: ${parsed.packageId}, stickerId: ${parsed.stickerId})`,
+      );
+      const stickerMsg = createStickerMessage(parsed.packageId, parsed.stickerId);
+      try {
+        await sendLineMessages([stickerMsg], true);
+      } catch (err) {
+        logVerbose(`line: sticker send failed (${safeRaw}): ${String(err)}`);
+        try {
+          await pushLineMessages([{ type: "text", text: stickerSendErrorText }]);
+        } catch (pushErr) {
+          logVerbose(`line: sticker error text push also failed: ${String(pushErr)}`);
+        }
+      }
+      return { replyTokenUsed };
+    }
+    // Invalid sticker-only payload should not disappear silently.
+    if (!hasTextContent && mediaUrls.length === 0 && !hasLineRichContent && !lineData?.sticker) {
+      await sendLineMessages([{ type: "text", text: stickerInvalidFormatText }], true);
+      return { replyTokenUsed };
+    }
+    // If another sendable payload part exists, fall through and deliver it normally.
+  }
+
+  // lineData.sticker: direct channelData path (packageId/stickerId already parsed).
+  if (lineData.sticker) {
+    const parsedChannelSticker = parseLineStickerRaw(
+      `${lineData.sticker.packageId}:${lineData.sticker.stickerId}`,
+    );
+    if (!parsedChannelSticker) {
+      await sendLineMessages(
+        [{ type: "text", text: "[Sticker send error: invalid sticker format]" }],
+        true,
+      );
+    } else {
+      const stickerMsg = createStickerMessage(
+        parsedChannelSticker.packageId,
+        parsedChannelSticker.stickerId,
+      );
+      try {
+        await sendLineMessages([stickerMsg], true);
+      } catch (err) {
+        logVerbose(`line: sticker send failed (channelData): ${String(err)}`);
+        try {
+          await pushLineMessages([{ type: "text", text: stickerSendErrorText }]);
+        } catch (pushErr) {
+          logVerbose(`line: sticker error text push also failed: ${String(pushErr)}`);
+        }
+      }
+    }
+    return { replyTokenUsed };
+  }
 
   const richMessages: messagingApi.Message[] = [];
   const hasQuickReplies = Boolean(lineData.quickReplies?.length);
@@ -124,7 +208,6 @@ export async function deliverLineAutoReply(params: {
 
   const chunks = processed.text ? deps.chunkMarkdownText(processed.text, textLimit) : [];
 
-  const mediaUrls = resolveSendableOutboundReplyParts(payload).mediaUrls;
   const mediaMessages = mediaUrls
     .map((url) => url?.trim())
     .filter((url): url is string => Boolean(url))

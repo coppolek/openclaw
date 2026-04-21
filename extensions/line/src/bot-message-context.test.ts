@@ -289,6 +289,85 @@ describe("buildLineMessageContext", () => {
     expect(context!.route.matchedBy).toBe("binding.peer");
   });
 
+  describe("sticker reception", () => {
+    const createStickerEvent = (
+      stickerOverrides: Partial<{
+        packageId: string;
+        stickerId: string;
+        keywords: string[];
+        stickerResourceType: string;
+      }> = {},
+    ): MessageEvent =>
+      ({
+        type: "message",
+        message: {
+          id: "sticker-1",
+          type: "sticker",
+          packageId: stickerOverrides.packageId ?? "11537",
+          stickerId: stickerOverrides.stickerId ?? "52002738",
+          stickerResourceType: stickerOverrides.stickerResourceType ?? "STATIC",
+          ...(stickerOverrides.keywords ? { keywords: stickerOverrides.keywords } : {}),
+        },
+        replyToken: "reply-token",
+        timestamp: Date.now(),
+        source: { type: "user", userId: "user-1" },
+        mode: "active",
+        webhookEventId: "evt-sticker",
+        deliveryContext: { isRedelivery: false },
+      }) as MessageEvent;
+
+    it("preserves sticker metadata in StickerInfo", async () => {
+      const event = createStickerEvent({
+        packageId: "11537",
+        stickerId: "52002738",
+        keywords: ["hi", "Hello"],
+      });
+      const context = await buildLineMessageContext({
+        event,
+        allMedia: [],
+        cfg,
+        account,
+        commandAuthorized: true,
+      });
+      expect(context).not.toBeNull();
+      expect(context!.ctxPayload.StickerInfo).toEqual({
+        raw: "11537:52002738",
+        keywords: ["hi", "Hello"],
+        description: expect.stringContaining("sticker"),
+        channel: "line",
+      });
+    });
+
+    it("includes explicit StickerInfo details in BodyForAgent", async () => {
+      const event = createStickerEvent({ packageId: "446", stickerId: "1988" });
+      const context = await buildLineMessageContext({
+        event,
+        allMedia: [],
+        cfg,
+        account,
+        commandAuthorized: true,
+      });
+      expect(context).not.toBeNull();
+      expect(context!.ctxPayload.BodyForAgent).toContain("[User sent a");
+      expect(context!.ctxPayload.BodyForAgent).toContain("[StickerInfo");
+      expect(context!.ctxPayload.BodyForAgent).toContain("package_id=446");
+      expect(context!.ctxPayload.BodyForAgent).toContain("sticker_id=1988");
+    });
+
+    it("sets empty keywords array when no keywords provided", async () => {
+      const event = createStickerEvent({ packageId: "11537", stickerId: "52002734" });
+      const context = await buildLineMessageContext({
+        event,
+        allMedia: [],
+        cfg,
+        account,
+        commandAuthorized: true,
+      });
+      expect(context).not.toBeNull();
+      expect(context!.ctxPayload.StickerInfo?.keywords).toEqual([]);
+    });
+  });
+
   it("room peer binding matches raw roomId without prefix (#21907)", async () => {
     const roomId = "Rr1234567890abcdef";
     const bindingCfg: OpenClawConfig = {

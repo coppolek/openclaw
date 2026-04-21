@@ -19,6 +19,7 @@ export type NormalizedOutboundPayload = {
   audioAsVoice?: boolean;
   interactive?: InteractiveReply;
   channelData?: Record<string, unknown>;
+  sticker?: ReplyPayload["sticker"];
 };
 
 export type OutboundPayloadJson = {
@@ -28,6 +29,7 @@ export type OutboundPayloadJson = {
   audioAsVoice?: boolean;
   interactive?: InteractiveReply;
   channelData?: Record<string, unknown>;
+  sticker?: { raw: string };
 };
 
 export type OutboundPayloadPlan = {
@@ -109,6 +111,7 @@ function createOutboundPayloadPlanEntry(payload: ReplyPayload): OutboundPayloadP
   }
   const hasMultipleMedia = (explicitMediaUrls?.length ?? 0) > 1;
   const resolvedMediaUrl = hasMultipleMedia ? undefined : explicitMediaUrl;
+  const resolvedSticker = payload.sticker ?? parsed.sticker;
   const normalizedPayload: ReplyPayload = {
     ...payload,
     text:
@@ -122,8 +125,9 @@ function createOutboundPayloadPlanEntry(payload: ReplyPayload): OutboundPayloadP
     replyToTag: payload.replyToTag || parsed.replyToTag,
     replyToCurrent: payload.replyToCurrent || parsed.replyToCurrent,
     audioAsVoice: Boolean(payload.audioAsVoice || parsed.audioAsVoice),
+    ...(resolvedSticker !== undefined ? { sticker: resolvedSticker } : {}),
   };
-  if (!isRenderablePayload(normalizedPayload)) {
+  if (!isRenderablePayload(normalizedPayload) && !normalizedPayload.sticker) {
     return null;
   }
   const parts = resolveSendableOutboundReplyParts(normalizedPayload);
@@ -170,7 +174,8 @@ export function projectOutboundPayloadPlanForOutbound(
       !hasReplyPayloadContent(
         { ...payload, text, mediaUrls: entry.parts.mediaUrls },
         { hasChannelData: entry.hasChannelData },
-      )
+      ) &&
+      !payload.sticker
     ) {
       continue;
     }
@@ -180,6 +185,7 @@ export function projectOutboundPayloadPlanForOutbound(
       audioAsVoice: payload.audioAsVoice === true ? true : undefined,
       ...(entry.hasInteractive ? { interactive: payload.interactive } : {}),
       ...(entry.hasChannelData ? { channelData: payload.channelData } : {}),
+      ...(payload.sticker ? { sticker: payload.sticker } : {}),
     });
   }
   return normalizedPayloads;
@@ -198,6 +204,7 @@ export function projectOutboundPayloadPlanForJson(
       audioAsVoice: payload.audioAsVoice === true ? true : undefined,
       interactive: payload.interactive,
       channelData: payload.channelData,
+      sticker: payload.sticker,
     });
   }
   return normalized;

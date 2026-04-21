@@ -6,6 +6,7 @@ import {
   resolveTextChunkLimit,
 } from "../../auto-reply/chunk.js";
 import type { ReplyPayload } from "../../auto-reply/types.js";
+import type { SupportedPayloadType } from "../../channels/plugins/outbound.types.js";
 import { loadChannelOutboundAdapter } from "../../channels/plugins/outbound/load.js";
 import type {
   ChannelOutboundAdapter,
@@ -25,6 +26,10 @@ import { hasReplyPayloadContent } from "../../interactive/payload.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import type { OutboundMediaAccess } from "../../media/load-options.js";
 import { resolveAgentScopedOutboundMediaAccess } from "../../media/read-capability.js";
+import {
+  STANDALONE_PAYLOAD_TYPES,
+  getCapabilityScopedPayloadTypes,
+} from "../../plugin-sdk/reply-payload.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { formatErrorMessage } from "../errors.js";
 import { throwIfAborted } from "./abort.js";
@@ -74,6 +79,9 @@ type ChannelHandler = {
   chunkerMode?: "text" | "markdown";
   textChunkLimit?: number;
   supportsMedia: boolean;
+  supportedPayloadTypes: readonly SupportedPayloadType[];
+  /** @deprecated use supportedPayloadTypes. Kept for backward compat. */
+  supportsStickerPayload: boolean;
   sanitizeText?: (payload: ReplyPayload) => string;
   normalizePayload?: (payload: ReplyPayload) => ReplyPayload | null;
   shouldSkipPlainTextSanitization?: (payload: ReplyPayload) => boolean;
@@ -166,6 +174,27 @@ function createPluginHandler(
   const baseCtx = createChannelOutboundContextBase(params);
   const sendText = outbound.sendText;
   const sendMedia = outbound.sendMedia;
+  // Build resolved capability list from both new and legacy declarations
+  const declaredTypes: SupportedPayloadType[] = Array.isArray(outbound.supportedPayloadTypes)
+    ? [...outbound.supportedPayloadTypes]
+    : [];
+  // Backward compat: legacy supportsStickerPayload flag
+  if (outbound.supportsStickerPayload === true && !declaredTypes.includes("sticker")) {
+    declaredTypes.push("sticker");
+  }
+  // Warn if capabilities declared but sendPayload missing
+  if (declaredTypes.length > 0 && !outbound.sendPayload) {
+    log.warn(
+      "Outbound adapter declares payload type support but sendPayload is not implemented; treating as unsupported",
+      {
+        channel: params.channel,
+        declaredTypes,
+      },
+    );
+  }
+  const supportedPayloadTypes: readonly SupportedPayloadType[] =
+    declaredTypes.length > 0 && outbound.sendPayload ? declaredTypes : [];
+  const supportsStickerPayload = supportedPayloadTypes.includes("sticker");
   const chunker = outbound.chunker ?? null;
   const chunkerMode = outbound.chunkerMode;
   const resolveCtx = (overrides?: {
@@ -183,6 +212,8 @@ function createPluginHandler(
     chunkerMode,
     textChunkLimit: outbound.textChunkLimit,
     supportsMedia: Boolean(sendMedia),
+    supportedPayloadTypes,
+    supportsStickerPayload,
     sanitizeText: outbound.sanitizeText
       ? (payload) => outbound.sanitizeText!({ text: payload.text ?? "", payload })
       : undefined,
@@ -310,7 +341,10 @@ type MessageSentEvent = {
 function normalizeEmptyPayloadForDelivery(payload: ReplyPayload): ReplyPayload | null {
   const text = typeof payload.text === "string" ? payload.text : "";
   if (!text.trim()) {
-    if (!hasReplyPayloadContent({ ...payload, text })) {
+    const standaloneTypes = getCapabilityScopedPayloadTypes(payload).filter((t) =>
+      STANDALONE_PAYLOAD_TYPES.has(t),
+    );
+    if (!hasReplyPayloadContent({ ...payload, text }) && standaloneTypes.length === 0) {
       return null;
     }
     if (text) {
@@ -693,12 +727,17 @@ async function deliverOutboundPayloadsCore(
         audioAsVoice: effectivePayload.audioAsVoice === true ? true : undefined,
         forceDocument: params.forceDocument,
       };
+      const capabilityTypes = getCapabilityScopedPayloadTypes(effectivePayload);
+      const allCapabilitiesSupported =
+        capabilityTypes.length > 0 &&
+        capabilityTypes.every((t) => handler.supportedPayloadTypes.includes(t));
       if (
         handler.sendPayload &&
-        hasReplyPayloadContent({
+        (hasReplyPayloadContent({
           interactive: effectivePayload.interactive,
           channelData: effectivePayload.channelData,
-        })
+        }) ||
+          allCapabilitiesSupported)
       ) {
         const delivery = await handler.sendPayload(effectivePayload, sendOverrides);
         results.push(delivery);
@@ -710,6 +749,25 @@ async function deliverOutboundPayloadsCore(
         continue;
       }
       if (payloadSummary.mediaUrls.length === 0) {
+        if (
+          capabilityTypes.length > 0 &&
+          !allCapabilitiesSupported &&
+          !payloadSummary.text.trim()
+        ) {
+          log.warn(
+            `Structured payload [${capabilityTypes.join(",")}] not supported by channel; skipping delivery`,
+            {
+              channel,
+              to,
+            },
+          );
+          emitMessageSent({
+            success: false,
+            content: payloadSummary.text,
+            error: `Structured payload [${capabilityTypes.join(",")}] not supported by channel`,
+          });
+          continue;
+        }
         const beforeCount = results.length;
         if (handler.sendFormattedText) {
           results.push(...(await handler.sendFormattedText(payloadSummary.text, sendOverrides)));

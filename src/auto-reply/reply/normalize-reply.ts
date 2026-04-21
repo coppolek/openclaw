@@ -47,7 +47,7 @@ export function normalizeReplyPayload(
       },
     );
   const trimmed = normalizeOptionalString(payload.text) ?? "";
-  if (!hasContent(trimmed)) {
+  if (!hasContent(trimmed) && !payload.sticker) {
     opts.onSkip?.("empty");
     return null;
   }
@@ -88,7 +88,7 @@ export function normalizeReplyPayload(
     if (stripped.didStrip) {
       opts.onHeartbeatStrip?.();
     }
-    if (stripped.shouldSkip && !hasContent(stripped.text)) {
+    if (stripped.shouldSkip && !hasContent(stripped.text) && !payload.sticker) {
       opts.onSkip?.("heartbeat");
       return null;
     }
@@ -98,7 +98,7 @@ export function normalizeReplyPayload(
   if (text) {
     text = sanitizeUserFacingText(text, { errorContext: Boolean(payload.isError) });
   }
-  if (!hasContent(text)) {
+  if (!hasContent(text) && !payload.sticker) {
     opts.onSkip?.("empty");
     return null;
   }

@@ -311,6 +311,48 @@ describe("normalizeReplyPayloadsForDelivery", () => {
       },
     ]);
   });
+
+  it("preserves parsed sticker directives on normalized payloads", () => {
+    expect(
+      normalizeReplyPayloadsForDelivery([
+        {
+          text: "STICKER:11537:52002734",
+        },
+      ]),
+    ).toEqual([
+      {
+        text: "",
+        sticker: { raw: "11537:52002734" },
+        replyToCurrent: false,
+        replyToTag: false,
+        audioAsVoice: false,
+        mediaUrl: undefined,
+        mediaUrls: undefined,
+        replyToId: undefined,
+      },
+    ]);
+  });
+
+  it("normalizes mixed text+sticker directive while preserving parsed sticker", () => {
+    expect(
+      normalizeReplyPayloadsForDelivery([
+        {
+          text: "ありがとう！\nSTICKER:446:1988",
+        },
+      ]),
+    ).toEqual([
+      {
+        text: "ありがとう！",
+        sticker: { raw: "446:1988" },
+        replyToCurrent: false,
+        replyToTag: false,
+        audioAsVoice: false,
+        mediaUrl: undefined,
+        mediaUrls: undefined,
+        replyToId: undefined,
+      },
+    ]);
+  });
 });
 
 describe("normalizeOutboundPayloadsForJson", () => {
@@ -399,6 +441,12 @@ describe("normalizeOutboundPayloadsForJson", () => {
 });
 
 describe("normalizeOutboundPayloads", () => {
+  it("keeps sticker-only payloads", () => {
+    expect(normalizeOutboundPayloads([{ sticker: { raw: "446:1988" } }])).toEqual([
+      { text: "", mediaUrls: [], sticker: { raw: "446:1988" } },
+    ]);
+  });
+
   it("keeps channelData-only payloads", () => {
     const channelData = { line: { flexMessage: { altText: "Card", contents: {} } } };
     expect(normalizeOutboundPayloads([{ channelData }])).toEqual([

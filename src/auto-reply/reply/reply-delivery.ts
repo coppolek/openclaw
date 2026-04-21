@@ -27,7 +27,8 @@ export function normalizeReplyPayloadDirectives(params: {
     (parseMode === "auto" &&
       (sourceText.includes("[[") ||
         sourceText.includes("MEDIA:") ||
-        sourceText.includes(silentToken)));
+        sourceText.includes(silentToken) ||
+        /sticker:/i.test(sourceText)));
 
   const parsed = shouldParse
     ? parseReplyDirectives(sourceText, {
@@ -54,6 +55,8 @@ export function normalizeReplyPayloadDirectives(params: {
       replyToTag: params.payload.replyToTag || parsed?.replyToTag,
       replyToCurrent: params.payload.replyToCurrent || parsed?.replyToCurrent,
       audioAsVoice: Boolean(params.payload.audioAsVoice || parsed?.audioAsVoice),
+      // Propagate sticker from directives parser; preserve any pre-existing value.
+      sticker: params.payload.sticker ?? parsed?.sticker,
     },
     isSilent: parsed?.isSilent ?? false,
   };
@@ -87,14 +90,18 @@ export function createBlockReplyDeliveryHandler(params: {
 }): (payload: ReplyPayload) => Promise<void> {
   return async (payload) => {
     const { text, skip } = params.normalizeStreamingText(payload);
-    if (skip && !resolveSendableOutboundReplyParts(payload).hasMedia) {
+    const hasMedia = resolveSendableOutboundReplyParts(payload).hasMedia;
+    const hasStickerDirectiveCandidate =
+      Boolean(payload.sticker) || /sticker:/i.test(payload.text ?? "");
+    if (skip && !hasMedia && !payload.audioAsVoice && !hasStickerDirectiveCandidate) {
       return;
     }
+    const textForTagging = skip && hasStickerDirectiveCandidate ? payload.text : text;
 
     const taggedPayload = applyReplyTagsToPayload(
       {
         ...payload,
-        text,
+        text: textForTagging,
         mediaUrl: payload.mediaUrl ?? payload.mediaUrls?.[0],
         replyToId:
           payload.replyToId ??
@@ -124,9 +131,16 @@ export function createBlockReplyDeliveryHandler(params: {
       params.applyReplyToMode(mediaNormalizedPayload),
     );
     const blockHasMedia = resolveSendableOutboundReplyParts(blockPayload).hasMedia;
+    const blockHasSticker = Boolean(blockPayload.sticker);
 
     // Skip empty payloads unless they have audioAsVoice flag (need to track it).
-    if (!blockPayload.text && !blockHasMedia && !blockPayload.audioAsVoice) {
+    // Also keep sticker-only payloads (sticker is not counted in blockHasMedia).
+    if (
+      !blockPayload.text &&
+      !blockHasMedia &&
+      !blockPayload.audioAsVoice &&
+      !blockPayload.sticker
+    ) {
       return;
     }
     if (normalized.isSilent && !blockHasMedia) {
@@ -151,17 +165,17 @@ export function createBlockReplyDeliveryHandler(params: {
         trackingPayload: blockPayload,
         payload: blockPayload,
       });
-    } else if (blockHasMedia) {
+    } else if (blockHasMedia || blockHasSticker) {
       // When block streaming is disabled, text-only block replies are accumulated into the
-      // final response. Media cannot be reconstructed later, so send it immediately and let
-      // the assistant's final text arrive through the normal final-reply path.
+      // final response. Media/sticker content cannot be reconstructed later, so send it
+      // immediately and let the assistant's final text arrive through the normal final-reply path.
       await sendDirectBlockReply({
         onBlockReply: params.onBlockReply,
         directlySentBlockKeys: params.directlySentBlockKeys,
         trackingPayload: blockPayload,
         payload: { ...blockPayload, text: undefined },
       });
+      // When streaming is disabled entirely, text-only blocks are accumulated in final text.
     }
-    // When streaming is disabled entirely, text-only blocks are accumulated in final text.
   };
 }

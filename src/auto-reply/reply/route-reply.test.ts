@@ -195,12 +195,40 @@ describe("routeReply", () => {
     await expectSlackNoDelivery({});
   });
 
+  it("keeps sticker-only payloads renderable for outbound delivery", async () => {
+    mocks.deliverOutboundPayloads.mockResolvedValue([]);
+    const res = await routeReply({
+      payload: { sticker: { raw: "11537:52002734" } },
+      channel: "slack",
+      to: "channel:C123",
+      cfg: {} as never,
+    });
+
+    expect(res.ok).toBe(true);
+    expect(mocks.deliverOutboundPayloads).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payloads: [
+          expect.objectContaining({
+            sticker: { raw: "11537:52002734" },
+          }),
+        ],
+      }),
+    );
+  });
+
   it("suppresses reasoning payloads", async () => {
     await expectSlackNoDelivery({ text: "Reasoning:\n_step_", isReasoning: true });
   });
 
   it("drops silent token payloads", async () => {
     await expectSlackNoDelivery({ text: SILENT_REPLY_TOKEN });
+  });
+
+  it("does not restore sticker fallback for intentional silent skips", async () => {
+    await expectSlackNoDelivery({
+      text: SILENT_REPLY_TOKEN,
+      sticker: { raw: "11537:52002734" },
+    });
   });
 
   it("does not drop payloads that merely start with the silent token", async () => {

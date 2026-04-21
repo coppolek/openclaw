@@ -7,6 +7,8 @@ import { resolveOutboundMediaUrls } from "openclaw/plugin-sdk/reply-payload";
 import { type ChannelPlugin, type ResolvedLineAccount } from "./channel-api.js";
 import { resolveLineOutboundMedia, type LineOutboundMediaResolved } from "./outbound-media.js";
 import { getLineRuntime } from "./runtime.js";
+import { createStickerMessage } from "./send.js";
+import { parseLineStickerRaw } from "./sticker-utils.js";
 import type { LineChannelData } from "./types.js";
 
 const loadLineOutboundRuntime = createLazyRuntimeModule(() => import("./outbound.runtime.js"));
@@ -71,6 +73,8 @@ function buildLineMediaMessageObject(
 
 export const lineOutboundAdapter: NonNullable<ChannelPlugin<ResolvedLineAccount>["outbound"]> = {
   deliveryMode: "direct",
+  supportsStickerPayload: true,
+  supportedPayloadTypes: ["sticker"] as const,
   chunker: (text, limit) => getLineRuntime().channel.text.chunkMarkdownText(text, limit),
   textChunkLimit: 5000,
   sendPayload: async ({ to, payload, accountId, cfg }) => {
@@ -96,6 +100,11 @@ export const lineOutboundAdapter: NonNullable<ChannelPlugin<ResolvedLineAccount>
     const quickReply = hasQuickReplies
       ? (lineRuntime?.createQuickReplyItems ?? outboundRuntime.createQuickReplyItems)(quickReplies)
       : undefined;
+    const mediaUrls = resolveOutboundMediaUrls(payload);
+    const hasTextContent = Boolean(payload.text?.trim());
+    const hasLineRichContent = Boolean(
+      lineData.flexMessage ?? lineData.templateMessage ?? lineData.location,
+    );
 
     // LINE SDK expects Message[] but we build dynamically.
     const sendMessageBatch = async (messages: Array<Record<string, unknown>>) => {
@@ -113,6 +122,45 @@ export const lineOutboundAdapter: NonNullable<ChannelPlugin<ResolvedLineAccount>
       }
     };
 
+    // NOTE: When sticker is present, text is intentionally NOT sent to LINE.
+    // LINE API does not support text+sticker in a single message.
+    // Text in sticker payloads may serve as transcript context (mirror).
+    // If this behavior changes, verify route-reply.ts mirror construction.
+    // Sticker-only payload: send sticker via LINE Messaging API and return early.
+    if (payload.sticker) {
+      const parsed = parseLineStickerRaw(payload.sticker.raw);
+      if (parsed) {
+        await sendMessageBatch([createStickerMessage(parsed.packageId, parsed.stickerId)]);
+        return createEmptyChannelResult("line", lastResult ?? { messageId: "sticker", chatId: to });
+      }
+      // Malformed sticker token with no other sendable content: surface as error.
+      if (!hasTextContent && mediaUrls.length === 0 && !hasLineRichContent && !lineData?.sticker) {
+        await sendMessageBatch([
+          { type: "text", text: "[Sticker send error: invalid sticker format]" },
+        ]);
+        return createEmptyChannelResult("line", { messageId: "sticker-error", chatId: to });
+      }
+      // Malformed sticker token but other sendable content is present: fall through.
+    }
+
+    // lineData.sticker: direct channelData path (packageId/stickerId already parsed).
+    if (lineData.sticker) {
+      const parsed = parseLineStickerRaw(
+        `${lineData.sticker.packageId}:${lineData.sticker.stickerId}`,
+      );
+      if (parsed) {
+        await sendMessageBatch([createStickerMessage(parsed.packageId, parsed.stickerId)]);
+        return createEmptyChannelResult("line", lastResult ?? { messageId: "sticker", chatId: to });
+      }
+      if (!hasTextContent && mediaUrls.length === 0 && !hasLineRichContent) {
+        await sendMessageBatch([
+          { type: "text", text: "[Sticker send error: invalid sticker format]" },
+        ]);
+        return createEmptyChannelResult("line", { messageId: "sticker-error", chatId: to });
+      }
+      // Malformed lineData.sticker but other sendable content is present: fall through.
+    }
+
     const processed = payload.text
       ? outboundRuntime.processLineMessage(payload.text)
       : { text: "", flexMessages: [] };
@@ -125,7 +173,6 @@ export const lineOutboundAdapter: NonNullable<ChannelPlugin<ResolvedLineAccount>
     const chunks = processed.text
       ? runtime.channel.text.chunkMarkdownText(processed.text, chunkLimit)
       : [];
-    const mediaUrls = resolveOutboundMediaUrls(payload);
     const useLineSpecificMedia = hasLineSpecificMediaOptions(lineData);
     const shouldSendQuickRepliesInline = chunks.length === 0 && hasQuickReplies;
     const sendMediaMessages = async () => {

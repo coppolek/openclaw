@@ -34,13 +34,15 @@ describe("createBlockReplyDeliveryHandler", () => {
       directlySentBlockKeys,
     });
 
-    await handler({
+    const originalPayload = {
       text: "here's the vibe",
       mediaUrls: ["/tmp/generated.png"],
       replyToCurrent: true,
-    });
+    };
 
-    expect(onBlockReply).toHaveBeenCalledWith({
+    await handler(originalPayload);
+
+    const strippedPayload = {
       text: undefined,
       mediaUrl: "/tmp/generated.png",
       mediaUrls: ["/tmp/generated.png"],
@@ -48,16 +50,10 @@ describe("createBlockReplyDeliveryHandler", () => {
       replyToId: undefined,
       replyToTag: undefined,
       audioAsVoice: false,
-    });
-    expect(directlySentBlockKeys).toEqual(
-      new Set([
-        createBlockReplyContentKey({
-          text: "here's the vibe",
-          mediaUrls: ["/tmp/generated.png"],
-          replyToCurrent: true,
-        }),
-      ]),
-    );
+    };
+
+    expect(onBlockReply).toHaveBeenCalledWith(strippedPayload);
+    expect(directlySentBlockKeys).toEqual(new Set([createBlockReplyContentKey(originalPayload)]));
     expect(typingSignals.signalTextDelta).toHaveBeenCalledWith("here's the vibe");
   });
 
@@ -79,6 +75,66 @@ describe("createBlockReplyDeliveryHandler", () => {
     await handler({ text: "text only" });
 
     expect(onBlockReply).not.toHaveBeenCalled();
+  });
+
+  it("sends sticker-only block replies immediately when block streaming is disabled", async () => {
+    const onBlockReply = vi.fn(async () => {});
+    const directlySentBlockKeys = new Set<string>();
+
+    const handler = createBlockReplyDeliveryHandler({
+      onBlockReply,
+      normalizeStreamingText: (payload) => ({ text: payload.text, skip: false }),
+      applyReplyToMode: (payload) => payload,
+      typingSignals: {
+        signalTextDelta: vi.fn(async () => {}),
+      } as unknown as TypingSignaler,
+      blockStreamingEnabled: false,
+      blockReplyPipeline: null,
+      directlySentBlockKeys,
+    });
+
+    await handler({ sticker: { raw: "446:1988" } });
+
+    expect(onBlockReply).toHaveBeenCalledWith({
+      text: undefined,
+      mediaUrl: undefined,
+      mediaUrls: undefined,
+      sticker: { raw: "446:1988" },
+      replyToId: undefined,
+      replyToCurrent: undefined,
+      replyToTag: undefined,
+      audioAsVoice: false,
+    });
+    expect(directlySentBlockKeys).toEqual(
+      new Set([
+        createBlockReplyContentKey({
+          sticker: { raw: "446:1988" },
+        }),
+      ]),
+    );
+  });
+
+  it("tracks different sticker-only block replies with distinct dedupe keys", async () => {
+    const onBlockReply = vi.fn(async () => {});
+    const directlySentBlockKeys = new Set<string>();
+
+    const handler = createBlockReplyDeliveryHandler({
+      onBlockReply,
+      normalizeStreamingText: (payload) => ({ text: payload.text, skip: false }),
+      applyReplyToMode: (payload) => payload,
+      typingSignals: {
+        signalTextDelta: vi.fn(async () => {}),
+      } as unknown as TypingSignaler,
+      blockStreamingEnabled: false,
+      blockReplyPipeline: null,
+      directlySentBlockKeys,
+    });
+
+    await handler({ sticker: { raw: "446:1988" } });
+    await handler({ sticker: { raw: "11537:52002734" } });
+
+    expect(onBlockReply).toHaveBeenCalledTimes(2);
+    expect(directlySentBlockKeys.size).toBe(2);
   });
 
   it("trims leading whitespace in block-streamed replies", async () => {

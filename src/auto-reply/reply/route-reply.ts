@@ -20,7 +20,7 @@ import { normalizeOptionalLowercaseString } from "../../shared/string-coerce.js"
 import { INTERNAL_MESSAGE_CHANNEL, normalizeMessageChannel } from "../../utils/message-channel.js";
 import type { OriginatingChannelType } from "../templating.js";
 import type { ReplyPayload } from "../types.js";
-import { normalizeReplyPayload } from "./normalize-reply.js";
+import { normalizeReplyPayload, type NormalizeReplySkipReason } from "./normalize-reply.js";
 import {
   formatBtwTextForExternalDelivery,
   shouldSuppressReasoningPayload,
@@ -115,8 +115,12 @@ export async function routeReply(params: RouteReplyParams): Promise<RouteReplyRe
     : cfg.messages?.responsePrefix === "auto"
       ? undefined
       : cfg.messages?.responsePrefix;
+  let skipReason: NormalizeReplySkipReason | null = null;
   const normalized = normalizeReplyPayload(payload, {
     responsePrefix,
+    onSkip: (reason) => {
+      skipReason = reason;
+    },
     transformReplyPayload: messaging?.transformReplyPayload
       ? (nextPayload) =>
           messaging.transformReplyPayload?.({
@@ -126,12 +130,20 @@ export async function routeReply(params: RouteReplyParams): Promise<RouteReplyRe
           }) ?? nextPayload
       : undefined,
   });
-  if (!normalized) {
+  const normalizedPayload =
+    normalized ??
+    (!skipReason && payload.sticker
+      ? {
+          ...payload,
+          text: payload.text ?? "",
+        }
+      : null);
+  if (!normalizedPayload) {
     return { ok: true };
   }
   const externalPayload: ReplyPayload = {
-    ...normalized,
-    text: formatBtwTextForExternalDelivery(normalized),
+    ...normalizedPayload,
+    text: formatBtwTextForExternalDelivery(normalizedPayload),
   };
 
   let text = externalPayload.text ?? "";
@@ -144,6 +156,7 @@ export async function routeReply(params: RouteReplyParams): Promise<RouteReplyRe
   const hasChannelData = messaging?.hasStructuredReplyPayload?.({
     payload: externalPayload,
   });
+  const hasSticker = Boolean(externalPayload.sticker?.raw?.trim());
 
   // Skip empty replies.
   if (
@@ -155,6 +168,7 @@ export async function routeReply(params: RouteReplyParams): Promise<RouteReplyRe
       },
       {
         hasChannelData,
+        extraContent: hasSticker,
       },
     )
   ) {
@@ -216,7 +230,7 @@ export async function routeReply(params: RouteReplyParams): Promise<RouteReplyRe
           ? {
               sessionKey: params.sessionKey,
               agentId: resolvedAgentId,
-              text,
+              text: text || (hasSticker ? `[sticker:${externalPayload.sticker!.raw}]` : ""),
               mediaUrls,
               ...(params.isGroup != null ? { isGroup: params.isGroup } : {}),
               ...(params.groupId ? { groupId: params.groupId } : {}),
