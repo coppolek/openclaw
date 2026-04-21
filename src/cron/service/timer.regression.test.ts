@@ -214,6 +214,381 @@ describe("cron service timer regressions", () => {
     expect(runIsolatedAgentJob).toHaveBeenCalledTimes(4);
   });
 
+  it("#63770: deleteAfterRun keeps one-shot jobs when run is skipped", async () => {
+    const store = timerRegressionFixtures.makeStorePath();
+    const scheduledAt = Date.parse("2026-02-06T10:00:00.000Z");
+
+    const cronJob = createIsolatedRegressionJob({
+      id: "oneshot-delete-after-run-skipped",
+      name: "oneshot skip keeps record",
+      scheduledAt,
+      schedule: { kind: "at", at: new Date(scheduledAt).toISOString() },
+      payload: { kind: "agentTurn", message: "skip me" },
+      state: { nextRunAtMs: scheduledAt },
+    });
+    cronJob.deleteAfterRun = true;
+    await writeCronJobs(store.storePath, [cronJob]);
+
+    const runIsolatedAgentJob = vi.fn().mockResolvedValue({
+      status: "skipped",
+      summary: "precondition not met",
+    });
+    const state = createCronServiceState({
+      cronEnabled: true,
+      storePath: store.storePath,
+      log: noopLogger,
+      nowMs: () => scheduledAt,
+      enqueueSystemEvent: vi.fn(),
+      requestHeartbeatNow: vi.fn(),
+      runIsolatedAgentJob,
+    });
+
+    await onTimer(state);
+
+    const keptJob = state.store?.jobs.find((j) => j.id === "oneshot-delete-after-run-skipped");
+    expect(keptJob).toBeDefined();
+    expect(keptJob!.enabled).toBe(false);
+    expect(keptJob!.state.lastStatus).toBe("skipped");
+    expect(runIsolatedAgentJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("#63770: deleteAfterRun removes recurring jobs after first successful run", async () => {
+    const store = timerRegressionFixtures.makeStorePath();
+    const scheduledAt = Date.parse("2026-02-06T10:00:00.000Z");
+
+    const cronJob = createIsolatedRegressionJob({
+      id: "every-delete-after-run",
+      name: "delete recurring after success",
+      scheduledAt,
+      schedule: { kind: "every", everyMs: 60_000, anchorMs: scheduledAt },
+      payload: { kind: "agentTurn", message: "run once" },
+      state: { nextRunAtMs: scheduledAt },
+    });
+    cronJob.deleteAfterRun = true;
+    await writeCronJobs(store.storePath, [cronJob]);
+
+    const runIsolatedAgentJob = vi.fn().mockResolvedValue({ status: "ok", summary: "done" });
+    const state = createCronServiceState({
+      cronEnabled: true,
+      storePath: store.storePath,
+      log: noopLogger,
+      nowMs: () => scheduledAt,
+      enqueueSystemEvent: vi.fn(),
+      requestHeartbeatNow: vi.fn(),
+      runIsolatedAgentJob,
+    });
+
+    await onTimer(state);
+
+    const deletedJob = state.store?.jobs.find((j) => j.id === "every-delete-after-run");
+    expect(deletedJob).toBeUndefined();
+
+    const persisted = JSON.parse(await fs.readFile(store.storePath, "utf8")) as {
+      jobs?: Array<{ id: string }>;
+    };
+    expect(persisted.jobs?.some((j) => j.id === "every-delete-after-run")).toBe(false);
+    expect(runIsolatedAgentJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("#63770: deleteAfterRun also removes cron-expression jobs after first successful run", async () => {
+    const store = timerRegressionFixtures.makeStorePath();
+    const scheduledAt = Date.parse("2026-02-06T10:00:00.000Z");
+
+    const cronJob = createIsolatedRegressionJob({
+      id: "cron-delete-after-run",
+      name: "delete cron schedule after success",
+      scheduledAt,
+      schedule: { kind: "cron", expr: "*/5 * * * *", tz: "UTC" },
+      payload: { kind: "agentTurn", message: "run once" },
+      state: { nextRunAtMs: scheduledAt },
+    });
+    cronJob.deleteAfterRun = true;
+    await writeCronJobs(store.storePath, [cronJob]);
+
+    const runIsolatedAgentJob = vi.fn().mockResolvedValue({ status: "ok", summary: "done" });
+    const state = createCronServiceState({
+      cronEnabled: true,
+      storePath: store.storePath,
+      log: noopLogger,
+      nowMs: () => scheduledAt,
+      enqueueSystemEvent: vi.fn(),
+      requestHeartbeatNow: vi.fn(),
+      runIsolatedAgentJob,
+    });
+
+    await onTimer(state);
+
+    const deletedJob = state.store?.jobs.find((j) => j.id === "cron-delete-after-run");
+    expect(deletedJob).toBeUndefined();
+    const persisted = JSON.parse(await fs.readFile(store.storePath, "utf8")) as {
+      jobs?: Array<{ id: string }>;
+    };
+    expect(persisted.jobs?.some((j) => j.id === "cron-delete-after-run")).toBe(false);
+    expect(runIsolatedAgentJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("#63770: deleteAfterRun keeps recurring jobs when run fails", async () => {
+    const store = timerRegressionFixtures.makeStorePath();
+    const scheduledAt = Date.parse("2026-02-06T10:00:00.000Z");
+
+    const cronJob = createIsolatedRegressionJob({
+      id: "every-delete-after-run-error",
+      name: "delete recurring after failure",
+      scheduledAt,
+      schedule: { kind: "every", everyMs: 60_000, anchorMs: scheduledAt },
+      payload: { kind: "agentTurn", message: "run once" },
+      state: { nextRunAtMs: scheduledAt },
+    });
+    cronJob.deleteAfterRun = true;
+    await writeCronJobs(store.storePath, [cronJob]);
+
+    const runIsolatedAgentJob = vi.fn().mockResolvedValue({
+      status: "error",
+      error: "transient failure",
+    });
+    const state = createCronServiceState({
+      cronEnabled: true,
+      storePath: store.storePath,
+      log: noopLogger,
+      nowMs: () => scheduledAt,
+      enqueueSystemEvent: vi.fn(),
+      requestHeartbeatNow: vi.fn(),
+      runIsolatedAgentJob,
+    });
+
+    await onTimer(state);
+
+    const remainingJob = state.store?.jobs.find((j) => j.id === "every-delete-after-run-error");
+    expect(remainingJob).toBeDefined();
+    expect(remainingJob?.state.lastStatus).toBe("error");
+    expect(remainingJob?.state.nextRunAtMs).toBeGreaterThan(scheduledAt);
+    expect(runIsolatedAgentJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("#63770: deleteAfterRun keeps cron-expression jobs when run fails", async () => {
+    const store = timerRegressionFixtures.makeStorePath();
+    const scheduledAt = Date.parse("2026-02-06T10:00:00.000Z");
+
+    const cronJob = createIsolatedRegressionJob({
+      id: "cron-delete-after-run-error",
+      name: "delete cron schedule after failure",
+      scheduledAt,
+      schedule: { kind: "cron", expr: "*/5 * * * *", tz: "UTC" },
+      payload: { kind: "agentTurn", message: "run once" },
+      state: { nextRunAtMs: scheduledAt },
+    });
+    cronJob.deleteAfterRun = true;
+    await writeCronJobs(store.storePath, [cronJob]);
+
+    const runIsolatedAgentJob = vi.fn().mockResolvedValue({
+      status: "error",
+      error: "transient failure",
+    });
+    const state = createCronServiceState({
+      cronEnabled: true,
+      storePath: store.storePath,
+      log: noopLogger,
+      nowMs: () => scheduledAt,
+      enqueueSystemEvent: vi.fn(),
+      requestHeartbeatNow: vi.fn(),
+      runIsolatedAgentJob,
+    });
+
+    await onTimer(state);
+
+    const remainingJob = state.store?.jobs.find((j) => j.id === "cron-delete-after-run-error");
+    expect(remainingJob).toBeDefined();
+    expect(remainingJob?.state.lastStatus).toBe("error");
+    expect(remainingJob?.state.nextRunAtMs).toBeGreaterThan(scheduledAt);
+    expect(runIsolatedAgentJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("#63770: deleteAfterRun keeps recurring jobs when run is skipped", async () => {
+    const store = timerRegressionFixtures.makeStorePath();
+    const scheduledAt = Date.parse("2026-02-06T10:00:00.000Z");
+
+    const cronJob = createIsolatedRegressionJob({
+      id: "every-delete-after-run-skipped",
+      name: "delete recurring after skipped run",
+      scheduledAt,
+      schedule: { kind: "every", everyMs: 60_000, anchorMs: scheduledAt },
+      payload: { kind: "agentTurn", message: "run once" },
+      state: { nextRunAtMs: scheduledAt },
+    });
+    cronJob.deleteAfterRun = true;
+    await writeCronJobs(store.storePath, [cronJob]);
+
+    const runIsolatedAgentJob = vi.fn().mockResolvedValue({
+      status: "skipped",
+      reason: "policy check",
+    });
+    const state = createCronServiceState({
+      cronEnabled: true,
+      storePath: store.storePath,
+      log: noopLogger,
+      nowMs: () => scheduledAt,
+      enqueueSystemEvent: vi.fn(),
+      requestHeartbeatNow: vi.fn(),
+      runIsolatedAgentJob,
+    });
+
+    await onTimer(state);
+
+    const remainingJob = state.store?.jobs.find((j) => j.id === "every-delete-after-run-skipped");
+    expect(remainingJob).toBeDefined();
+    expect(remainingJob?.state.lastStatus).toBe("skipped");
+    expect(remainingJob?.state.nextRunAtMs).toBeGreaterThan(scheduledAt);
+    expect(runIsolatedAgentJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("#63770: deleteAfterRun keeps cron-expression jobs when run is skipped", async () => {
+    const store = timerRegressionFixtures.makeStorePath();
+    const scheduledAt = Date.parse("2026-02-06T10:00:00.000Z");
+
+    const cronJob = createIsolatedRegressionJob({
+      id: "cron-delete-after-run-skipped",
+      name: "delete cron schedule after skipped run",
+      scheduledAt,
+      schedule: { kind: "cron", expr: "*/5 * * * *", tz: "UTC" },
+      payload: { kind: "agentTurn", message: "run once" },
+      state: { nextRunAtMs: scheduledAt },
+    });
+    cronJob.deleteAfterRun = true;
+    await writeCronJobs(store.storePath, [cronJob]);
+
+    const runIsolatedAgentJob = vi.fn().mockResolvedValue({
+      status: "skipped",
+      reason: "policy check",
+    });
+    const state = createCronServiceState({
+      cronEnabled: true,
+      storePath: store.storePath,
+      log: noopLogger,
+      nowMs: () => scheduledAt,
+      enqueueSystemEvent: vi.fn(),
+      requestHeartbeatNow: vi.fn(),
+      runIsolatedAgentJob,
+    });
+
+    await onTimer(state);
+
+    const remainingJob = state.store?.jobs.find((j) => j.id === "cron-delete-after-run-skipped");
+    expect(remainingJob).toBeDefined();
+    expect(remainingJob?.state.lastStatus).toBe("skipped");
+    expect(remainingJob?.state.nextRunAtMs).toBeGreaterThan(scheduledAt);
+    expect(runIsolatedAgentJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("#63770: deleteAfterRun removes recurring jobs after a transient failure then success", async () => {
+    const store = timerRegressionFixtures.makeStorePath();
+    const scheduledAt = Date.parse("2026-02-06T10:00:00.000Z");
+
+    const cronJob = createIsolatedRegressionJob({
+      id: "every-delete-after-run-retry-then-success",
+      name: "delete recurring after retry success",
+      scheduledAt,
+      schedule: { kind: "every", everyMs: 60_000, anchorMs: scheduledAt },
+      payload: { kind: "agentTurn", message: "run once" },
+      state: { nextRunAtMs: scheduledAt },
+    });
+    cronJob.deleteAfterRun = true;
+    await writeCronJobs(store.storePath, [cronJob]);
+
+    let now = scheduledAt;
+    const runIsolatedAgentJob = vi
+      .fn()
+      .mockResolvedValueOnce({ status: "error", error: "transient failure" })
+      .mockResolvedValueOnce({ status: "ok", summary: "done" });
+    const state = createCronServiceState({
+      cronEnabled: true,
+      storePath: store.storePath,
+      log: noopLogger,
+      nowMs: () => now,
+      enqueueSystemEvent: vi.fn(),
+      requestHeartbeatNow: vi.fn(),
+      runIsolatedAgentJob,
+    });
+
+    await onTimer(state);
+    const jobAfterFailure = state.store?.jobs.find(
+      (j) => j.id === "every-delete-after-run-retry-then-success",
+    );
+    expect(jobAfterFailure).toBeDefined();
+    expect(jobAfterFailure?.state.lastStatus).toBe("error");
+    expect(jobAfterFailure?.state.nextRunAtMs).toBeGreaterThan(scheduledAt);
+
+    now = (jobAfterFailure?.state.nextRunAtMs ?? scheduledAt) + 1;
+    await onTimer(state);
+
+    const deletedJob = state.store?.jobs.find(
+      (j) => j.id === "every-delete-after-run-retry-then-success",
+    );
+    expect(deletedJob).toBeUndefined();
+
+    const persisted = JSON.parse(await fs.readFile(store.storePath, "utf8")) as {
+      jobs?: Array<{ id: string }>;
+    };
+    expect(persisted.jobs?.some((j) => j.id === "every-delete-after-run-retry-then-success")).toBe(
+      false,
+    );
+    expect(runIsolatedAgentJob).toHaveBeenCalledTimes(2);
+  });
+
+  it("#63770: deleteAfterRun removes cron-expression jobs after a transient failure then success", async () => {
+    const store = timerRegressionFixtures.makeStorePath();
+    const scheduledAt = Date.parse("2026-02-06T10:00:00.000Z");
+
+    const cronJob = createIsolatedRegressionJob({
+      id: "cron-delete-after-run-retry-then-success",
+      name: "delete cron schedule after retry success",
+      scheduledAt,
+      schedule: { kind: "cron", expr: "*/5 * * * *", tz: "UTC" },
+      payload: { kind: "agentTurn", message: "run once" },
+      state: { nextRunAtMs: scheduledAt },
+    });
+    cronJob.deleteAfterRun = true;
+    await writeCronJobs(store.storePath, [cronJob]);
+
+    let now = scheduledAt;
+    const runIsolatedAgentJob = vi
+      .fn()
+      .mockResolvedValueOnce({ status: "error", error: "transient failure" })
+      .mockResolvedValueOnce({ status: "ok", summary: "done" });
+    const state = createCronServiceState({
+      cronEnabled: true,
+      storePath: store.storePath,
+      log: noopLogger,
+      nowMs: () => now,
+      enqueueSystemEvent: vi.fn(),
+      requestHeartbeatNow: vi.fn(),
+      runIsolatedAgentJob,
+    });
+
+    await onTimer(state);
+    const jobAfterFailure = state.store?.jobs.find(
+      (j) => j.id === "cron-delete-after-run-retry-then-success",
+    );
+    expect(jobAfterFailure).toBeDefined();
+    expect(jobAfterFailure?.state.lastStatus).toBe("error");
+    expect(jobAfterFailure?.state.nextRunAtMs).toBeGreaterThan(scheduledAt);
+
+    now = (jobAfterFailure?.state.nextRunAtMs ?? scheduledAt) + 1;
+    await onTimer(state);
+
+    const deletedJob = state.store?.jobs.find(
+      (j) => j.id === "cron-delete-after-run-retry-then-success",
+    );
+    expect(deletedJob).toBeUndefined();
+
+    const persisted = JSON.parse(await fs.readFile(store.storePath, "utf8")) as {
+      jobs?: Array<{ id: string }>;
+    };
+    expect(persisted.jobs?.some((j) => j.id === "cron-delete-after-run-retry-then-success")).toBe(
+      false,
+    );
+    expect(runIsolatedAgentJob).toHaveBeenCalledTimes(2);
+  });
+
   it("#24355: one-shot job respects cron.retry config", async () => {
     const store = timerRegressionFixtures.makeStorePath();
     const scheduledAt = Date.parse("2026-02-06T10:00:00.000Z");
