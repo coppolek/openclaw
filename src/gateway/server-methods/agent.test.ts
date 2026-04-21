@@ -854,6 +854,35 @@ describe("gateway agent handler", () => {
     );
   });
 
+  it("accepts Paperclip adapter's root-level paperclip metadata", async () => {
+    primeMainAgentRun();
+    mocks.agentCommand.mockClear();
+    const respond = vi.fn();
+
+    await invokeAgent(
+      {
+        message: "Paperclip wake event",
+        sessionKey: "paperclip",
+        idempotencyKey: "paperclip-test",
+        paperclip: {
+          runId: "paperclip-run-123",
+          agentId: "test-agent",
+          companyId: "test-company",
+        },
+      },
+      { reqId: "paperclip-test-1", respond },
+    );
+
+    await waitForAssertion(() => expect(mocks.agentCommand).toHaveBeenCalled());
+    expect(respond).not.toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({
+        message: expect.stringContaining("invalid agent params"),
+      }),
+    );
+  });
+
   it("does not create task rows for inter-session completion wakes", async () => {
     primeMainAgentRun();
     mocks.agentCommand.mockClear();
