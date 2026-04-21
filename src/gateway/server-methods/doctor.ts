@@ -15,8 +15,9 @@ import {
 import {
   collectDreamDiaryBackfillEntries,
   filterSessionSummaryDailyMemoryFiles,
+  isSupportedShortTermMemoryPath,
+  isSessionSummaryDailyMemoryPath,
   listDailyMemoryFiles,
-  parseDailyMemoryFileName,
 } from "../../memory-host-sdk/runtime-files.js";
 import { getActiveMemorySearchManager } from "../../plugins/memory-runtime.js";
 import { formatError } from "../server-utils.js";
@@ -156,9 +157,6 @@ export type DoctorMemoryDreamActionPayload = {
   keptEntries?: number;
 };
 
-const DREAMING_MEMORY_PATH_RE = /(?:^|\/)memory\/dreaming\//;
-const SHORT_TERM_MEMORY_DIR_RE = /(?:^|\/)memory\/(?:[^/]+\/)*[^/]+$/;
-
 async function listWorkspaceDailyFiles(memoryDir: string): Promise<string[]> {
   try {
     return (
@@ -263,23 +261,26 @@ function normalizeMemoryPathForWorkspace(workspaceDir: string, rawPath: string):
   return normalized;
 }
 
-function isShortTermMemoryPath(filePath: string): boolean {
-  const normalized = normalizeMemoryPath(filePath);
-  if (DREAMING_MEMORY_PATH_RE.test(normalized)) {
+async function shouldCountDoctorShortTermMemoryPath(params: {
+  workspaceDir: string;
+  filePath: string;
+  summaryProbeCache: Map<string, boolean>;
+  snippet?: string;
+}): Promise<boolean> {
+  if (!isSupportedShortTermMemoryPath(params.filePath)) {
     return false;
   }
   if (
-    /(?:^|\/)memory\/\.dreams\/session-corpus\/(\d{4})-(\d{2})-(\d{2})\.(?:md|txt)$/.test(
-      normalized,
-    )
+    await isSessionSummaryDailyMemoryPath({
+      workspaceDir: params.workspaceDir,
+      filePath: params.filePath,
+      cache: params.summaryProbeCache,
+      snippet: params.snippet,
+    })
   ) {
-    return true;
-  }
-  const baseName = path.posix.basename(normalized);
-  if (!parseDailyMemoryFileName(baseName)) {
     return false;
   }
-  return normalized === baseName || SHORT_TERM_MEMORY_DIR_RE.test(normalized);
+  return true;
 }
 
 type DreamingStoreStats = Pick<
@@ -413,6 +414,7 @@ async function loadDreamingStoreStats(
     const activeEntries = new Map<string, DoctorMemoryDreamingEntryPayload>();
     const shortTermEntries: DoctorMemoryDreamingEntryPayload[] = [];
     const promotedEntries: DoctorMemoryDreamingEntryPayload[] = [];
+    const sessionSummaryProbeCache = new Map<string, boolean>();
 
     for (const [entryKey, value] of Object.entries(entries)) {
       const entry = asRecord(value);
@@ -421,7 +423,16 @@ async function loadDreamingStoreStats(
       }
       const source = normalizeTrimmedString(entry.source);
       const entryPath = normalizeTrimmedString(entry.path);
-      if (source !== "memory" || !entryPath || !isShortTermMemoryPath(entryPath)) {
+      if (
+        source !== "memory" ||
+        !entryPath ||
+        !(await shouldCountDoctorShortTermMemoryPath({
+          workspaceDir,
+          filePath: entryPath,
+          summaryProbeCache: sessionSummaryProbeCache,
+          snippet: normalizeTrimmedString(entry.snippet) ?? normalizeTrimmedString(entry.summary),
+        }))
+      ) {
         continue;
       }
       const range = parseEntryRangeFromKey(entryKey, entry.startLine, entry.endLine);
@@ -893,6 +904,7 @@ export const doctorHandlers: GatewayRequestHandlers = {
     const memoryDir = path.join(workspaceDir, "memory");
     const sourceFiles = await filterSessionSummaryDailyMemoryFiles(
       await listWorkspaceDailyFiles(memoryDir),
+      { tolerateReadErrors: false },
     );
     if (sourceFiles.length === 0) {
       const dreamDiary = await readDreamDiary(workspaceDir);
