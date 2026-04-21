@@ -141,7 +141,7 @@ describe("resolveTelegramInboundBody", () => {
 
     expect(transcribeFirstAudioMock).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({
-      bodyText: "hey bot please help",
+      bodyText: '[Audio transcript]: "hey bot please help"',
       effectiveWasMentioned: true,
     });
   });
@@ -168,7 +168,7 @@ describe("resolveTelegramInboundBody", () => {
 
     expect(transcribeFirstAudioMock).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({
-      bodyText: "hello from a voice note",
+      bodyText: '[Audio transcript]: "hello from a voice note"',
     });
     expect(result?.bodyText).not.toContain("<media:audio>");
   });
