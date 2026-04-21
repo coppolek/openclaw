@@ -388,7 +388,7 @@ Behavior:
 - Task last-run timestamps are stored in session state (`heartbeatTaskState`), so intervals survive normal restarts.
 - Task timestamps are only advanced after a heartbeat run completes its normal reply path. Skipped `empty-heartbeat-file` / `no-tasks-due` runs do not mark tasks as completed.
 
-### Task mode is useful when you want one heartbeat file to hold several periodic checks without paying for all of them every tick.
+### Task mode is useful when you want one heartbeat file to hold several periodic checks without paying for all of them every tick
 
 ### PENDING.md integration (optional)
 
