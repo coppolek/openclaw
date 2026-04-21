@@ -115,6 +115,7 @@ Built-in commands available today:
 - `/allowlist [list|add|remove] ...` manages allowlist entries. Text-only.
 - `/approve <id> <decision>` resolves exec approval prompts.
 - `/btw <question>` asks a side question without changing future session context. See [/tools/btw](/tools/btw).
+- `/lean` runs the prompt-stack cleanup pass with safe autofixes and upgrade guidance.
 - `/subagents list|kill|log|info|send|steer|spawn` manages sub-agent runs for the current session.
 - `/acp spawn|cancel|steer|close|sessions|status|set-mode|set|cwd|permissions|timeout|model|reset-options|doctor|install|help` manages ACP sessions and runtime options.
 - `/focus <target>` binds the current Discord thread or Telegram topic/conversation to a session target.
@@ -129,6 +130,7 @@ Built-in commands available today:
 - `/usage off|tokens|full|cost` controls the per-response usage footer or prints a local cost summary.
 - `/tts on|off|status|provider|limit|summary|audio|help` controls TTS. See [/tools/tts](/tools/tts).
 - `/restart` restarts OpenClaw when enabled. Default: enabled; set `commands.restart: false` to disable it.
+- `/powernap` resets all sessions across all agents and restarts the gateway. Used for full session reset without LLM cost.
 - `/activation mention|always` sets group activation mode.
 - `/send on|off|inherit` sets send policy. Owner-only.
 - `/bash <command>` runs a host shell command. Text-only. Alias: `! <command>`. Requires `commands.bash: true` plus `tools.elevated` allowlists.

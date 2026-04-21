@@ -4,6 +4,10 @@ import { resolveMarkdownTableMode } from "openclaw/plugin-sdk/config-runtime";
 import { generateSecureUuid } from "openclaw/plugin-sdk/core";
 import { normalizePollInput, type PollInput } from "openclaw/plugin-sdk/media-runtime";
 import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
+import {
+  looksLikePdfArchiveCandidate,
+  maybeShoarchiveOutboundPdf,
+} from "openclaw/plugin-sdk/shoarchive";
 import { getChildLogger } from "openclaw/plugin-sdk/text-runtime";
 import { redactIdentifier } from "openclaw/plugin-sdk/text-runtime";
 import { convertMarkdownTables } from "openclaw/plugin-sdk/text-runtime";
@@ -145,6 +149,22 @@ export async function sendMessageWhatsApp(
     const result = sendOptions
       ? await active.sendMessage(to, text, mediaBuffer, mediaType, sendOptions)
       : await active.sendMessage(to, text, mediaBuffer, mediaType);
+    if (
+      primaryMediaUrl &&
+      looksLikePdfArchiveCandidate({
+        mediaUrl: primaryMediaUrl,
+        contentType: mediaType,
+        fileName: documentFileName,
+      })
+    ) {
+      await maybeShoarchiveOutboundPdf({
+        mediaUrl: primaryMediaUrl,
+        contentType: mediaType,
+        fileName: documentFileName,
+        recipient: to,
+        via: "WhatsApp",
+      });
+    }
     const messageId = (result as { messageId?: string })?.messageId ?? "unknown";
     const durationMs = Date.now() - startedAt;
     outboundLog.info(

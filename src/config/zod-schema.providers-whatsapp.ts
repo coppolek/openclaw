@@ -19,9 +19,12 @@ const ToolPolicyBySenderSchema = z.record(z.string(), ToolPolicySchema).optional
 
 const WhatsAppGroupEntrySchema = z
   .object({
+    name: z.string().optional(),
     requireMention: z.boolean().optional(),
     tools: ToolPolicySchema,
     toolsBySender: ToolPolicyBySenderSchema,
+    forceActivation: z.enum(["always", "mentions", "never"]).optional(),
+    systemPrompt: z.string().optional(),
   })
   .strict()
   .optional();
@@ -33,6 +36,17 @@ const WhatsAppAckReactionSchema = z
     emoji: z.string().optional(),
     direct: z.boolean().optional().default(true),
     group: z.enum(["always", "mentions", "never"]).optional().default("mentions"),
+  })
+  .strict()
+  .optional();
+
+const WhatsAppWorkIntakeReactionSchema = z
+  .object({
+    emoji: z.string().optional(),
+    direct: z.boolean().optional().default(true),
+    group: z.enum(["always", "mentions", "never"]).optional().default("mentions"),
+    cooldownMs: z.number().int().nonnegative().optional().default(120000),
+    keywords: z.array(z.string()).optional(),
   })
   .strict()
   .optional();
@@ -66,6 +80,8 @@ function buildWhatsAppCommonShape(params: { useDefaults: boolean }) {
     blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
     groups: WhatsAppGroupsSchema,
     ackReaction: WhatsAppAckReactionSchema,
+    allowedReactions: z.array(z.string()).optional(),
+    workIntakeReaction: WhatsAppWorkIntakeReactionSchema,
     reactionLevel: z.enum(["off", "ack", "minimal", "extensive"]).optional(),
     debounceMs: params.useDefaults
       ? z.number().int().nonnegative().optional().default(0)
