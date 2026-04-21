@@ -71,7 +71,7 @@ function resolveRuntimeAuthProfileStore(agentDir?: string): AuthProfileStore | n
   }
 
   if (mainStore && requestedStore) {
-    return mergeAuthProfileStores(mainStore, requestedStore);
+    return mergeAuthProfileStores(mainStore, requestedStore, { preferFresherOAuth: true });
   }
   if (requestedStore) {
     return requestedStore;
@@ -312,7 +312,7 @@ export function ensureAuthProfileStore(
   }
 
   const mainStore = loadAuthProfileStoreForAgent(undefined, options);
-  const merged = mergeAuthProfileStores(mainStore, store);
+  const merged = mergeAuthProfileStores(mainStore, store, { preferFresherOAuth: true });
 
   return overlayExternalAuthProfiles(merged, { agentDir });
 }

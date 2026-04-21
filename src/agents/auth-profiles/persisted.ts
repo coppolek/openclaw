@@ -159,9 +159,90 @@ function mergeRecord<T>(
   return { ...base, ...override };
 }
 
+function normalizeOAuthIdentityToken(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function normalizeOAuthEmailToken(value: string | undefined): string | undefined {
+  return normalizeOAuthIdentityToken(value)?.toLowerCase();
+}
+
+function hasOAuthIdentity(cred: AuthProfileCredential): boolean {
+  if (cred.type !== "oauth") {
+    return false;
+  }
+  return (
+    normalizeOAuthIdentityToken(cred.accountId) !== undefined ||
+    normalizeOAuthEmailToken(cred.email) !== undefined
+  );
+}
+
+function oauthCredentialsShareIdentity(
+  a: AuthProfileCredential,
+  b: AuthProfileCredential,
+): boolean {
+  if (a.type !== "oauth" || b.type !== "oauth") {
+    return false;
+  }
+  const aAccount = normalizeOAuthIdentityToken(a.accountId);
+  const bAccount = normalizeOAuthIdentityToken(b.accountId);
+  if (aAccount !== undefined && bAccount !== undefined) {
+    return aAccount === bAccount;
+  }
+  const aEmail = normalizeOAuthEmailToken(a.email);
+  const bEmail = normalizeOAuthEmailToken(b.email);
+  if (aEmail !== undefined && bEmail !== undefined) {
+    return aEmail === bEmail;
+  }
+  return false;
+}
+
+type MergeAuthProfileStoresOptions = {
+  preferFresherOAuth?: boolean;
+};
+
+function mergeAuthProfileCredentials(
+  base: AuthProfileStore["profiles"],
+  override: AuthProfileStore["profiles"],
+  preferFresherOAuth: boolean,
+): AuthProfileStore["profiles"] {
+  if (!preferFresherOAuth) {
+    return { ...base, ...override };
+  }
+  const merged: AuthProfileStore["profiles"] = { ...base };
+  for (const [profileId, overrideCred] of Object.entries(override)) {
+    const baseCred = merged[profileId];
+    if (
+      baseCred?.type === "oauth" &&
+      overrideCred.type === "oauth" &&
+      baseCred.provider === overrideCred.provider &&
+      Number.isFinite(baseCred.expires) &&
+      (!Number.isFinite(overrideCred.expires) || baseCred.expires > overrideCred.expires)
+    ) {
+      const baseHasIdentity = hasOAuthIdentity(baseCred);
+      const overrideHasIdentity = hasOAuthIdentity(overrideCred);
+      // When both sides declare identities, respect them: the fresher base
+      // only wins if the identities match. If either side lacks identity,
+      // fall back to expiry-based freshness preference.
+      if (baseHasIdentity && overrideHasIdentity) {
+        if (!oauthCredentialsShareIdentity(baseCred, overrideCred)) {
+          merged[profileId] = overrideCred;
+          continue;
+        }
+      }
+      // Keep the fresher base OAuth credential.
+      continue;
+    }
+    merged[profileId] = overrideCred;
+  }
+  return merged;
+}
+
 export function mergeAuthProfileStores(
   base: AuthProfileStore,
   override: AuthProfileStore,
+  options?: MergeAuthProfileStoresOptions,
 ): AuthProfileStore {
   if (
     Object.keys(override.profiles).length === 0 &&
@@ -173,7 +254,11 @@ export function mergeAuthProfileStores(
   }
   return {
     version: Math.max(base.version, override.version ?? base.version),
-    profiles: { ...base.profiles, ...override.profiles },
+    profiles: mergeAuthProfileCredentials(
+      base.profiles,
+      override.profiles,
+      options?.preferFresherOAuth === true,
+    ),
     order: mergeRecord(base.order, override.order),
     lastGood: mergeRecord(base.lastGood, override.lastGood),
     usageStats: mergeRecord(base.usageStats, override.usageStats),
