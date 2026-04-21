@@ -1,4 +1,6 @@
+import fs from "node:fs";
 import fsPromises from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import path from "node:path";
 import type {
   SandboxFsBridge,
@@ -50,13 +52,16 @@ class OpenShellFsBridge implements SandboxFsBridge {
   }): Promise<Buffer> {
     const target = this.resolveTarget(params);
     const hostPath = this.requireHostPath(target);
-    await assertLocalPathSafety({
-      target,
-      root: target.mountHostRoot,
-      allowMissingLeaf: false,
-      allowFinalSymlinkForUnlink: false,
+    const handle = await openPinnedReadableFile({
+      absolutePath: hostPath,
+      rootPath: target.mountHostRoot,
+      containerPath: target.containerPath,
     });
-    return await fsPromises.readFile(hostPath);
+    try {
+      return (await handle.readFile()) as Buffer;
+    } finally {
+      await handle.close();
+    }
   }
 
   async writeFile(params: {
@@ -351,4 +356,97 @@ async function resolveCanonicalCandidate(targetPath: string): Promise<string> {
     missing.unshift(path.basename(cursor));
     cursor = parent;
   }
+}
+
+async function openPinnedReadableFile(params: {
+  absolutePath: string;
+  rootPath: string;
+  containerPath: string;
+}): Promise<FileHandle> {
+  const canonicalRoot = await fsPromises
+    .realpath(params.rootPath)
+    .catch(() => path.resolve(params.rootPath));
+  const preOpenCheck = await resolvePreOpenReadablePath({
+    absolutePath: params.absolutePath,
+    canonicalRoot,
+    containerPath: params.containerPath,
+  });
+  const openCloseOnExecFlag = (fs.constants as Record<string, number>).O_CLOEXEC ?? 0;
+  const openReadFlags =
+    fs.constants.O_RDONLY |
+    (typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0) |
+    openCloseOnExecFlag;
+  const handle = await fsPromises.open(preOpenCheck.resolvedPath, openReadFlags);
+  try {
+    const openedStat = await handle.stat();
+    if (!openedStat.isFile()) {
+      throw new Error(`Sandbox boundary checks failed; cannot read files: ${params.containerPath}`);
+    }
+    if (openedStat.nlink > 1) {
+      throw new Error(`Sandbox boundary checks failed; cannot read files: ${params.containerPath}`);
+    }
+    const resolvedPath = await resolveOpenedReadablePath(handle.fd);
+    if (resolvedPath !== null) {
+      if (!isPathInside(canonicalRoot, resolvedPath)) {
+        throw new Error(`Sandbox boundary checks failed; cannot read files: ${params.containerPath}`);
+      }
+      return handle;
+    }
+    if (!sameFileIdentity(preOpenCheck.stat, openedStat)) {
+      throw new Error(`Sandbox boundary checks failed; cannot read files: ${params.containerPath}`);
+    }
+    return handle;
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
+}
+
+async function resolvePreOpenReadablePath(params: {
+  absolutePath: string;
+  canonicalRoot: string;
+  containerPath: string;
+}): Promise<{ resolvedPath: string; stat: fs.Stats }> {
+  const resolvedPath = await fsPromises.realpath(params.absolutePath);
+  if (!isPathInside(params.canonicalRoot, resolvedPath)) {
+    throw new Error(`Sandbox path escapes allowed mounts; cannot access: ${params.containerPath}`);
+  }
+  const stat = await fsPromises.lstat(resolvedPath);
+  if (!stat.isFile() || stat.nlink > 1) {
+    throw new Error(`Sandbox boundary checks failed; cannot read files: ${params.containerPath}`);
+  }
+  return { resolvedPath, stat };
+}
+
+async function resolveOpenedReadablePath(fd: number): Promise<string | null> {
+  for (const fdPath of [`/proc/self/fd/${fd}`, `/dev/fd/${fd}`]) {
+    try {
+      const openedPath = await fsPromises.readlink(fdPath);
+      return normalizeOpenedReadablePath(openedPath);
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+function normalizeOpenedReadablePath(openedPath: string): string {
+  const deletedSuffix = " (deleted)";
+  const withoutDeletedSuffix = openedPath.endsWith(deletedSuffix)
+    ? openedPath.slice(0, -deletedSuffix.length)
+    : openedPath;
+  return path.resolve(withoutDeletedSuffix);
+}
+
+function sameFileIdentity(left: fs.Stats, right: fs.Stats): boolean {
+  if (left.ino !== right.ino) {
+    return false;
+  }
+  if (left.ino === 0 || right.ino === 0) {
+    return false;
+  }
+  if (left.dev === 0 || right.dev === 0) {
+    return false;
+  }
+  return left.dev === right.dev;
 }
