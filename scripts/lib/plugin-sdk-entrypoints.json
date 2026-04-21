@@ -241,6 +241,7 @@
   "provider-auth-result",
   "provider-auth-login",
   "plugin-entry",
+  "privacy-runtime",
   "provider-catalog-shared",
   "provider-entry",
   "provider-env-vars",
