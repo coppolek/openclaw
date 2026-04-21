@@ -5,7 +5,12 @@ import {
   type WebSearchProviderPlugin,
   type WebSearchProviderToolDefinition,
 } from "openclaw/plugin-sdk/provider-web-search-config-contract";
-import { resolveGeminiApiKey, resolveGeminiModel } from "./gemini-web-search-provider.shared.js";
+import {
+  resolveGeminiApiKey,
+  resolveGeminiApiType,
+  resolveGeminiBaseUrl,
+  resolveGeminiModel,
+} from "./gemini-web-search-provider.shared.js";
 
 const GEMINI_CREDENTIAL_PATH = "plugins.entries.google.config.webSearch.apiKey";
 
@@ -58,7 +63,13 @@ export function createGeminiWebSearchProvider(): WebSearchProviderPlugin {
     hint: "Requires Google Gemini API key · Google Search grounding",
     onboardingScopes: ["text-inference"],
     credentialLabel: "Google Gemini API key",
-    envVars: ["GEMINI_API_KEY"],
+    envVars: [
+      "GEMINI_API_KEY",
+      "GOOGLE_GEMINI_BASE_URL",
+      "GEMINI_BASE_URL",
+      "GOOGLE_GEMINI_ENDPOINT",
+      "GEMINI_API_TYPE",
+    ],
     placeholder: "AIza...",
     signupUrl: "https://aistudio.google.com/apikey",
     docsUrl: "https://docs.openclaw.ai/tools/web",
@@ -82,5 +93,7 @@ export function createGeminiWebSearchProvider(): WebSearchProviderPlugin {
 
 export const __testing = {
   resolveGeminiApiKey,
+  resolveGeminiBaseUrl,
   resolveGeminiModel,
+  resolveGeminiApiType,
 } as const;

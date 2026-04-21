@@ -16,7 +16,11 @@ import {
   resolveApiKeyForProvider,
 } from "openclaw/plugin-sdk/provider-auth-runtime";
 import type { SsrFPolicy } from "openclaw/plugin-sdk/ssrf-runtime";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
+import {
+  normalizeOptionalString,
+} from "openclaw/plugin-sdk/text-runtime";
+import { DEFAULT_GOOGLE_API_BASE_URL } from "./api.js";
+import { resolveGoogleApiType, resolveGoogleBaseUrl } from "./env-utils.js";
 
 export type GeminiEmbeddingClient = {
   baseUrl: string;
@@ -26,10 +30,10 @@ export type GeminiEmbeddingClient = {
   modelPath: string;
   apiKeys: string[];
   outputDimensionality?: number;
+  apiType: "gemini" | "openai-compatible";
 };
 
 export const DEFAULT_GEMINI_EMBEDDING_MODEL = "gemini-embedding-001";
-const DEFAULT_GOOGLE_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 const GEMINI_MAX_INPUT_TOKENS: Record<string, number> = {
   "text-embedding-004": 2048,
   "gemini-embedding-001": 2048,
@@ -169,6 +173,7 @@ async function fetchGeminiEmbeddingPayload(params: {
 }): Promise<{
   embedding?: { values?: number[] };
   embeddings?: Array<{ values?: number[] }>;
+  data?: Array<{ embedding?: number[] }>; // OpenAI format
 }> {
   return await executeWithApiKeyRotation({
     provider: "google",
@@ -179,6 +184,12 @@ async function fetchGeminiEmbeddingPayload(params: {
         ...authHeaders.headers,
         ...params.client.headers,
       };
+      // For OpenAI-compatible endpoints, we use Bearer token
+      if (params.client.apiType === "openai-compatible") {
+        headers["Authorization"] = `Bearer ${apiKey}`;
+        delete headers["x-goog-api-key"];
+      }
+
       return await withRemoteHttpResponse({
         url: params.endpoint,
         ssrfPolicy: params.client.ssrfPolicy,
@@ -195,6 +206,7 @@ async function fetchGeminiEmbeddingPayload(params: {
           return (await res.json()) as {
             embedding?: { values?: number[] };
             embeddings?: Array<{ values?: number[] }>;
+            data?: Array<{ embedding?: number[] }>;
           };
         },
       });
@@ -202,38 +214,8 @@ async function fetchGeminiEmbeddingPayload(params: {
   });
 }
 
-function normalizeGeminiBaseUrl(raw: string): string {
-  const trimmed = raw.replace(/\/+$/, "");
-  const openAiIndex = trimmed.indexOf("/openai");
-  if (openAiIndex > -1) {
-    return normalizeGoogleApiBaseUrl(trimmed.slice(0, openAiIndex));
-  }
-  return normalizeGoogleApiBaseUrl(trimmed);
-}
-
 function buildGeminiModelPath(model: string): string {
   return model.startsWith("models/") ? model : `models/${model}`;
-}
-
-function normalizeGoogleApiBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, "");
-  if (!trimmed) {
-    return DEFAULT_GOOGLE_API_BASE_URL;
-  }
-  try {
-    const url = new URL(trimmed);
-    url.hash = "";
-    url.search = "";
-    if (
-      url.origin.toLowerCase() === "https://generativelanguage.googleapis.com" &&
-      url.pathname.replace(/\/+$/, "") === ""
-    ) {
-      url.pathname = "/v1beta";
-    }
-    return url.toString().replace(/\/+$/, "");
-  } catch {
-    return trimmed;
-  }
 }
 
 export async function createGeminiEmbeddingProvider(
@@ -241,8 +223,15 @@ export async function createGeminiEmbeddingProvider(
 ): Promise<{ provider: MemoryEmbeddingProvider; client: GeminiEmbeddingClient }> {
   const client = await resolveGeminiEmbeddingClient(options);
   const baseUrl = client.baseUrl.replace(/\/$/, "");
-  const embedUrl = `${baseUrl}/${client.modelPath}:embedContent`;
-  const batchUrl = `${baseUrl}/${client.modelPath}:batchEmbedContents`;
+  const isOpenAICompatible = client.apiType === "openai-compatible";
+
+  const embedUrl = isOpenAICompatible
+    ? `${baseUrl}/embeddings`
+    : `${baseUrl}/${client.modelPath}:embedContent`;
+  const batchUrl = isOpenAICompatible
+    ? `${baseUrl}/embeddings`
+    : `${baseUrl}/${client.modelPath}:batchEmbedContents`;
+
   const isV2 = isGeminiEmbedding2Model(client.model);
   const outputDimensionality = client.outputDimensionality;
 
@@ -250,15 +239,23 @@ export async function createGeminiEmbeddingProvider(
     if (!text.trim()) {
       return [];
     }
+    const body = isOpenAICompatible
+      ? { model: client.model, input: text }
+      : buildGeminiTextEmbeddingRequest({
+          text,
+          taskType: options.taskType ?? "RETRIEVAL_QUERY",
+          outputDimensionality: isV2 ? outputDimensionality : undefined,
+        });
+
     const payload = await fetchGeminiEmbeddingPayload({
       client,
       endpoint: embedUrl,
-      body: buildGeminiTextEmbeddingRequest({
-        text,
-        taskType: options.taskType ?? "RETRIEVAL_QUERY",
-        outputDimensionality: isV2 ? outputDimensionality : undefined,
-      }),
+      body,
     });
+
+    if (isOpenAICompatible) {
+      return sanitizeAndNormalizeEmbedding(payload.data?.[0]?.embedding ?? []);
+    }
     return sanitizeAndNormalizeEmbedding(payload.embedding?.values ?? []);
   };
 
@@ -266,6 +263,20 @@ export async function createGeminiEmbeddingProvider(
     if (inputs.length === 0) {
       return [];
     }
+
+    if (isOpenAICompatible) {
+      const payload = await fetchGeminiEmbeddingPayload({
+        client,
+        endpoint: batchUrl,
+        body: {
+          model: client.model,
+          input: inputs.map((input) => input.text),
+        },
+      });
+      const data = Array.isArray(payload.data) ? payload.data : [];
+      return inputs.map((_, index) => sanitizeAndNormalizeEmbedding(data[index]?.embedding ?? []));
+    }
+
     const payload = await fetchGeminiEmbeddingPayload({
       client,
       endpoint: batchUrl,
@@ -324,11 +335,9 @@ export async function resolveGeminiEmbeddingClient(
       );
 
   const providerConfig = options.config.models?.providers?.google;
-  const rawBaseUrl =
-    remoteBaseUrl ||
-    normalizeOptionalString(providerConfig?.baseUrl) ||
-    DEFAULT_GOOGLE_API_BASE_URL;
-  const baseUrl = normalizeGeminiBaseUrl(rawBaseUrl);
+  const googleBaseUrl = resolveGoogleBaseUrl(remoteBaseUrl || normalizeOptionalString(providerConfig?.baseUrl));
+  const baseUrl = googleBaseUrl.replace(/\/$/, "");
+  
   const ssrfPolicy = buildRemoteBaseUrlPolicy(baseUrl);
   const headerOverrides = Object.assign({}, providerConfig?.headers, remote?.headers);
   const headers: Record<string, string> = {
@@ -344,14 +353,23 @@ export async function resolveGeminiEmbeddingClient(
     model,
     options.outputDimensionality,
   );
+
+  const apiType = resolveGoogleApiType(baseUrl, (providerConfig as Record<string, unknown> | undefined)?.apiType as string | undefined);
+
   debugEmbeddingsLog("memory embeddings: gemini client", {
-    rawBaseUrl,
     baseUrl,
     model,
     modelPath,
     outputDimensionality,
-    embedEndpoint: `${baseUrl}/${modelPath}:embedContent`,
-    batchEndpoint: `${baseUrl}/${modelPath}:batchEmbedContents`,
+    apiType,
+    embedEndpoint:
+      apiType === "openai-compatible"
+        ? `${baseUrl}/embeddings`
+        : `${baseUrl}/${modelPath}:embedContent`,
+    batchEndpoint:
+      apiType === "openai-compatible"
+        ? `${baseUrl}/embeddings`
+        : `${baseUrl}/${modelPath}:batchEmbedContents`,
   });
-  return { baseUrl, headers, ssrfPolicy, model, modelPath, apiKeys, outputDimensionality };
+  return { baseUrl, headers, ssrfPolicy, model, modelPath, apiKeys, outputDimensionality, apiType };
 }

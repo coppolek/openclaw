@@ -42,9 +42,7 @@ function isNodeRunnablePnpmExecPath(value) {
 
 export function resolvePnpmRunner(params = {}) {
   const pnpmArgs = params.pnpmArgs ?? [];
-  const nodeArgs = params.nodeArgs ?? [];
   const npmExecPath = params.npmExecPath ?? process.env.npm_execpath;
-  const nodeExecPath = params.nodeExecPath ?? process.execPath;
   const platform = params.platform ?? process.platform;
   const comSpec = params.comSpec ?? process.env.ComSpec ?? "cmd.exe";
 
@@ -54,8 +52,8 @@ export function resolvePnpmRunner(params = {}) {
     isNodeRunnablePnpmExecPath(npmExecPath)
   ) {
     return {
-      command: nodeExecPath,
-      args: [...nodeArgs, npmExecPath, ...pnpmArgs],
+      command: npmExecPath,
+      args: pnpmArgs,
       shell: false,
     };
   }

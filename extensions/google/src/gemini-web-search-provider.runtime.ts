@@ -16,14 +16,13 @@ import {
   wrapWebContent,
   writeCachedSearchPayload,
 } from "openclaw/plugin-sdk/provider-web-search";
-import { DEFAULT_GOOGLE_API_BASE_URL } from "../api.js";
 import {
+  resolveGeminiApiType,
+  resolveGeminiBaseUrl,
   resolveGeminiConfig,
   resolveGeminiModel,
   type GeminiConfig,
 } from "./gemini-web-search-provider.shared.js";
-
-const GEMINI_API_BASE = DEFAULT_GOOGLE_API_BASE_URL;
 
 type GeminiGroundingResponse = {
   candidates?: Array<{
@@ -48,21 +47,93 @@ type GeminiGroundingResponse = {
   };
 };
 
+type OpenAICompatibleChatResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+  grounding_metadata?: {
+    groundingChunks?: Array<{
+      web?: {
+        uri?: string;
+        title?: string;
+      };
+    }>;
+  };
+  error?: {
+    message?: string;
+  };
+};
+
 export function resolveGeminiRuntimeApiKey(gemini?: GeminiConfig): string | undefined {
   return (
     readConfiguredSecretString(gemini?.apiKey, "tools.web.search.gemini.apiKey") ??
-    readProviderEnvValue(["GEMINI_API_KEY"])
+    readProviderEnvValue(["GEMINI_API_KEY", "GOOGLE_API_KEY"])
   );
 }
 
 async function runGeminiSearch(params: {
   query: string;
   apiKey: string;
+  baseUrl: string;
   model: string;
+  apiType: "gemini" | "openai-compatible";
   timeoutSeconds: number;
 }): Promise<{ content: string; citations: Array<{ url: string; title?: string }> }> {
-  const endpoint = `${GEMINI_API_BASE}/models/${params.model}:generateContent`;
+  const baseUrl = params.baseUrl.trim().replace(/\/$/, "");
 
+  if (params.apiType === "openai-compatible") {
+    const endpoint = `${baseUrl}/chat/completions`;
+    return withTrustedWebSearchEndpoint(
+      {
+        url: endpoint,
+        timeoutSeconds: params.timeoutSeconds,
+        init: {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${params.apiKey}`,
+          },
+          body: JSON.stringify({
+            model: params.model,
+            messages: [{ role: "user", content: params.query }],
+            tools: [{ google_search: {} }],
+          }),
+        },
+      },
+      async (res) => {
+        if (!res.ok) {
+          const detail = (await res.text()) || res.statusText;
+          throw new Error(`OpenAI-compatible API error (${res.status}) at ${endpoint}: ${detail}`);
+        }
+        const data = (await res.json()) as OpenAICompatibleChatResponse;
+        if (data.error) {
+          throw new Error(`API error: ${data.error.message}`);
+        }
+
+        const choice = data.choices?.[0];
+        const content = choice?.message?.content ?? "No response";
+        const rawCitations = (data.grounding_metadata?.groundingChunks ?? [])
+          .filter((chunk) => chunk.web?.uri)
+          .map((chunk) => ({
+            url: chunk.web!.uri!,
+            title: chunk.web?.title || undefined,
+          }));
+
+        const citations: Array<{ url: string; title?: string }> = [];
+        for (const citation of rawCitations) {
+          citations.push({
+            ...citation,
+            url: await resolveCitationRedirectUrl(citation.url),
+          });
+        }
+        return { content, citations };
+      },
+    );
+  }
+
+  const endpoint = `${baseUrl}/models/${params.model}:generateContent`;
   return withTrustedWebSearchEndpoint(
     {
       url: endpoint,
@@ -85,7 +156,7 @@ async function runGeminiSearch(params: {
           /key=[^&\s]+/giu,
           "key=***",
         );
-        throw new Error(`Gemini API error (${res.status}): ${safeDetail}`);
+        throw new Error(`Gemini API error (${res.status}) at ${endpoint}: ${safeDetail}`);
       }
 
       let data: GeminiGroundingResponse;
@@ -99,7 +170,7 @@ async function runGeminiSearch(params: {
       if (data.error) {
         const rawMessage = data.error.message || data.error.status || "unknown";
         throw new Error(
-          `Gemini API error (${data.error.code}): ${rawMessage.replace(/key=[^&\s]+/giu, "key=***")}`,
+          `Gemini API error (${data.error.code}) at ${endpoint}: ${rawMessage.replace(/key=[^&\s]+/giu, "key=***")}`,
         );
       }
 
@@ -120,9 +191,10 @@ async function runGeminiSearch(params: {
       for (let index = 0; index < rawCitations.length; index += 10) {
         const batch = rawCitations.slice(index, index + 10);
         const resolved = await Promise.all(
-          batch.map(async (citation) =>
-            Object.assign({}, citation, { url: await resolveCitationRedirectUrl(citation.url) }),
-          ),
+          batch.map(async (citation) => ({
+            ...citation,
+            url: await resolveCitationRedirectUrl(citation.url),
+          })),
         );
         citations.push(...resolved);
       }
@@ -156,11 +228,15 @@ export async function executeGeminiSearch(
   const count =
     readNumberParam(args, "count", { integer: true }) ?? searchConfig?.maxResults ?? undefined;
   const model = resolveGeminiModel(geminiConfig);
+  const baseUrl = resolveGeminiBaseUrl(geminiConfig);
+  const apiType = resolveGeminiApiType(geminiConfig);
   const cacheKey = buildSearchCacheKey([
     "gemini",
     query,
     resolveSearchCount(count, DEFAULT_SEARCH_COUNT),
     model,
+    baseUrl,
+    apiType,
   ]);
   const cached = readCachedSearchPayload(cacheKey);
   if (cached) {
@@ -171,7 +247,9 @@ export async function executeGeminiSearch(
   const result = await runGeminiSearch({
     query,
     apiKey,
+    baseUrl,
     model,
+    apiType,
     timeoutSeconds: resolveSearchTimeoutSeconds(searchConfig),
   });
   const payload = {

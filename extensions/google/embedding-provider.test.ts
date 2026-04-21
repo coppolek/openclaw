@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { withEnv } from "openclaw/plugin-sdk/testing";
 import {
   buildGeminiEmbeddingRequest,
   buildGeminiTextEmbeddingRequest,
@@ -7,6 +8,7 @@ import {
   GEMINI_EMBEDDING_2_MODELS,
   isGeminiEmbedding2Model,
   normalizeGeminiModel,
+  resolveGeminiEmbeddingClient,
   resolveGeminiOutputDimensionality,
 } from "./embedding-provider.js";
 
@@ -105,6 +107,68 @@ describe("Gemini embedding request helpers", () => {
   });
 });
 
+describe("resolveGeminiEmbeddingClient", () => {
+  it("resolves the Gemini base URL and apiType from config and environment", async () => {
+    await withEnv(
+      {
+        GEMINI_BASE_URL: "https://custom.gemini.api/v1",
+        GOOGLE_GEMINI_BASE_URL: undefined,
+        GOOGLE_GEMINI_ENDPOINT: undefined,
+      },
+      async () => {
+        const client = await resolveGeminiEmbeddingClient({
+          config: {} as never,
+          provider: "gemini",
+          model: "gemini-embedding-001",
+          fallback: "none",
+          remote: { apiKey: "test-key" },
+        });
+        expect(client.baseUrl).toBe("https://custom.gemini.api/v1");
+        expect(client.apiType).toBe("openai-compatible");
+      },
+    );
+
+    await withEnv(
+      {
+        GEMINI_BASE_URL: "https://custom.gemini.api",
+        GOOGLE_GEMINI_BASE_URL: undefined,
+        GOOGLE_GEMINI_ENDPOINT: undefined,
+      },
+      async () => {
+        const client = await resolveGeminiEmbeddingClient({
+          config: {} as never,
+          provider: "gemini",
+          model: "gemini-embedding-001",
+          fallback: "none",
+          remote: { apiKey: "test-key" },
+        });
+        expect(client.baseUrl).toBe("https://custom.gemini.api");
+        // Non-official Google host defaults to openai-compatible for safety/proxies
+        expect(client.apiType).toBe("openai-compatible");
+      },
+    );
+  });
+
+  it("respects explicit apiType overrides", async () => {
+    const client = await resolveGeminiEmbeddingClient({
+      config: {
+        models: {
+          providers: {
+            google: {
+              apiType: "openai-compatible",
+            },
+          },
+        },
+      } as any,
+      provider: "gemini",
+      model: "gemini-embedding-001",
+      fallback: "none",
+      remote: { apiKey: "test-key" },
+    });
+    expect(client.apiType).toBe("openai-compatible");
+  });
+});
+
 describe("Gemini embedding provider", () => {
   it("handles legacy and v2 request/response behavior", async () => {
     const fetchMock = installFetchMock((input) => {
@@ -118,15 +182,19 @@ describe("Gemini embedding provider", () => {
         : { embedding: { values: [3, 4, Number.NaN] } };
     });
 
-    const { provider } = await createGeminiEmbeddingProvider({
-      config: {} as never,
-      provider: "gemini",
-      remote: { apiKey: "test-key" },
-      model: "gemini-embedding-2-preview",
-      outputDimensionality: 768,
-      taskType: "SEMANTIC_SIMILARITY",
-      fallback: "none",
-    });
+    const { provider } = await withEnv(
+      { GOOGLE_GEMINI_BASE_URL: undefined, GOOGLE_GEMINI_ENDPOINT: undefined, GEMINI_BASE_URL: undefined },
+      () =>
+        createGeminiEmbeddingProvider({
+          config: {} as never,
+          provider: "gemini",
+          remote: { apiKey: "test-key" },
+          model: "gemini-embedding-2-preview",
+          outputDimensionality: 768,
+          taskType: "SEMANTIC_SIMILARITY",
+          fallback: "none",
+        }),
+    );
 
     await expect(provider.embedQuery("   ")).resolves.toEqual([]);
     await expect(provider.embedBatch([])).resolves.toEqual([]);
