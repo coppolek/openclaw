@@ -378,8 +378,9 @@ function deferGatewayRestartUntilIdleImpl(
       pending = getPendingCount();
     } catch (err) {
       hooks?.onCheckError?.(err);
-      // On error, treat as non-zero to avoid restarting while work is uncertain.
-      pending = 1;
+      clearInterval(poll);
+      emitGatewayRestart();
+      return;
     }
     const elapsedMs = Date.now() - startedAt;
     if (pending === 0) {
@@ -392,6 +393,21 @@ function deferGatewayRestartUntilIdleImpl(
     }
     hooks?.onDeferring?.(pending);
   }, pollMs);
+
+  // Immediate check before first poll tick to avoid added latency when already idle.
+  try {
+    if (getPendingCount() === 0) {
+      clearInterval(poll);
+      hooks?.onReady?.();
+      emitGatewayRestart();
+      return;
+    }
+  } catch (err) {
+    hooks?.onCheckError?.(err);
+    clearInterval(poll);
+    emitGatewayRestart();
+    return;
+  }
 
   return poll;
 }
