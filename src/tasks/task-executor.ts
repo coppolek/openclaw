@@ -77,7 +77,8 @@ function ensureSingleTaskFlow(params: {
       return linked;
     }
     return linked;
-  } catch (error) {
+  }
+  catch (error) {
     log.warn("Failed to create one-task flow for detached run", {
       taskId: params.task.taskId,
       runId: params.task.runId,
@@ -507,6 +508,45 @@ export function runTaskInFlow(params: RunTaskInFlowParams): RunTaskInFlowResult 
     };
   }
 
+  const flowTasks = listTasksForFlowId(flow.flowId);
+  let consecutiveDenials = 0;
+  for (let i = flowTasks.length - 1; i >= 0; i--) {
+    const t = flowTasks[i];
+    if (t.status === "queued" || t.status === "running") {
+      continue;
+    }
+    const errorText = (t.error || "").toLowerCase();
+    const summaryText = (t.terminalSummary || "").toLowerCase();
+    const isDenied =
+      t.terminalOutcome === "blocked" ||
+      errorText.includes("denied") ||
+      errorText.includes("rejected") ||
+      errorText.includes("拒绝") ||
+      summaryText.includes("denied") ||
+      summaryText.includes("拒绝");
+    if (isDenied) {
+      consecutiveDenials++;
+    }
+    else {
+      break;
+    }
+  }
+
+  if (consecutiveDenials >= 3) {
+    log.warn("Consecutive denial threshold reached. Suspending task flow execution.", {
+      flowId: flow.flowId,
+      consecutiveDenials,
+    });
+    const cancelRes = markFlowCancelRequested(flow);
+    const updatedFlow = "reason" in cancelRes ? (cancelRes.flow ?? flow) : cancelRes;
+    return {
+      found: true,
+      created: false,
+      reason: `Task execution denied ${consecutiveDenials} times consecutively. Flow suspended to prevent runaway retry loops. Please check user instructions.`,
+      flow: updatedFlow,
+    };
+  }
+
   const common = {
     runtime: params.runtime,
     sourceId: params.sourceId,
@@ -529,13 +569,14 @@ export function runTaskInFlow(params: RunTaskInFlowParams): RunTaskInFlowResult 
     task =
       params.status === "running"
         ? createRunningTaskRun({
-            ...common,
-            startedAt: params.startedAt,
-            lastEventAt: params.lastEventAt,
-            progressSummary: params.progressSummary,
-          })
+          ...common,
+          startedAt: params.startedAt,
+          lastEventAt: params.lastEventAt,
+          progressSummary: params.progressSummary,
+        })
         : createQueuedTaskRun(common);
-  } catch (error) {
+  }
+  catch (error) {
     return mapRunTaskInFlowCreateError({
       error,
       flowId: flow.flowId,
