@@ -349,6 +349,35 @@ describe("openshell fs bridges", () => {
     }
   });
 
+  it("falls back to inode checks when fd path resolution is unavailable", async () => {
+    const workspaceDir = await makeTempDir("openclaw-openshell-fs-");
+    await fs.mkdir(path.join(workspaceDir, "subdir"), { recursive: true });
+    await fs.writeFile(path.join(workspaceDir, "subdir", "secret.txt"), "inside", "utf8");
+
+    const backend = createMirrorBackendMock();
+    const sandbox = createSandboxTestContext({
+      overrides: {
+        backendId: "openshell",
+        workspaceDir,
+        agentWorkspaceDir: workspaceDir,
+        containerWorkdir: "/sandbox",
+      },
+    });
+
+    const { createOpenShellFsBridge } = await import("./fs-bridge.js");
+    const bridge = createOpenShellFsBridge({ sandbox, backend });
+    const readlinkSpy = vi.spyOn(fs, "readlink").mockRejectedValue(new Error("fd path unavailable"));
+
+    try {
+      await expect(bridge.readFile({ filePath: "subdir/secret.txt" })).resolves.toEqual(
+        Buffer.from("inside"),
+      );
+      expect(readlinkSpy).toHaveBeenCalled();
+    } finally {
+      readlinkSpy.mockRestore();
+    }
+  });
+
   it("maps agent mount paths when the sandbox workspace is read-only", async () => {
     const workspaceDir = await makeTempDir("openclaw-openshell-fs-");
     const agentWorkspaceDir = await makeTempDir("openclaw-openshell-agent-");

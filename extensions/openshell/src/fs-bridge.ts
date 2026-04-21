@@ -57,9 +57,9 @@ class OpenShellFsBridge implements SandboxFsBridge {
       containerPath: target.containerPath,
     });
     try {
-      return fs.readFileSync(opened.fd);
+      return await readReadableFileDescriptor(opened.fd);
     } finally {
-      fs.closeSync(opened.fd);
+      await closeReadableFileDescriptor(opened.fd);
     }
   }
 
@@ -365,14 +365,28 @@ async function openPinnedReadableFile(params: {
   const canonicalRoot = await fsPromises
     .realpath(params.rootPath)
     .catch(() => path.resolve(params.rootPath));
+  const preOpenCheck = await resolvePreOpenReadablePath({
+    absolutePath: params.absolutePath,
+    canonicalRoot,
+    containerPath: params.containerPath,
+  });
   const openReadFlags =
     fs.constants.O_RDONLY |
     (typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0);
   const fd = fs.openSync(params.absolutePath, openReadFlags);
   try {
     const openedStat = fs.fstatSync(fd);
+    if (!openedStat.isFile()) {
+      throw new Error(`Sandbox boundary checks failed; cannot read files: ${params.containerPath}`);
+    }
     const resolvedPath = await resolveOpenedReadablePath(fd);
-    if (!openedStat.isFile() || !isPathInside(canonicalRoot, resolvedPath)) {
+    if (resolvedPath !== null) {
+      if (!isPathInside(canonicalRoot, resolvedPath)) {
+        throw new Error(`Sandbox boundary checks failed; cannot read files: ${params.containerPath}`);
+      }
+      return { fd };
+    }
+    if (!sameFileIdentity(preOpenCheck.stat, openedStat)) {
       throw new Error(`Sandbox boundary checks failed; cannot read files: ${params.containerPath}`);
     }
     return { fd };
@@ -382,7 +396,23 @@ async function openPinnedReadableFile(params: {
   }
 }
 
-async function resolveOpenedReadablePath(fd: number): Promise<string> {
+async function resolvePreOpenReadablePath(params: {
+  absolutePath: string;
+  canonicalRoot: string;
+  containerPath: string;
+}): Promise<{ resolvedPath: string; stat: fs.Stats }> {
+  const resolvedPath = await fsPromises.realpath(params.absolutePath);
+  if (!isPathInside(params.canonicalRoot, resolvedPath)) {
+    throw new Error(`Sandbox path escapes allowed mounts; cannot access: ${params.containerPath}`);
+  }
+  const stat = await fsPromises.lstat(resolvedPath);
+  if (!stat.isFile()) {
+    throw new Error(`Sandbox boundary checks failed; cannot read files: ${params.containerPath}`);
+  }
+  return { resolvedPath, stat };
+}
+
+async function resolveOpenedReadablePath(fd: number): Promise<string | null> {
   for (const fdPath of [`/proc/self/fd/${fd}`, `/dev/fd/${fd}`]) {
     try {
       const openedPath = await fsPromises.readlink(fdPath);
@@ -391,7 +421,7 @@ async function resolveOpenedReadablePath(fd: number): Promise<string> {
       continue;
     }
   }
-  throw new Error("Sandbox boundary checks failed; cannot resolve opened file path");
+  return null;
 }
 
 function normalizeOpenedReadablePath(openedPath: string): string {
@@ -400,4 +430,40 @@ function normalizeOpenedReadablePath(openedPath: string): string {
     ? openedPath.slice(0, -deletedSuffix.length)
     : openedPath;
   return path.resolve(withoutDeletedSuffix);
+}
+
+function sameFileIdentity(left: fs.Stats, right: fs.Stats): boolean {
+  if (left.ino !== right.ino) {
+    return false;
+  }
+  if (left.dev === right.dev) {
+    return true;
+  }
+  const leftDevUnknown = left.dev === 0;
+  const rightDevUnknown = right.dev === 0;
+  return process.platform === "win32" && (leftDevUnknown || rightDevUnknown);
+}
+
+async function closeReadableFileDescriptor(fd: number): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    fs.close(fd, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+async function readReadableFileDescriptor(fd: number): Promise<Buffer> {
+  return await new Promise<Buffer>((resolve, reject) => {
+    fs.readFile(fd, (error, data) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(data);
+    });
+  });
 }
