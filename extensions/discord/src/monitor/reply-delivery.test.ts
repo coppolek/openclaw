@@ -1,6 +1,7 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { rememberDiscordDirectoryUser, __resetDiscordDirectoryCacheForTest } from "../directory-cache.js";
 import {
   __testing as threadBindingTesting,
   createThreadBindingManager,
@@ -9,6 +10,7 @@ import {
 const sendMessageDiscordMock = vi.hoisted(() => vi.fn());
 const sendVoiceMessageDiscordMock = vi.hoisted(() => vi.fn());
 const sendWebhookMessageDiscordMock = vi.hoisted(() => vi.fn());
+const sendDiscordComponentMessageMock = vi.hoisted(() => vi.fn());
 const sendDiscordTextMock = vi.hoisted(() => vi.fn());
 const retryAsyncMock = vi.hoisted(() =>
   vi.fn(
@@ -43,6 +45,15 @@ vi.mock("../send.js", async () => {
     sendMessageDiscord: (...args: unknown[]) => sendMessageDiscordMock(...args),
     sendVoiceMessageDiscord: (...args: unknown[]) => sendVoiceMessageDiscordMock(...args),
     sendWebhookMessageDiscord: (...args: unknown[]) => sendWebhookMessageDiscordMock(...args),
+  };
+});
+
+vi.mock("../send.components.js", async () => {
+  const actual =
+    await vi.importActual<typeof import("../send.components.js")>("../send.components.js");
+  return {
+    ...actual,
+    sendDiscordComponentMessage: (...args: unknown[]) => sendDiscordComponentMessageMock(...args),
   };
 });
 
@@ -131,12 +142,17 @@ describe("deliverDiscordReply", () => {
       messageId: "webhook-1",
       channelId: "thread-1",
     });
+    sendDiscordComponentMessageMock.mockClear().mockResolvedValue({
+      messageId: "component-1",
+      channelId: "channel-1",
+    });
     sendDiscordTextMock.mockClear().mockResolvedValue({
       id: "msg-direct-1",
       channel_id: "channel-1",
     });
     retryAsyncMock.mockClear();
     threadBindingTesting.resetThreadBindingsForTests();
+    __resetDiscordDirectoryCacheForTest();
   });
 
   it("routes audioAsVoice payloads through the voice API and sends text separately", async () => {
@@ -242,12 +258,23 @@ describe("deliverDiscordReply", () => {
     );
   });
 
-  it("sends text first and videos as a separate media-only follow-up", async () => {
+  it("routes plain component replies through the Discord component sender", async () => {
     await deliverDiscordReply({
       replies: [
         {
-          text: "done — i kicked off a 5s Molty clip",
-          mediaUrls: ["/tmp/molty.mp4"],
+          text: "Choose wisely",
+          channelData: {
+            discord: {
+              components: {
+                blocks: [
+                  {
+                    type: "actions",
+                    buttons: [{ label: "Approve", callbackData: "approve", style: "success" }],
+                  },
+                ],
+              },
+            },
+          },
         },
       ],
       target: "channel:654",
@@ -258,23 +285,293 @@ describe("deliverDiscordReply", () => {
       replyToId: "reply-1",
     });
 
-    expect(sendMessageDiscordMock).toHaveBeenCalledTimes(2);
-    expect(sendMessageDiscordMock).toHaveBeenNthCalledWith(
-      1,
+    expect(sendDiscordComponentMessageMock).toHaveBeenCalledTimes(1);
+    expect(sendDiscordComponentMessageMock).toHaveBeenCalledWith(
       "channel:654",
-      "done — i kicked off a 5s Molty clip",
+      expect.objectContaining({
+        text: "Choose wisely",
+        blocks: [
+          expect.objectContaining({
+            type: "actions",
+            buttons: [expect.objectContaining({ label: "Approve", callbackData: "approve" })],
+          }),
+        ],
+      }),
+      expect.objectContaining({ token: "token", replyTo: "reply-1" }),
+    );
+    expect(sendMessageDiscordMock).not.toHaveBeenCalled();
+  });
+
+  it("applies markdown-table conversion when component text falls back from payload text", async () => {
+    const cfgWithCodeTables = {
+      channels: { discord: { token: "test-token", markdownTableMode: "code" } },
+    } as OpenClawConfig;
+
+    await deliverDiscordReply({
+      replies: [
+        {
+          text: "| H | I |\n| - | - |\n| 1 | 2 |",
+          channelData: {
+            discord: {
+              components: {
+                blocks: [
+                  {
+                    type: "actions",
+                    buttons: [{ label: "Approve", callbackData: "approve", style: "success" }],
+                  },
+                ],
+              },
+            },
+          },
+        },
+      ],
+      target: "channel:654",
+      token: "token",
+      runtime,
+      cfg: cfgWithCodeTables,
+      textLimit: 2000,
+      replyToId: "reply-1",
+    });
+
+    expect(sendDiscordComponentMessageMock).toHaveBeenCalledTimes(1);
+    const spec = sendDiscordComponentMessageMock.mock.calls[0]?.[1] as {
+      text?: string;
+    };
+    expect(spec.text?.startsWith("```")).toBe(true);
+    expect(spec.text).toContain("| H | I |");
+    expect(spec.text).toContain("| --- | --- |");
+  });
+
+  it("rewrites known mentions in component reply text", async () => {
+    rememberDiscordDirectoryUser({
+      accountId: "default",
+      userId: "123456789012345678",
+      handles: ["alice"],
+    });
+
+    await deliverDiscordReply({
+      replies: [
+        {
+          text: "hi @alice",
+          channelData: {
+            discord: {
+              components: {
+                blocks: [
+                  {
+                    type: "actions",
+                    buttons: [{ label: "Approve", callbackData: "approve", style: "success" }],
+                  },
+                ],
+              },
+            },
+          },
+        },
+      ],
+      target: "channel:654",
+      token: "token",
+      runtime,
+      cfg,
+      textLimit: 2000,
+      replyToId: "reply-1",
+    });
+
+    const spec = sendDiscordComponentMessageMock.mock.calls.at(-1)?.[1] as {
+      text?: string;
+    };
+    expect(spec.text).toContain("<@123456789012345678>");
+  });
+
+  it("builds Discord components from interactive replies and attaches them to the first media send", async () => {
+    const mediaLocalRoots = ["/tmp/workspace-agent"] as const;
+    await deliverDiscordReply({
+      replies: [
+        {
+          text: "Media choice",
+          mediaUrls: ["https://example.com/first.png", "https://example.com/second.png"],
+          interactive: {
+            blocks: [
+              {
+                type: "buttons",
+                buttons: [{ label: "Approve", value: "approve", style: "success" }],
+              },
+            ],
+          },
+        },
+      ],
+      target: "channel:654",
+      token: "token",
+      runtime,
+      cfg,
+      textLimit: 2000,
+      replyToId: "reply-1",
+      mediaLocalRoots,
+    });
+
+    expect(sendDiscordComponentMessageMock).toHaveBeenCalledTimes(1);
+    expect(sendDiscordComponentMessageMock).toHaveBeenCalledWith(
+      "channel:654",
+      expect.objectContaining({
+        text: "Media choice",
+        blocks: [
+          expect.objectContaining({
+            type: "actions",
+            buttons: [expect.objectContaining({ label: "Approve", callbackData: "approve" })],
+          }),
+        ],
+      }),
       expect.objectContaining({
         token: "token",
+        mediaUrl: "https://example.com/first.png",
+        mediaLocalRoots,
         replyTo: "reply-1",
       }),
     );
-    expect(sendMessageDiscordMock).toHaveBeenNthCalledWith(
-      2,
+    expect(sendMessageDiscordMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageDiscordMock).toHaveBeenCalledWith(
+      "channel:654",
+      "",
+      expect.objectContaining({
+        token: "token",
+        mediaUrl: "https://example.com/second.png",
+        mediaLocalRoots,
+        replyTo: "reply-1",
+      }),
+    );
+  });
+
+  it("sends component replies before video follow-ups when text and video must split", async () => {
+    await deliverDiscordReply({
+      replies: [
+        {
+          text: "done — i kicked off a 5s Molty clip",
+          mediaUrls: ["/tmp/molty.mp4"],
+          interactive: {
+            blocks: [
+              {
+                type: "buttons",
+                buttons: [{ label: "Nice", value: "nice" }],
+              },
+            ],
+          },
+        },
+      ],
+      target: "channel:654",
+      token: "token",
+      runtime,
+      cfg,
+      textLimit: 2000,
+      replyToId: "reply-1",
+    });
+
+    expect(sendDiscordComponentMessageMock).toHaveBeenCalledTimes(1);
+    expect(sendDiscordComponentMessageMock).toHaveBeenCalledWith(
+      "channel:654",
+      expect.objectContaining({
+        text: "done — i kicked off a 5s Molty clip",
+        blocks: [
+          expect.objectContaining({
+            type: "actions",
+            buttons: [expect.objectContaining({ label: "Nice", callbackData: "nice" })],
+          }),
+        ],
+      }),
+      expect.objectContaining({ token: "token", replyTo: "reply-1" }),
+    );
+    expect(sendMessageDiscordMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageDiscordMock).toHaveBeenCalledWith(
       "channel:654",
       "",
       expect.objectContaining({
         token: "token",
         mediaUrl: "/tmp/molty.mp4",
+        replyTo: "reply-1",
+      }),
+    );
+  });
+
+  it("falls back to plain Discord sends for component replies targeting forum-like channels", async () => {
+    sendDiscordComponentMessageMock.mockRejectedValueOnce(
+      new Error("Discord components are not supported in forum-style channels"),
+    );
+
+    await deliverDiscordReply({
+      replies: [
+        {
+          text: "Choose wisely",
+          interactive: {
+            blocks: [
+              {
+                type: "buttons",
+                buttons: [{ label: "Approve", value: "approve", style: "success" }],
+              },
+            ],
+          },
+        },
+      ],
+      target: "channel:forum-parent",
+      token: "token",
+      runtime,
+      cfg,
+      textLimit: 2000,
+      replyToId: "reply-1",
+    });
+
+    expect(sendDiscordComponentMessageMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageDiscordMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageDiscordMock).toHaveBeenCalledWith(
+      "channel:forum-parent",
+      "Choose wisely",
+      expect.objectContaining({ token: "token", replyTo: "reply-1" }),
+    );
+  });
+
+  it("falls back to plain Discord media sends when forum-like channels reject interactive media replies", async () => {
+    sendDiscordComponentMessageMock.mockRejectedValueOnce(
+      new Error("Discord components are not supported in forum-style channels"),
+    );
+
+    await deliverDiscordReply({
+      replies: [
+        {
+          text: "Media choice",
+          mediaUrls: ["https://example.com/first.png", "https://example.com/second.png"],
+          interactive: {
+            blocks: [
+              {
+                type: "buttons",
+                buttons: [{ label: "Approve", value: "approve", style: "success" }],
+              },
+            ],
+          },
+        },
+      ],
+      target: "channel:forum-parent",
+      token: "token",
+      runtime,
+      cfg,
+      textLimit: 2000,
+      replyToId: "reply-1",
+    });
+
+    expect(sendDiscordComponentMessageMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageDiscordMock).toHaveBeenCalledTimes(2);
+    expect(sendMessageDiscordMock).toHaveBeenNthCalledWith(
+      1,
+      "channel:forum-parent",
+      "Media choice",
+      expect.objectContaining({
+        token: "token",
+        mediaUrl: "https://example.com/first.png",
+        replyTo: "reply-1",
+      }),
+    );
+    expect(sendMessageDiscordMock).toHaveBeenNthCalledWith(
+      2,
+      "channel:forum-parent",
+      "",
+      expect.objectContaining({
+        token: "token",
+        mediaUrl: "https://example.com/second.png",
         replyTo: "reply-1",
       }),
     );
