@@ -200,6 +200,41 @@ describe("getCompatibleActivePluginRegistry", () => {
       }),
     ).toBe(registry);
   });
+
+  it("does not let default-mode helper loads inherit gateway-bindable registries via synthetic handlers", () => {
+    const registry = createEmptyPluginRegistry();
+    const gatewayLoadOptions = {
+      config: {
+        plugins: {
+          allow: ["demo"],
+          load: { paths: ["/tmp/demo.js"] },
+        },
+      },
+      workspaceDir: "/tmp/workspace-a",
+      runtimeOptions: {
+        allowGatewaySubagentBinding: true,
+      },
+      coreGatewayHandlers: {
+        "sessions.get": () => undefined,
+        "sessions.list": () => undefined,
+      },
+    };
+    const { cacheKey } = __testing.resolvePluginLoadCacheContext(gatewayLoadOptions);
+    setActivePluginRegistry(
+      registry,
+      cacheKey,
+      "gateway-bindable",
+      gatewayLoadOptions.workspaceDir,
+      Object.keys(gatewayLoadOptions.coreGatewayHandlers),
+    );
+
+    expect(
+      __testing.getCompatibleActivePluginRegistry({
+        config: gatewayLoadOptions.config,
+        workspaceDir: gatewayLoadOptions.workspaceDir,
+      }),
+    ).toBeUndefined();
+  });
 });
 
 describe("resolveRuntimePluginRegistry", () => {

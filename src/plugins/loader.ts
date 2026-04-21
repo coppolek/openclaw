@@ -725,10 +725,16 @@ function getCompatibleActivePluginRegistry(
   if (loadContext.cacheKey === activeCacheKey) {
     return activeRegistry;
   }
+  const tryExactVariant = (variant: PluginLoadOptions): PluginRegistry | undefined => {
+    return resolvePluginLoadCacheContext(variant).cacheKey === activeCacheKey
+      ? activeRegistry
+      : undefined;
+  };
   const activeCoreGatewayMethodNames = getActivePluginCoreGatewayMethodNames();
   const tryCompatibleVariant = (variant: PluginLoadOptions): PluginRegistry | undefined => {
-    if (resolvePluginLoadCacheContext(variant).cacheKey === activeCacheKey) {
-      return activeRegistry;
+    const exactMatch = tryExactVariant(variant);
+    if (exactMatch) {
+      return exactMatch;
     }
     if (
       activeRuntimeSubagentMode !== "gateway-bindable" ||
@@ -752,7 +758,7 @@ function getCompatibleActivePluginRegistry(
     loadContext.runtimeSubagentMode === "default" &&
     activeRuntimeSubagentMode === "gateway-bindable"
   ) {
-    return tryCompatibleVariant({
+    return tryExactVariant({
       ...options,
       runtimeOptions: {
         ...options.runtimeOptions,
