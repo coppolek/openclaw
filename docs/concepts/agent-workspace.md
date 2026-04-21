@@ -91,6 +91,12 @@ These are the standard files OpenClaw expects inside the workspace:
   - Optional tiny checklist for heartbeat runs.
   - Keep it short to avoid token burn.
 
+- `PENDING.md` (optional)
+  - Cross-session commitment tracking file.
+  - Records user-visible commitments with deadlines.
+  - Useful for multi-day workflows that must survive session reset.
+  - See [PENDING.md Template](/reference/templates/PENDING.md) for details.
+
 - `BOOT.md`
   - Optional startup checklist executed on gateway restart when internal hooks are enabled.
   - Keep it short; use the message tool for outbound sends.
