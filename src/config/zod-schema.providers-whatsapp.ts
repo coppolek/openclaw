@@ -40,6 +40,17 @@ const WhatsAppAckReactionSchema = z
   .strict()
   .optional();
 
+const WhatsAppWorkIntakeReactionSchema = z
+  .object({
+    emoji: z.string().optional(),
+    direct: z.boolean().optional().default(true),
+    group: z.enum(["always", "mentions", "never"]).optional().default("mentions"),
+    cooldownMs: z.number().int().nonnegative().optional().default(120000),
+    keywords: z.array(z.string()).optional(),
+  })
+  .strict()
+  .optional();
+
 function buildWhatsAppCommonShape(params: { useDefaults: boolean }) {
   return {
     enabled: z.boolean().optional(),
@@ -69,6 +80,8 @@ function buildWhatsAppCommonShape(params: { useDefaults: boolean }) {
     blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
     groups: WhatsAppGroupsSchema,
     ackReaction: WhatsAppAckReactionSchema,
+    allowedReactions: z.array(z.string()).optional(),
+    workIntakeReaction: WhatsAppWorkIntakeReactionSchema,
     reactionLevel: z.enum(["off", "ack", "minimal", "extensive"]).optional(),
     debounceMs: params.useDefaults
       ? z.number().int().nonnegative().optional().default(0)

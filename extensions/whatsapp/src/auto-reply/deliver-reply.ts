@@ -2,6 +2,7 @@ import type { MarkdownTableMode } from "openclaw/plugin-sdk/config-runtime";
 import { chunkMarkdownTextWithMode, type ChunkMode } from "openclaw/plugin-sdk/reply-chunking";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-chunking";
 import {
+  normalizeOutboundReplyMediaDirectives,
   resolveOutboundMediaUrls,
   sendMediaWithLeadingCaption,
 } from "openclaw/plugin-sdk/reply-payload";
@@ -47,17 +48,18 @@ export async function deliverWebReply(params: {
 }) {
   const { replyResult, msg, maxMediaBytes, textLimit, replyLogger, connectionId, skipLog } = params;
   const replyStarted = Date.now();
-  if (shouldSuppressReasoningReply(replyResult)) {
+  const normalizedReplyResult = normalizeOutboundReplyMediaDirectives(replyResult);
+  if (shouldSuppressReasoningReply(normalizedReplyResult)) {
     whatsappOutboundLog.debug(`Suppressed reasoning payload to ${msg.from}`);
     return;
   }
   const tableMode = params.tableMode ?? "code";
   const chunkMode = params.chunkMode ?? "length";
   const convertedText = markdownToWhatsApp(
-    convertMarkdownTables(replyResult.text || "", tableMode),
+    convertMarkdownTables(normalizedReplyResult.text || "", tableMode),
   );
   const textChunks = chunkMarkdownTextWithMode(convertedText, textLimit, chunkMode);
-  const mediaList = resolveOutboundMediaUrls(replyResult);
+  const mediaList = resolveOutboundMediaUrls(normalizedReplyResult);
 
   const sendWithRetry = async (fn: () => Promise<unknown>, label: string, maxAttempts = 3) => {
     let lastErr: unknown;
@@ -101,7 +103,7 @@ export async function deliverWebReply(params: {
         connectionId: connectionId ?? null,
         to: msg.from,
         from: msg.to,
-        text: elide(replyResult.text, 240),
+        text: elide(normalizedReplyResult.text, 240),
         mediaUrl: null,
         mediaSizeBytes: null,
         mediaKind: null,

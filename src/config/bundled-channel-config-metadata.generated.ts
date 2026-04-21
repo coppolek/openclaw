@@ -15161,6 +15161,43 @@ export const GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA = [
           required: ["direct", "group"],
           additionalProperties: false,
         },
+        allowedReactions: {
+          type: "array",
+          items: {
+            type: "string",
+          },
+        },
+        workIntakeReaction: {
+          type: "object",
+          properties: {
+            emoji: {
+              type: "string",
+            },
+            direct: {
+              default: true,
+              type: "boolean",
+            },
+            group: {
+              default: "mentions",
+              type: "string",
+              enum: ["always", "mentions", "never"],
+            },
+            cooldownMs: {
+              default: 120000,
+              type: "integer",
+              minimum: 0,
+              maximum: 9007199254740991,
+            },
+            keywords: {
+              type: "array",
+              items: {
+                type: "string",
+              },
+            },
+          },
+          required: ["direct", "group", "cooldownMs"],
+          additionalProperties: false,
+        },
         reactionLevel: {
           type: "string",
           enum: ["off", "ack", "minimal", "extensive"],
@@ -15420,6 +15457,43 @@ export const GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA = [
                   },
                 },
                 required: ["direct", "group"],
+                additionalProperties: false,
+              },
+              allowedReactions: {
+                type: "array",
+                items: {
+                  type: "string",
+                },
+              },
+              workIntakeReaction: {
+                type: "object",
+                properties: {
+                  emoji: {
+                    type: "string",
+                  },
+                  direct: {
+                    default: true,
+                    type: "boolean",
+                  },
+                  group: {
+                    default: "mentions",
+                    type: "string",
+                    enum: ["always", "mentions", "never"],
+                  },
+                  cooldownMs: {
+                    default: 120000,
+                    type: "integer",
+                    minimum: 0,
+                    maximum: 9007199254740991,
+                  },
+                  keywords: {
+                    type: "array",
+                    items: {
+                      type: "string",
+                    },
+                  },
+                },
+                required: ["direct", "group", "cooldownMs"],
                 additionalProperties: false,
               },
               reactionLevel: {
