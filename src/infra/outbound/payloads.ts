@@ -138,7 +138,7 @@ function createOutboundPayloadPlanEntry(
       }) ?? "",
     mediaUrls: mergedMedia.length ? mergedMedia : undefined,
     mediaUrl: resolvedMediaUrl,
-    replyToId: payload.replyToId ?? parsed.replyToId,
+    replyToId: payload.replyToId === null ? null : (payload.replyToId ?? parsed.replyToId),
     replyToTag: payload.replyToTag || parsed.replyToTag,
     replyToCurrent: payload.replyToCurrent || parsed.replyToCurrent,
     audioAsVoice: Boolean(payload.audioAsVoice || parsed.audioAsVoice),
