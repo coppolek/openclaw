@@ -79,9 +79,9 @@ export function createOpenClawTools(
     hasRepliedRef?: { value: boolean };
     /** If true, the model has native vision capability */
     modelHasVision?: boolean;
-    /** Active model provider for provider-specific tool gating. */
+    /** Active model provider for provider/model-specific tool gating. */
     modelProvider?: string;
-    /** Active model id for provider/model-specific tool gating. */
+    /** Active model id for provider/model-specific tool gating and runtime-only fallbacks. */
     modelId?: string;
     /** If true, nodes action="invoke" can call media-returning commands directly. */
     allowMediaInvokeCommands?: boolean;
@@ -146,6 +146,8 @@ export function createOpenClawTools(
         workspaceDir,
         sandbox,
         fsPolicy: options?.fsPolicy,
+        modelProvider: options?.modelProvider,
+        modelId: options?.modelId,
         modelHasVision: options?.modelHasVision,
       })
     : null;
