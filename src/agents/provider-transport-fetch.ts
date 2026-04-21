@@ -87,7 +87,54 @@ function resolveModelRequestPolicy(model: Model<Api>) {
   });
 }
 
-export function buildGuardedModelFetch(model: Model<Api>): typeof fetch {
+function normalizeHeaderKey(key: string): string {
+  return key.trim().toLowerCase();
+}
+
+function resolveProtectedModelRequestHeaderKeys(
+  requestConfig: ReturnType<typeof resolveModelRequestPolicy>,
+): Set<string> {
+  const protectedKeys = new Set<string>(
+    Object.keys(requestConfig.policy?.attributionHeaders ?? {}).map((key) =>
+      normalizeHeaderKey(key),
+    ),
+  );
+  const auth = requestConfig.auth;
+  if (!auth?.configured || typeof auth.headerName !== "string") {
+    return protectedKeys;
+  }
+  protectedKeys.add(normalizeHeaderKey(auth.headerName));
+  if (auth.mode === "header") {
+    protectedKeys.add("authorization");
+  }
+  return protectedKeys;
+}
+
+function mergeResolvedModelRequestHeaders(
+  requestInit: RequestInit | undefined,
+  requestConfig: ReturnType<typeof resolveModelRequestPolicy>,
+): RequestInit | undefined {
+  if (!requestConfig.headers && !requestInit?.headers) {
+    return requestInit;
+  }
+  const headers = new Headers(requestConfig.headers);
+  const protectedKeys = resolveProtectedModelRequestHeaderKeys(requestConfig);
+  for (const [key, value] of new Headers(requestInit?.headers).entries()) {
+    if (protectedKeys.has(normalizeHeaderKey(key))) {
+      continue;
+    }
+    headers.set(key, value);
+  }
+  return {
+    ...requestInit,
+    headers,
+  };
+}
+
+export function buildGuardedModelFetch(
+  model: Model<Api>,
+  options?: { auditContext?: string },
+): typeof fetch {
   const requestConfig = resolveModelRequestPolicy(model);
   const dispatcherPolicy = buildProviderRequestDispatcherPolicy(requestConfig);
   return async (input, init) => {
@@ -111,9 +158,10 @@ export function buildGuardedModelFetch(model: Model<Api>): typeof fetch {
         signal: request.signal,
         ...(request.body ? ({ duplex: "half" } as const) : {}),
       } satisfies RequestInit & { duplex?: "half" });
+    const mergedRequestInit = mergeResolvedModelRequestHeaders(requestInit ?? init, requestConfig);
     const result = await fetchWithSsrFGuard({
       url,
-      init: requestInit ?? init,
+      init: mergedRequestInit,
       capture: {
         meta: {
           provider: model.provider,
@@ -121,6 +169,7 @@ export function buildGuardedModelFetch(model: Model<Api>): typeof fetch {
           model: model.id,
         },
       },
+      ...(options?.auditContext ? { auditContext: options.auditContext } : {}),
       dispatcherPolicy,
       // Provider transport intentionally keeps the secure default and never
       // replays unsafe request bodies across cross-origin redirects.

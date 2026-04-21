@@ -1,0 +1,19 @@
+{
+  "name": "@openclaw/plamo-provider",
+  "version": "2026.4.11",
+  "private": true,
+  "description": "OpenClaw PLaMo provider plugin",
+  "type": "module",
+  "dependencies": {
+    "@mariozechner/pi-agent-core": "0.67.68",
+    "@mariozechner/pi-ai": "0.67.68"
+  },
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

@@ -10,6 +10,7 @@ import type { OAuthCredential } from "../agents/auth-profiles/types.js";
 import { writePrivateSecretFileAtomic } from "../infra/secret-file.js";
 
 export { resolveEnvApiKey } from "../agents/model-auth-env.js";
+export { isNonSecretApiKeyMarker } from "../agents/model-auth-markers.js";
 export {
   collectProviderApiKeysForExecution,
   executeWithApiKeyRotation,

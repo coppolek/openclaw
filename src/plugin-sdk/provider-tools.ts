@@ -182,6 +182,15 @@ export function normalizeOpenAIToolSchemas(
   });
 }
 
+/**
+ * Normalizes a single tool parameter schema for OpenAI-compatible transports
+ * that require an object-root schema but do not use the native OpenAI strict
+ * tool-routing hooks.
+ */
+export function normalizeOpenAICompatibleToolParameters(schema: unknown): unknown {
+  return normalizeOpenAIStrictCompatSchema(schema ?? {});
+}
+
 function normalizeOpenAIStrictCompatSchema(schema: unknown): unknown {
   return normalizeOpenAIStrictCompatSchemaRecursive(schema, { promoteEmptyObject: true });
 }
