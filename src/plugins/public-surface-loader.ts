@@ -183,11 +183,12 @@ export function loadBundledPluginPublicArtifactModuleSync<T extends object>(para
       );
     }
     // Defensive: verify loaded module is accessible (handles proxy with null target like #62844)
-    // If the module is a Proxy with null/undefined target, property access will throw
-    // Use Object.getPrototypeOf to trigger the proxy's get trap, not just the has trap.
-    // This catches the exact failure mode from #62844 where accessing a property throws.
+    // If the module is a Proxy with null/undefined target, property access will throw.
+    // We must use a direct property read to trigger the get trap — Object.getPrototypeOf
+    // bypasses the proxy and won't catch a broken get trap.
     try {
-      Object.getPrototypeOf(loaded);
+      // eslint-disable-next-line @typescript-eslint/no-unused-expressions -- trigger get trap
+      loaded["constructor"];
     } catch {
       loadedPublicSurfaceModules.delete(location.modulePath);
       throw new Error(
