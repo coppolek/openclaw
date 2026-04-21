@@ -376,7 +376,7 @@ async function openPinnedReadableFile(params: {
     fs.constants.O_RDONLY |
     (typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0) |
     openCloseOnExecFlag;
-  const handle = await fsPromises.open(params.absolutePath, openReadFlags);
+  const handle = await fsPromises.open(preOpenCheck.resolvedPath, openReadFlags);
   try {
     const openedStat = await handle.stat();
     if (!openedStat.isFile()) {
@@ -442,10 +442,11 @@ function sameFileIdentity(left: fs.Stats, right: fs.Stats): boolean {
   if (left.ino !== right.ino) {
     return false;
   }
-  if (left.dev === right.dev) {
-    return true;
+  if (left.ino === 0 || right.ino === 0) {
+    return false;
   }
-  const leftDevUnknown = left.dev === 0;
-  const rightDevUnknown = right.dev === 0;
-  return process.platform === "win32" && (leftDevUnknown || rightDevUnknown);
+  if (left.dev === 0 || right.dev === 0) {
+    return false;
+  }
+  return left.dev === right.dev;
 }
