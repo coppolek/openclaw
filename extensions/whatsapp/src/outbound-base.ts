@@ -4,6 +4,11 @@ import {
 } from "openclaw/plugin-sdk/channel-send-result";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import { resolveOutboundSendDep, sanitizeForPlainText } from "openclaw/plugin-sdk/infra-runtime";
+import { sendTextMediaPayload } from "openclaw/plugin-sdk/reply-payload";
+import {
+  normalizeWhatsAppOutboundPayload,
+  normalizeWhatsAppPayloadText,
+} from "./outbound-media-contract.js";
 import { WHATSAPP_LEGACY_OUTBOUND_SEND_DEP_KEYS } from "./outbound-send-deps.js";
 
 type WhatsAppChunker = NonNullable<ChannelOutboundAdapter["chunker"]>;
@@ -19,6 +24,7 @@ type WhatsAppSendTextOptions = {
   mediaReadFile?: (filePath: string) => Promise<Buffer>;
   gifPlayback?: boolean;
   accountId?: string;
+  preserveLeadingWhitespace?: boolean;
 };
 type WhatsAppSendMessage = (
   to: string,
@@ -41,15 +47,7 @@ type CreateWhatsAppOutboundBaseParams = {
   skipEmptyText?: boolean;
 };
 
-export function createWhatsAppOutboundBase({
-  chunker,
-  sendMessageWhatsApp,
-  sendPollWhatsApp,
-  shouldLogVerbose,
-  resolveTarget,
-  normalizeText = (text) => text ?? "",
-  skipEmptyText = false,
-}: CreateWhatsAppOutboundBaseParams): Pick<
+type WhatsAppOutboundBaseCore = Pick<
   ChannelOutboundAdapter,
   | "deliveryMode"
   | "chunker"
@@ -61,8 +59,31 @@ export function createWhatsAppOutboundBase({
   | "sendText"
   | "sendMedia"
   | "sendPoll"
+>;
+
+export function createWhatsAppOutboundBase({
+  chunker,
+  sendMessageWhatsApp,
+  sendPollWhatsApp,
+  shouldLogVerbose,
+  resolveTarget,
+  normalizeText = normalizeWhatsAppPayloadText,
+  skipEmptyText = true,
+}: CreateWhatsAppOutboundBaseParams): Pick<
+  ChannelOutboundAdapter,
+  | "deliveryMode"
+  | "chunker"
+  | "chunkerMode"
+  | "textChunkLimit"
+  | "sanitizeText"
+  | "pollMaxOptions"
+  | "resolveTarget"
+  | "sendPayload"
+  | "sendText"
+  | "sendMedia"
+  | "sendPoll"
 > {
-  return {
+  const outbound: WhatsAppOutboundBaseCore = {
     deliveryMode: "gateway",
     chunker,
     chunkerMode: "text",
@@ -122,5 +143,17 @@ export function createWhatsAppOutboundBase({
           cfg,
         }),
     }),
+  };
+  return {
+    ...outbound,
+    sendPayload: async (ctx) =>
+      await sendTextMediaPayload({
+        channel: "whatsapp",
+        ctx: {
+          ...ctx,
+          payload: normalizeWhatsAppOutboundPayload(ctx.payload, { normalizeText }),
+        },
+        adapter: outbound,
+      }),
   };
 }

@@ -45,6 +45,14 @@ vi.mock("./outbound-media.runtime.js", async () => {
   };
 });
 
+vi.mock("./text-runtime.js", async () => {
+  const actual = await vi.importActual<typeof import("./text-runtime.js")>("./text-runtime.js");
+  return {
+    ...actual,
+    sleep: vi.fn(async () => {}),
+  };
+});
+
 describe("web outbound", () => {
   const sendComposingTo = vi.fn(async () => {});
   const sendMessage = vi.fn(async () => ({ messageId: "msg123" }));
@@ -150,6 +158,15 @@ describe("web outbound", () => {
     expect(sendMessage).toHaveBeenLastCalledWith("+1555", "caption", buf, "image/jpeg");
   });
 
+  it("preserves intentional indentation when the caller opts out of transport trimming", async () => {
+    await sendMessageWhatsApp("+1555", "    indented", {
+      verbose: false,
+      preserveLeadingWhitespace: true,
+    });
+
+    expect(sendMessage).toHaveBeenLastCalledWith("+1555", "    indented", undefined, undefined);
+  });
+
   it("skips whitespace-only text sends without media", async () => {
     const result = await sendMessageWhatsApp("+1555", "\n \t", { verbose: false });
 
@@ -235,6 +252,38 @@ describe("web outbound", () => {
       verbose: false,
       mediaUrl: "/tmp/pic.jpg",
     });
+    expect(sendMessage).toHaveBeenLastCalledWith("+1555", "pic", buf, "image/jpeg");
+  });
+
+  it("does not retry transient outbound send failures to avoid duplicate sends", async () => {
+    sendMessage.mockRejectedValueOnce({ error: { message: "connection closed" } });
+
+    await expect(sendMessageWhatsApp("+1555", "hi", { verbose: false })).rejects.toEqual({
+      error: { message: "connection closed" },
+    });
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("prefers explicit mediaUrl over mediaUrls when both are present", async () => {
+    const buf = Buffer.from("img");
+    loadWebMediaMock.mockResolvedValueOnce({
+      buffer: buf,
+      contentType: "image/jpeg",
+      kind: "image",
+    });
+
+    await sendMessageWhatsApp("+1555", "pic", {
+      verbose: false,
+      mediaUrl: "/tmp/primary.jpg",
+      mediaUrls: [" /tmp/secondary.jpg "],
+    });
+
+    expect(loadWebMediaMock).toHaveBeenCalledWith(
+      "/tmp/primary.jpg",
+      expect.objectContaining({
+        hostReadCapability: false,
+      }),
+    );
     expect(sendMessage).toHaveBeenLastCalledWith("+1555", "pic", buf, "image/jpeg");
   });
 
