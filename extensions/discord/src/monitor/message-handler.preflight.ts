@@ -965,6 +965,7 @@ export async function preflightDiscordMessage(
       allowTextCommands,
       hasControlCommand: hasControlCommandInMessage,
       commandAuthorized,
+      suppressIfOtherAgentMentioned: true,
     },
   });
   const effectiveWasMentioned = mentionDecision.effectiveWasMentioned;
@@ -990,6 +991,14 @@ export async function preflightDiscordMessage(
       });
       return null;
     }
+  }
+
+  if (isGuildMessage && mentionDecision.suppressedByOtherAgentMention) {
+    logDebug(`[discord-preflight] drop: suppressed-by-other-agent-mention`);
+    logVerbose(
+      `discord: drop guild message (suppressed, other agent mentioned, channel=${messageChannelId})`,
+    );
+    return null;
   }
 
   if (author.bot && !sender.isPluralKit && allowBotsMode === "mentions") {
