@@ -1005,6 +1005,71 @@ describe("deliverOutboundPayloads", () => {
     );
   });
 
+  it("keeps message_sent content aligned with message_sending rewrites for audio-only payloads", async () => {
+    hookMocks.runner.hasHooks.mockReturnValue(true);
+    hookMocks.runner.runMessageSending.mockResolvedValue({
+      content: "sanitized transcript",
+    });
+    const sendMedia = vi.fn(async () => ({
+      channel: "matrix" as const,
+      messageId: "mx-voice-1",
+      roomId: "!room:example",
+    }));
+    setActivePluginRegistry(
+      createTestRegistry([
+        {
+          pluginId: "matrix",
+          source: "test",
+          plugin: createOutboundTestPlugin({
+            id: "matrix",
+            outbound: {
+              deliveryMode: "direct",
+              sendText: async ({ to, text }) => ({
+                channel: "matrix",
+                messageId: `${to}:${text}`,
+              }),
+              sendMedia,
+            },
+          }),
+        },
+      ]),
+    );
+
+    await deliverOutboundPayloads({
+      cfg: { channels: { matrix: {} } } as OpenClawConfig,
+      channel: "matrix",
+      to: "room:!room:example",
+      payloads: [
+        {
+          mediaUrl: "file:///tmp/clip.mp3",
+          audioAsVoice: true,
+          spokenText: "original transcript",
+        },
+      ],
+    });
+
+    expect(hookMocks.runner.runMessageSending).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "room:!room:example", content: "original transcript" }),
+      expect.objectContaining({ channelId: "matrix" }),
+    );
+    expect(sendMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "room:!room:example",
+        text: "sanitized transcript",
+        mediaUrl: "file:///tmp/clip.mp3",
+        audioAsVoice: true,
+      }),
+    );
+    expect(hookMocks.runner.runMessageSent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "room:!room:example",
+        content: "sanitized transcript",
+        success: true,
+      }),
+      expect.objectContaining({ channelId: "matrix" }),
+    );
+  });
+
   it("short-circuits lower-priority message_sending hooks after cancel=true", async () => {
     const hookRegistry = createEmptyPluginRegistry();
     const high = vi.fn().mockResolvedValue({ cancel: true, content: "blocked" });
