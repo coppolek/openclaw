@@ -169,16 +169,24 @@ class Embeddings {
   }
 
   async embed(text: string): Promise<number[]> {
-    const params: { model: string; input: string; dimensions?: number } = {
+    ensureGlobalUndiciEnvProxyDispatcher();
+    const response = await this.client.embeddings.create({
       model: this.model,
       input: text,
-    };
-    if (this.dimensions) {
-      params.dimensions = this.dimensions;
+    });
+    return this.trimEmbedding(response.data[0].embedding);
+  }
+
+  private trimEmbedding(embedding: number[]): number[] {
+    if (typeof this.dimensions !== "number") {
+      return embedding;
     }
-    ensureGlobalUndiciEnvProxyDispatcher();
-    const response = await this.client.embeddings.create(params);
-    return response.data[0].embedding;
+    if (embedding.length < this.dimensions) {
+      throw new Error(
+        `Embedding model ${this.model} returned ${embedding.length} dimensions, need at least ${this.dimensions} for local truncation`,
+      );
+    }
+    return embedding.slice(0, this.dimensions);
   }
 }
 
