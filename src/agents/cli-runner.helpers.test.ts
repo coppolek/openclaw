@@ -5,10 +5,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolvePreferredOpenClawTmpDir } from "../infra/tmp-openclaw-dir.js";
 import { MAX_IMAGE_BYTES } from "../media/constants.js";
 import {
+  applyWindowsArgvGuard,
   buildCliArgs,
+  estimateArgvByteLength,
   loadPromptRefImages,
   prepareCliPromptImagePayload,
   resolveCliRunQueueKey,
+  stripSystemPromptFromArgv,
   writeCliImages,
   writeCliSystemPromptFile,
 } from "./cli-runner/helpers.js";
@@ -497,5 +500,109 @@ describe("resolveCliRunQueueKey", () => {
         workspaceDir: "/tmp/project-a",
       }),
     ).toBe("claude-cli:run-4");
+  });
+});
+
+describe("estimateArgvByteLength", () => {
+  it("accounts for quoting and space overhead per entry", () => {
+    const estimate = estimateArgvByteLength(["claude", "-p", "--model", "sonnet"]);
+    // Each entry adds entry.length + 3 (quotes + space).
+    expect(estimate).toBe(6 + 3 + 2 + 3 + 7 + 3 + 6 + 3);
+  });
+
+  it("returns 0 for an empty argv", () => {
+    expect(estimateArgvByteLength([])).toBe(0);
+  });
+});
+
+describe("stripSystemPromptFromArgv", () => {
+  it("removes the system-prompt flag and its value", () => {
+    const args = ["-p", "--model", "sonnet", "--append-system-prompt", "Be helpful.", "--verbose"];
+    const result = stripSystemPromptFromArgv(args, "--append-system-prompt");
+    expect(result).toEqual({
+      args: ["-p", "--model", "sonnet", "--verbose"],
+      systemPrompt: "Be helpful.",
+    });
+  });
+
+  it("returns null when the flag is absent", () => {
+    const args = ["-p", "--model", "sonnet"];
+    expect(stripSystemPromptFromArgv(args, "--append-system-prompt")).toBeNull();
+  });
+
+  it("returns null when systemPromptArg is undefined", () => {
+    expect(stripSystemPromptFromArgv(["-p"], undefined)).toBeNull();
+  });
+
+  it("returns null when the flag is the last entry (no value follows)", () => {
+    const args = ["-p", "--append-system-prompt"];
+    expect(stripSystemPromptFromArgv(args, "--append-system-prompt")).toBeNull();
+  });
+});
+
+describe("applyWindowsArgvGuard", () => {
+  it("returns null on non-Windows platforms", () => {
+    const longPrompt = "x".repeat(40_000);
+    expect(
+      applyWindowsArgvGuard({
+        command: "claude",
+        args: ["--append-system-prompt", longPrompt],
+        stdinPayload: "hello",
+        systemPromptArg: "--append-system-prompt",
+        platform: "linux",
+      }),
+    ).toBeNull();
+  });
+
+  it("returns null when argv fits within the Windows limit", () => {
+    expect(
+      applyWindowsArgvGuard({
+        command: "claude",
+        args: ["-p", "--append-system-prompt", "short"],
+        stdinPayload: "hello",
+        systemPromptArg: "--append-system-prompt",
+        platform: "win32",
+      }),
+    ).toBeNull();
+  });
+
+  it("moves the system prompt to stdin when argv exceeds the Windows limit", () => {
+    const longPrompt = "x".repeat(40_000);
+    const result = applyWindowsArgvGuard({
+      command: "claude",
+      args: ["-p", "--append-system-prompt", longPrompt, "--verbose"],
+      stdinPayload: "user message",
+      systemPromptArg: "--append-system-prompt",
+      platform: "win32",
+    });
+    expect(result).not.toBeNull();
+    expect(result!.args).toEqual(["-p", "--verbose"]);
+    expect(result!.stdinPayload).toBe(`${longPrompt}\n\nuser message`);
+  });
+
+  it("returns null when no system-prompt arg is present despite long argv", () => {
+    const longArg = "x".repeat(40_000);
+    expect(
+      applyWindowsArgvGuard({
+        command: "claude",
+        args: ["-p", longArg],
+        stdinPayload: "hello",
+        systemPromptArg: "--append-system-prompt",
+        platform: "win32",
+      }),
+    ).toBeNull();
+  });
+
+  it("handles empty stdin payload", () => {
+    const longPrompt = "x".repeat(40_000);
+    const result = applyWindowsArgvGuard({
+      command: "claude",
+      args: ["--append-system-prompt", longPrompt],
+      stdinPayload: "",
+      systemPromptArg: "--append-system-prompt",
+      platform: "win32",
+    });
+    expect(result).not.toBeNull();
+    expect(result!.stdinPayload).toBe(`${longPrompt}\n\n`);
   });
 });

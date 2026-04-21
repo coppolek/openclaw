@@ -30,6 +30,10 @@ import { sanitizeImageBlocks } from "../tool-images.js";
 import { formatTomlConfigOverride } from "./toml-inline.js";
 export { buildCliSupervisorScopeKey, resolveCliNoOutputTimeoutMs } from "./reliability.js";
 
+// Windows CreateProcessW has a 32 767-char command-line limit. Reserve a
+// buffer for quoting overhead, env-block padding, and OS headroom.
+const WIN32_MAX_SAFE_ARGV_CHARS = 30_000;
+
 const CLI_RUN_QUEUE = new KeyedAsyncQueue();
 
 function isClaudeCliProvider(providerId: string): boolean {
@@ -418,4 +422,79 @@ export function buildCliArgs(params: {
     args.push(params.promptArg);
   }
   return args;
+}
+
+/**
+ * Estimate the total command-line string length for a spawn argv.
+ *
+ * On Windows, `CreateProcessW` assembles all argv entries into a single
+ * string separated by spaces.  Entries that contain spaces or quotes are
+ * wrapped in double-quotes, which adds overhead.  This helper returns a
+ * conservative (slightly over-counted) estimate — enough to decide
+ * whether we need to move large payloads off the command line.
+ */
+export function estimateArgvByteLength(argv: readonly string[]): number {
+  let total = 0;
+  for (const entry of argv) {
+    // +3 accounts for surrounding quotes and the separating space.
+    total += entry.length + 3;
+  }
+  return total;
+}
+
+/**
+ * Remove the system-prompt flag + value pair from a built argv and return
+ * the stripped argv together with the extracted system-prompt text.
+ *
+ * Returns `null` when no system-prompt arg is found.
+ */
+export function stripSystemPromptFromArgv(
+  args: readonly string[],
+  systemPromptArg: string | undefined,
+): { args: string[]; systemPrompt: string } | null {
+  if (!systemPromptArg) {
+    return null;
+  }
+  const index = args.indexOf(systemPromptArg);
+  if (index < 0 || index + 1 >= args.length) {
+    return null;
+  }
+  const systemPrompt = args[index + 1];
+  const next = [...args];
+  next.splice(index, 2);
+  return { args: next, systemPrompt };
+}
+
+/**
+ * Check whether the given argv would exceed the Windows command-line limit
+ * and, if so, strip the system prompt from args and prepend it to stdin so
+ * the spawn succeeds.
+ *
+ * Returns `null` when no adjustment is needed (non-Windows or args are
+ * short enough).
+ */
+export function applyWindowsArgvGuard(params: {
+  command: string;
+  args: string[];
+  stdinPayload: string;
+  systemPromptArg: string | undefined;
+  platform?: NodeJS.Platform;
+}): { args: string[]; stdinPayload: string } | null {
+  if ((params.platform ?? process.platform) !== "win32") {
+    return null;
+  }
+  const total = estimateArgvByteLength([params.command, ...params.args]);
+  if (total <= WIN32_MAX_SAFE_ARGV_CHARS) {
+    return null;
+  }
+  const stripped = stripSystemPromptFromArgv(params.args, params.systemPromptArg);
+  if (!stripped) {
+    return null;
+  }
+  // Prepend the system prompt to stdin so it still reaches the model as
+  // context, even though it arrives as part of the user message rather
+  // than a dedicated system-prompt flag.
+  const prefix = stripped.systemPrompt.trimEnd();
+  const stdinPayload = prefix ? `${prefix}\n\n${params.stdinPayload}` : params.stdinPayload;
+  return { args: stripped.args, stdinPayload };
 }
