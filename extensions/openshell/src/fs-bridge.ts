@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 import type {
@@ -50,13 +51,16 @@ class OpenShellFsBridge implements SandboxFsBridge {
   }): Promise<Buffer> {
     const target = this.resolveTarget(params);
     const hostPath = this.requireHostPath(target);
-    await assertLocalPathSafety({
-      target,
-      root: target.mountHostRoot,
-      allowMissingLeaf: false,
-      allowFinalSymlinkForUnlink: false,
+    const opened = await openPinnedReadableFile({
+      absolutePath: hostPath,
+      rootPath: target.mountHostRoot,
+      containerPath: target.containerPath,
     });
-    return await fsPromises.readFile(hostPath);
+    try {
+      return fs.readFileSync(opened.fd);
+    } finally {
+      fs.closeSync(opened.fd);
+    }
   }
 
   async writeFile(params: {
@@ -351,4 +355,50 @@ async function resolveCanonicalCandidate(targetPath: string): Promise<string> {
     missing.unshift(path.basename(cursor));
     cursor = parent;
   }
+}
+
+async function openPinnedReadableFile(params: {
+  absolutePath: string;
+  rootPath: string;
+  containerPath: string;
+}): Promise<{ fd: number }> {
+  const canonicalRoot = await fsPromises
+    .realpath(params.rootPath)
+    .catch(() => path.resolve(params.rootPath));
+  const resolvedPath = await fsPromises.realpath(params.absolutePath);
+  if (!isPathInside(canonicalRoot, resolvedPath)) {
+    throw new Error(`Sandbox path escapes allowed mounts; cannot access: ${params.containerPath}`);
+  }
+
+  const preOpenStat = await fsPromises.lstat(resolvedPath);
+  if (!preOpenStat.isFile()) {
+    throw new Error(`Sandbox boundary checks failed; cannot read files: ${params.containerPath}`);
+  }
+
+  const openReadFlags =
+    fs.constants.O_RDONLY |
+    (typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0);
+  const fd = fs.openSync(resolvedPath, openReadFlags);
+  try {
+    const openedStat = fs.fstatSync(fd);
+    if (!openedStat.isFile() || !sameFileIdentity(preOpenStat, openedStat)) {
+      throw new Error(`Sandbox boundary checks failed; cannot read files: ${params.containerPath}`);
+    }
+    return { fd };
+  } catch (error) {
+    fs.closeSync(fd);
+    throw error;
+  }
+}
+
+function sameFileIdentity(left: fs.Stats, right: fs.Stats): boolean {
+  if (left.ino !== right.ino) {
+    return false;
+  }
+  if (left.dev === right.dev) {
+    return true;
+  }
+  const leftDevUnknown = left.dev === 0;
+  const rightDevUnknown = right.dev === 0;
+  return process.platform === "win32" && (leftDevUnknown || rightDevUnknown);
 }

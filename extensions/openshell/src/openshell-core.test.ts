@@ -252,6 +252,7 @@ describe("openshell fs bridges", () => {
     const workspaceDir = await makeTempDir("openclaw-openshell-fs-");
     const outsideDir = await makeTempDir("openclaw-openshell-outside-");
     await fs.symlink(outsideDir, path.join(workspaceDir, "alias"));
+
     const backend = createMirrorBackendMock();
     const sandbox = createSandboxTestContext({
       overrides: {
@@ -305,6 +306,43 @@ describe("openshell fs bridges", () => {
     await expect(fs.readlink(path.join(workspaceDir, "link.txt"))).resolves.toBe("existing.txt");
     await expect(fs.readFile(linkedTarget, "utf8")).resolves.toBe("keep");
     expect(backend.syncLocalPathToRemote).not.toHaveBeenCalled();
+  });
+
+  it("reads through a pinned boundary-opened file instead of the unresolved host path", async () => {
+    const workspaceDir = await makeTempDir("openclaw-openshell-fs-");
+    const outsideDir = await makeTempDir("openclaw-openshell-outside-");
+    await fs.mkdir(path.join(workspaceDir, "subdir"), { recursive: true });
+    await fs.writeFile(path.join(workspaceDir, "subdir", "secret.txt"), "inside", "utf8");
+    await fs.writeFile(path.join(outsideDir, "secret.txt"), "outside", "utf8");
+    const backend = createMirrorBackendMock();
+    const sandbox = createSandboxTestContext({
+      overrides: {
+        backendId: "openshell",
+        workspaceDir,
+        agentWorkspaceDir: workspaceDir,
+        containerWorkdir: "/sandbox",
+      },
+    });
+
+    const { createOpenShellFsBridge } = await import("./fs-bridge.js");
+    const bridge = createOpenShellFsBridge({ sandbox, backend });
+    const originalReadFile = fs.readFile.bind(fs);
+    const readFileSpy = vi.spyOn(fs, "readFile").mockImplementation(async (filePath, options) => {
+      await fs.rm(path.join(workspaceDir, "subdir"), { recursive: true, force: true });
+      await fs.symlink(outsideDir, path.join(workspaceDir, "subdir"));
+      return options === undefined
+        ? await originalReadFile(filePath)
+        : await originalReadFile(filePath, options as never);
+    });
+
+    try {
+      await expect(bridge.readFile({ filePath: "subdir/secret.txt" })).resolves.toEqual(
+        Buffer.from("inside"),
+      );
+      expect(readFileSpy).not.toHaveBeenCalled();
+    } finally {
+      readFileSpy.mockRestore();
+    }
   });
 
   it("maps agent mount paths when the sandbox workspace is read-only", async () => {
