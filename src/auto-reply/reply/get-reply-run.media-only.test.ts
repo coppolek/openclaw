@@ -265,6 +265,22 @@ describe("runPreparedReply media-only handling", () => {
     );
   });
 
+  it("forwards defaultProvider to runReplyAgent so auto-fallback recovery uses the caller-resolved default", async () => {
+    await runPreparedReply(
+      baseParams({
+        defaultProvider: "openai",
+        defaultModel: "gpt-5",
+      }),
+    );
+
+    expect(runReplyAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultProvider: "openai",
+        defaultModel: "gpt-5",
+      }),
+    );
+  });
+
   it("allows media-only prompts and preserves thread context in queued followups", async () => {
     const result = await runPreparedReply(baseParams());
     expect(result).toEqual({ text: "ok" });

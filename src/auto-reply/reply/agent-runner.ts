@@ -3,7 +3,7 @@ import { hasConfiguredModelFallbacks, resolveSessionAgentId } from "../../agents
 import { resolveContextTokensForModel } from "../../agents/context.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
 import { resolveModelAuthMode } from "../../agents/model-auth.js";
-import { isCliProvider } from "../../agents/model-selection.js";
+import { isCliProvider, resolveDefaultModelForAgent } from "../../agents/model-selection.js";
 import { queueEmbeddedPiMessage } from "../../agents/pi-embedded-runner/runs.js";
 import { hasNonzeroUsage, normalizeUsage } from "../../agents/usage.js";
 import {
@@ -19,6 +19,7 @@ import { emitAgentEvent } from "../../infra/agent-events.js";
 import { emitDiagnosticEvent, isDiagnosticsEnabled } from "../../infra/diagnostic-events.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
 import { CommandLaneClearedError, GatewayDrainingError } from "../../process/command-queue.js";
+import { clearRecoveredAutoModelOverride } from "../../sessions/model-overrides.js";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import {
   estimateUsageCost,
@@ -874,6 +875,7 @@ export async function runReplyAgent(params: {
   sessionStore?: Record<string, SessionEntry>;
   sessionKey?: string;
   storePath?: string;
+  defaultProvider?: string;
   defaultModel: string;
   agentCfgContextTokens?: number;
   resolvedVerboseLevel: VerboseLevel;
@@ -908,6 +910,7 @@ export async function runReplyAgent(params: {
     sessionStore,
     sessionKey,
     storePath,
+    defaultProvider,
     defaultModel,
     agentCfgContextTokens,
     resolvedVerboseLevel,
@@ -1311,6 +1314,49 @@ export async function runReplyAgent(params: {
     const cliSessionBinding = isCliProvider(providerUsed, cfg)
       ? runResult.meta?.agentMeta?.cliSessionBinding
       : undefined;
+    const configuredDefaultModel = resolveDefaultModelForAgent({
+      cfg,
+      agentId: followupRun.run.agentId,
+    });
+    const effectiveDefaultProvider = defaultProvider ?? configuredDefaultModel.provider;
+    // `defaultModel` is the unqualified `ModelRef.model` resolved by the caller (`resolveDefaultModel`).
+    // It can legitimately contain slashes for router-style ids (e.g. OpenRouter's `mistralai/mistral-7b`,
+    // Fireworks' `accounts/fireworks/models/...`), so we must not re-split on `/` to infer a provider.
+    const recoveredDefaultModel = {
+      provider: effectiveDefaultProvider,
+      model: defaultModel,
+    };
+    const recoverySessionEntry =
+      activeSessionEntry ??
+      (sessionKey && activeSessionStore ? activeSessionStore[sessionKey] : undefined);
+    if (recoverySessionEntry) {
+      const recoveredAutoOverride = clearRecoveredAutoModelOverride({
+        entry: recoverySessionEntry,
+        selectedProvider: recoveredDefaultModel.provider,
+        selectedModel: recoveredDefaultModel.model,
+        activeProvider: providerUsed,
+        activeModel: modelUsed,
+      });
+      if (recoveredAutoOverride.updated) {
+        if (sessionKey && activeSessionStore) {
+          activeSessionStore[sessionKey] = recoverySessionEntry;
+        }
+        if (sessionKey && storePath) {
+          await updateSessionStoreEntry({
+            storePath,
+            sessionKey,
+            update: async () => ({
+              providerOverride: undefined,
+              modelOverride: undefined,
+              modelOverrideSource: undefined,
+              fallbackNoticeSelectedModel: undefined,
+              fallbackNoticeActiveModel: undefined,
+              fallbackNoticeReason: undefined,
+            }),
+          });
+        }
+      }
+    }
     const contextTokensUsed =
       resolveContextTokensForModel({
         cfg,
