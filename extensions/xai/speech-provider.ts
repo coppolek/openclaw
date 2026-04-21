@@ -78,7 +78,7 @@ function responseFormatToFileExtension(
 
 function normalizeXaiProviderConfig(rawConfig: Record<string, unknown>): XaiTtsProviderConfig {
   const providers = rawConfig?.providers as Record<string, unknown> | undefined;
-  const xai = (providers?.xai ?? rawConfig) as Record<string, unknown>;
+  const xai = (providers?.xai ?? rawConfig?.xai ?? rawConfig) as Record<string, unknown>;
   return {
     apiKey: normalizeResolvedSecretInputString({
       value: xai?.apiKey,
