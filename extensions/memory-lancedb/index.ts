@@ -35,6 +35,12 @@ type MemoryEntry = {
   createdAt: number;
 };
 
+type MemoryListEntry = Omit<MemoryEntry, "vector">;
+
+type MemoryListOptions = {
+  orderByCreatedAt?: boolean;
+};
+
 type MemorySearchResult = {
   entry: MemoryEntry;
   score: number;
@@ -47,6 +53,17 @@ type LegacyBeforeAgentStartContext = { prependContext: string } | undefined;
 // ============================================================================
 
 const TABLE_NAME = "memories";
+
+function parsePositiveIntegerOption(value: string | undefined, flag: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${flag} must be a positive integer`);
+  }
+  return parsed;
+}
 
 class MemoryDB {
   private db: LanceDB.Connection | null = null;
@@ -133,6 +150,31 @@ class MemoryDB {
     });
 
     return mapped.filter((r) => r.score >= minScore);
+  }
+
+  async list(limit?: number, options: MemoryListOptions = {}): Promise<MemoryListEntry[]> {
+    await this.ensureInitialized();
+
+    let query = this.table!.query().select(["id", "text", "importance", "category", "createdAt"]);
+    // Push limit to LanceDB only when we don't need to sort in-memory.
+    if (!options.orderByCreatedAt && limit !== undefined) {
+      query = query.limit(limit);
+    }
+
+    const rows = await query.toArray();
+
+    const entries = rows.map((row) => ({
+      id: row.id as string,
+      text: row.text as string,
+      importance: row.importance as number,
+      category: row.category as MemoryEntry["category"],
+      createdAt: row.createdAt as number,
+    }));
+    if (options.orderByCreatedAt) {
+      entries.sort((a, b) => b.createdAt - a.createdAt);
+    }
+
+    return limit === undefined ? entries : entries.slice(0, limit);
   }
 
   async delete(id: string): Promise<boolean> {
@@ -502,9 +544,14 @@ export default definePluginEntry({
         memory
           .command("list")
           .description("List memories")
-          .action(async () => {
-            const count = await db.count();
-            console.log(`Total memories: ${count}`);
+          .option("--limit <n>", "Max results")
+          .option("--order-by-created-at", "Order memories by createdAt descending", false)
+          .action(async (opts) => {
+            const limit = parsePositiveIntegerOption(opts.limit, "--limit");
+            const entries = await db.list(limit, {
+              orderByCreatedAt: Boolean(opts.orderByCreatedAt),
+            });
+            console.log(JSON.stringify(entries, null, 2));
           });
 
         memory
