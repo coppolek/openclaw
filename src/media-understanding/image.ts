@@ -20,6 +20,21 @@ import type {
   ImagesDescriptionResult,
 } from "./types.js";
 
+type ResolvedRequestAuth =
+  | {
+      ok: true;
+      apiKey?: string;
+      headers?: Record<string, string>;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
+type ModelRegistryWithRequestAuthLookup = {
+  getApiKeyAndHeaders?: (model: Model<Api>) => Promise<ResolvedRequestAuth>;
+};
+
 let piModelDiscoveryRuntimePromise: Promise<
   typeof import("../agents/pi-model-discovery-runtime.js")
 > | null = null;
@@ -102,7 +117,7 @@ async function resolveImageRuntime(params: {
   profile?: string;
   preferredProfile?: string;
   authStore?: ImageDescriptionRequest["authStore"];
-}): Promise<{ apiKey: string; model: Model<Api> }> {
+}): Promise<{ apiKey: string; model: Model<Api>; headers?: Record<string, string> }> {
   await ensureOpenClawModelsJson(params.cfg, params.agentDir);
   const { discoverAuthStorage, discoverModels } = await loadPiModelDiscoveryRuntime();
   const authStorage = discoverAuthStorage(params.agentDir);
@@ -115,17 +130,29 @@ async function resolveImageRuntime(params: {
   if (!model.input?.includes("image")) {
     throw new Error(`Model does not support images: ${params.provider}/${params.model}`);
   }
-  const apiKeyInfo = await getApiKeyForModel({
+  const resolvedAuth = await getApiKeyForModel({
     model,
     cfg: params.cfg,
     agentDir: params.agentDir,
     profileId: params.profile,
     preferredProfile: params.preferredProfile,
-    store: params.authStore,
   });
-  const apiKey = requireApiKey(apiKeyInfo, model.provider);
+  const apiKey = requireApiKey(resolvedAuth, model.provider);
   authStorage.setRuntimeApiKey(model.provider, apiKey);
-  return { apiKey, model };
+
+  const modelRegistryWithRequestAuthLookup = modelRegistry as ModelRegistryWithRequestAuthLookup;
+  let requestAuth: ResolvedRequestAuth | null = null;
+  if (typeof modelRegistryWithRequestAuthLookup.getApiKeyAndHeaders === "function") {
+    try {
+      requestAuth = await modelRegistryWithRequestAuthLookup.getApiKeyAndHeaders(model);
+    } catch {
+      // Keep the legacy auth path available when registry request-auth lookup fails.
+      requestAuth = null;
+    }
+  }
+  const headers = requestAuth?.ok ? requestAuth.headers : undefined;
+
+  return { apiKey, model, headers };
 }
 
 function buildImageContext(
@@ -215,11 +242,13 @@ export async function describeImagesWithModel(
 ): Promise<ImagesDescriptionResult> {
   const prompt = params.prompt ?? "Describe the image.";
   let apiKey: string;
+  let headers: Record<string, string> | undefined;
   let model: Model<Api> | undefined;
 
   try {
     const resolved = await resolveImageRuntime(params);
     apiKey = resolved.apiKey;
+    headers = resolved.headers;
     model = resolved.model;
   } catch (err) {
     if (!isMinimaxVlmModel(params.provider, params.model) || !isUnknownModelError(err)) {
@@ -258,6 +287,7 @@ export async function describeImagesWithModel(
   const completeImage = async (onPayload?: ProviderStreamOptions["onPayload"]) =>
     await complete(model, context, {
       apiKey,
+      ...(headers ? { headers } : {}),
       maxTokens,
       signal: controller.signal,
       ...(onPayload ? { onPayload } : {}),
