@@ -92,6 +92,7 @@ Use one section per commitment.
 ## Active
 
 ### API Batch Job - Data Export
+
 - **Committed**: 2026-04-17
 - **Deadline**: 2026-04-22
 - **Description**: Export 1000 records via rate-limited API.
@@ -105,6 +106,7 @@ Use one section per commitment.
   - Workspace file: reports/export-log.md
 
 ### Follow Up - Customer Reply
+
 - **Committed**: 2026-04-18
 - **Deadline**: 2026-04-19
 - **Description**: Send a summary and next steps after document review.
@@ -116,6 +118,7 @@ Use one section per commitment.
 ## Done
 
 ### Weekly Review - Inbox Cleanup
+
 - **Committed**: 2026-04-19
 - **Deadline**: 2026-04-20
 - **Description**: Review untriaged items and identify action items.
@@ -131,6 +134,7 @@ If you prefer a lighter format, this also works:
 
 ```md
 ### API Batch Job
+
 - **Deadline**: 2026-04-22
 - **Status**: In Progress (800/1000 complete)
 - **Notes**: Rate-limited API, resumes nightly via cron
@@ -152,10 +156,10 @@ tasks:
 - name: pending-tasks-check
   interval: 30m
   prompt: |
-    Read PENDING.md if it exists.
-    Check each pending item's deadline against the current time.
-    If any item is overdue and not completed, report the overdue items.
-    If all items are on-track, reply HEARTBEAT_OK.
+  Read PENDING.md if it exists.
+  Check each pending item's deadline against the current time.
+  If any item is overdue and not completed, report the overdue items.
+  If all items are on-track, reply HEARTBEAT_OK.
 ```
 
 See [Heartbeat](/gateway/heartbeat) for full configuration details.
@@ -182,13 +186,13 @@ Archive pattern:
 
 Native mechanisms handle other concerns:
 
-| Mechanism | Answers |
-| --- | --- |
-| Cron | When should something run? |
-| Background Tasks | What is this running job doing? |
-| Standing Orders | What is the agent allowed to do persistently? |
-| HEARTBEAT.md | What needs periodic attention? |
-| PENDING.md | What commitment must be remembered across sessions? |
+| Mechanism        | Answers                                             |
+| ---------------- | --------------------------------------------------- |
+| Cron             | When should something run?                          |
+| Background Tasks | What is this running job doing?                     |
+| Standing Orders  | What is the agent allowed to do persistently?       |
+| HEARTBEAT.md     | What needs periodic attention?                      |
+| PENDING.md       | What commitment must be remembered across sessions? |
 
 This separation avoids overloading any single mechanism.
 

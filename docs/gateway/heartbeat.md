@@ -404,10 +404,10 @@ tasks:
 - name: pending-tasks-check
   interval: 30m
   prompt: |
-    Read PENDING.md if it exists.
-    Check each pending item's deadline against the current time.
-    If any item is overdue and not completed, report the overdue items to the user.
-    If all items are on-track, reply HEARTBEAT_OK.
+  Read PENDING.md if it exists.
+  Check each pending item's deadline against the current time.
+  If any item is overdue and not completed, report the overdue items to the user.
+  If all items are on-track, reply HEARTBEAT_OK.
 ```
 
 ### Can the agent update HEARTBEAT.md?
