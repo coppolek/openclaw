@@ -151,10 +151,18 @@ type MemoryPluginState = {
   runtime?: MemoryPluginRuntime;
 };
 
+type MemoryCapabilityLoader = (cfg: OpenClawConfig) => void;
+
 const memoryPluginState: MemoryPluginState = {
   corpusSupplements: [],
   promptSupplements: [],
 };
+
+let memoryCapabilityLoader: MemoryCapabilityLoader | undefined;
+
+export function registerMemoryCapabilityLoader(loader?: MemoryCapabilityLoader): void {
+  memoryCapabilityLoader = loader;
+}
 
 export function registerMemoryCorpusSupplement(
   pluginId: string,
@@ -274,6 +282,12 @@ function cloneMemoryPublicArtifact(
 export async function listActiveMemoryPublicArtifacts(params: {
   cfg: OpenClawConfig;
 }): Promise<MemoryPluginPublicArtifact[]> {
+  if (!memoryPluginState.capability && params.cfg) {
+    memoryCapabilityLoader?.(params.cfg);
+    if (!memoryPluginState.capability) {
+      memoryCapabilityLoader?.(params.cfg);
+    }
+  }
   const artifacts =
     (await memoryPluginState.capability?.capability.publicArtifacts?.listArtifacts(params)) ?? [];
   return artifacts.map(cloneMemoryPublicArtifact).toSorted((left, right) => {
@@ -322,6 +336,7 @@ export function clearMemoryPluginState(): void {
   memoryPluginState.promptSupplements = [];
   memoryPluginState.flushPlanResolver = undefined;
   memoryPluginState.runtime = undefined;
+  memoryCapabilityLoader = undefined;
 }
 
 export const _resetMemoryPluginState = clearMemoryPluginState;
