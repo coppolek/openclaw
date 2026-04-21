@@ -196,6 +196,133 @@ describe("createTelegramDraftStream", () => {
     expect(api.editMessageText).toHaveBeenCalledWith(123, 17, "Hello again");
   });
 
+  it("uses the message-transport default throttle after draft transport falls back", async () => {
+    vi.useFakeTimers();
+    try {
+      const api = createMockDraftApi();
+      api.sendMessageDraft.mockRejectedValueOnce(
+        new Error(
+          "Call to 'sendMessageDraft' failed! (400: Bad Request: method sendMessageDraft can be used only in private chats)",
+        ),
+      );
+      const stream = createTelegramDraftStream({
+        api: api as unknown as Bot["api"],
+        chatId: 123,
+        thread: { id: 42, scope: "dm" },
+      });
+
+      stream.update("Hello");
+      await stream.flush();
+
+      expect(api.sendMessage).toHaveBeenCalledWith(123, "Hello", { message_thread_id: 42 });
+      expect(stream.previewMode?.()).toBe("message");
+
+      stream.update("Hello again");
+      expect(api.editMessageText).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(api.editMessageText).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.waitFor(() =>
+        expect(api.editMessageText).toHaveBeenCalledWith(123, 17, "Hello again"),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("applies the message-transport default throttle to buffered partials after draft fallback", async () => {
+    vi.useFakeTimers();
+    try {
+      let rejectDraftSend: ((reason?: unknown) => void) | undefined;
+      const api = createMockDraftApi();
+      api.sendMessageDraft.mockImplementationOnce(
+        () =>
+          new Promise<true>((_resolve, reject) => {
+            rejectDraftSend = reject;
+          }),
+      );
+      const stream = createTelegramDraftStream({
+        api: api as unknown as Bot["api"],
+        chatId: 123,
+        thread: { id: 42, scope: "dm" },
+      });
+
+      stream.update("Hello");
+      await vi.waitFor(() => expect(api.sendMessageDraft).toHaveBeenCalledTimes(1));
+
+      stream.update("Hello again");
+      let flushResolved = false;
+      const flushPromise = stream.flush().then(() => {
+        flushResolved = true;
+      });
+      rejectDraftSend?.(
+        new Error(
+          "Call to 'sendMessageDraft' failed! (400: Bad Request: method sendMessageDraft can be used only in private chats)",
+        ),
+      );
+
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(stream.previewMode?.()).toBe("message");
+      expect(api.sendMessage).toHaveBeenCalledWith(123, "Hello", { message_thread_id: 42 });
+      expect(api.editMessageText).not.toHaveBeenCalled();
+      expect(flushResolved).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(api.editMessageText).not.toHaveBeenCalled();
+      expect(flushResolved).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await flushPromise;
+      expect(api.editMessageText).toHaveBeenCalledWith(123, 17, "Hello again");
+      expect(flushResolved).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drains buffered final text immediately after draft fallback", async () => {
+    vi.useFakeTimers();
+    try {
+      let rejectDraftSend: ((reason?: unknown) => void) | undefined;
+      const api = createMockDraftApi();
+      api.sendMessageDraft.mockImplementationOnce(
+        () =>
+          new Promise<true>((_resolve, reject) => {
+            rejectDraftSend = reject;
+          }),
+      );
+      const stream = createTelegramDraftStream({
+        api: api as unknown as Bot["api"],
+        chatId: 123,
+        thread: { id: 42, scope: "dm" },
+      });
+
+      stream.update("Hello");
+      await vi.waitFor(() => expect(api.sendMessageDraft).toHaveBeenCalledTimes(1));
+
+      stream.update("Hello again");
+      const stopPromise = stream.stop();
+      rejectDraftSend?.(
+        new Error(
+          "Call to 'sendMessageDraft' failed! (400: Bad Request: method sendMessageDraft can be used only in private chats)",
+        ),
+      );
+
+      await stopPromise;
+
+      expect(api.sendMessage).toHaveBeenCalledWith(123, "Hello", { message_thread_id: 42 });
+      expect(api.editMessageText).toHaveBeenCalledWith(123, 17, "Hello again");
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(api.editMessageText).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("retries DM message preview send without thread when thread is not found", async () => {
     const api = createMockDraftApi();
     api.sendMessage
@@ -602,7 +729,6 @@ describe("draft stream initial message debounce", () => {
 
       stream.update("Y");
       await stream.stop();
-      await stream.flush();
 
       expect(api.sendMessage).toHaveBeenCalledWith(123, "Y", undefined);
     });
@@ -613,7 +739,6 @@ describe("draft stream initial message debounce", () => {
 
       stream.update("Ok.");
       await stream.stop();
-      await stream.flush();
 
       expect(api.sendMessage).toHaveBeenCalledWith(123, "Ok.", undefined);
     });
@@ -677,6 +802,78 @@ describe("draft stream initial message debounce", () => {
 
       expect(api.editMessageText).toHaveBeenCalled();
       expect(api.sendMessage).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("throttle behavior", () => {
+    it("uses the 1000ms default throttle for message transport when no throttleMs is provided", async () => {
+      const api = createMockApi();
+      const stream = createTelegramDraftStream({
+        api: api as unknown as Bot["api"],
+        chatId: 123,
+      });
+
+      stream.update("Hello");
+      await stream.flush();
+      expect(api.sendMessage).toHaveBeenCalledTimes(1);
+
+      stream.update("Hello again");
+      expect(api.editMessageText).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(api.editMessageText).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.waitFor(() =>
+        expect(api.editMessageText).toHaveBeenCalledWith(123, 42, "Hello again"),
+      );
+    });
+
+    it("uses the 250ms default throttle for draft transport when no throttleMs is provided", async () => {
+      const api = createMockDraftApi();
+      const stream = createTelegramDraftStream({
+        api: api as unknown as Bot["api"],
+        chatId: 123,
+        thread: { id: 42, scope: "dm" },
+      });
+
+      stream.update("Hello");
+      await stream.flush();
+      expect(api.sendMessageDraft).toHaveBeenCalledTimes(1);
+
+      stream.update("Hello again");
+      expect(api.sendMessageDraft).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(249);
+      expect(api.sendMessageDraft).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.waitFor(() => expect(api.sendMessageDraft).toHaveBeenCalledTimes(2));
+      expect(api.sendMessageDraft.mock.calls[1]?.[2]).toBe("Hello again");
+    });
+
+    it("respects explicit throttleMs overrides", async () => {
+      const api = createMockApi();
+      const stream = createTelegramDraftStream({
+        api: api as unknown as Bot["api"],
+        chatId: 123,
+        throttleMs: 1000,
+      });
+
+      stream.update("Hello");
+      await stream.flush();
+      expect(api.sendMessage).toHaveBeenCalledTimes(1);
+
+      stream.update("Hello again");
+      expect(api.editMessageText).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(api.editMessageText).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.waitFor(() =>
+        expect(api.editMessageText).toHaveBeenCalledWith(123, 42, "Hello again"),
+      );
     });
   });
 

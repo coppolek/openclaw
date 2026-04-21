@@ -95,6 +95,50 @@ describe("draft-stream-controls", () => {
     expect(sendOrEditStreamMessage).not.toHaveBeenCalled();
   });
 
+  it("stop reruns flush after marking final so debounced previews still send", async () => {
+    const state = { stopped: false, final: false };
+    const sendOrEditStreamMessage = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const controls = createFinalizableDraftStreamControlsForState({
+      throttleMs: 250,
+      state,
+      sendOrEditStreamMessage,
+    });
+
+    controls.update("final text");
+    await controls.stop();
+
+    expect(sendOrEditStreamMessage).toHaveBeenCalledTimes(2);
+    expect(sendOrEditStreamMessage).toHaveBeenNthCalledWith(1, "final text");
+    expect(sendOrEditStreamMessage).toHaveBeenNthCalledWith(2, "final text");
+  });
+
+  it("stop does not retry deferred final text when drain send returns false", async () => {
+    vi.useFakeTimers();
+    try {
+      const state = { stopped: false, final: false };
+      const sendOrEditStreamMessage = vi.fn<() => Promise<boolean>>().mockResolvedValue(false);
+      const throttleMs = Date.now() + 60_000;
+      const controls = createFinalizableDraftStreamControlsForState({
+        throttleMs,
+        state,
+        sendOrEditStreamMessage,
+      });
+
+      controls.update("final text");
+      expect(sendOrEditStreamMessage).not.toHaveBeenCalled();
+
+      await controls.stop();
+
+      expect(sendOrEditStreamMessage).toHaveBeenCalledTimes(1);
+      expect(sendOrEditStreamMessage).toHaveBeenCalledWith("final text");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("lifecycle clear marks stopped, clears id, and deletes preview message", async () => {
     const state = { stopped: false, final: false };
     let messageId: string | undefined = "m-4";
