@@ -1,0 +1,28 @@
+{
+  "id": "friendliai",
+  "enabledByDefault": true,
+  "providers": ["friendliai"],
+  "providerAuthEnvVars": {
+    "friendliai": ["FRIENDLIAI_API_KEY"]
+  },
+  "providerAuthChoices": [
+    {
+      "provider": "friendliai",
+      "method": "api-key",
+      "choiceId": "friendliai-api-key",
+      "choiceLabel": "FriendliAI API key",
+      "groupId": "friendliai",
+      "groupLabel": "FriendliAI",
+      "groupHint": "API key",
+      "optionKey": "friendliaiApiKey",
+      "cliFlag": "--friendliai-api-key",
+      "cliOption": "--friendliai-api-key <token>",
+      "cliDescription": "FriendliAI personal API key"
+    }
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

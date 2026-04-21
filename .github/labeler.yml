@@ -285,6 +285,11 @@
   - changed-files:
       - any-glob-to-any-file:
           - "extensions/minimax-portal-auth/**"
+"extensions: friendliai":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "extensions/friendliai/**"
+          - "docs/providers/friendliai.md"
 "extensions: huggingface":
   - changed-files:
       - any-glob-to-any-file:

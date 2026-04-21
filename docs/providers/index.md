@@ -37,6 +37,7 @@ Looking for chat channel docs (WhatsApp/Telegram/Discord/Slack/Mattermost (plugi
 - [DeepSeek](/providers/deepseek)
 - [fal](/providers/fal)
 - [Fireworks](/providers/fireworks)
+- [FriendliAI](/providers/friendliai)
 - [GitHub Copilot](/providers/github-copilot)
 - [GLM models](/providers/glm)
 - [Google (Gemini)](/providers/google)
