@@ -14,7 +14,7 @@ import {
 } from "../../memory-host-sdk/dreaming.js";
 import {
   collectDreamDiaryBackfillEntries,
-  filterSessionSummaryDailyMemoryFiles,
+  filterOutSessionSummaryDailyMemoryFiles,
   isSupportedShortTermMemoryPath,
   isSessionSummaryDailyMemoryPath,
   listDailyMemoryFiles,
@@ -902,7 +902,7 @@ export const doctorHandlers: GatewayRequestHandlers = {
     const agentId = resolveDefaultAgentId(cfg);
     const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
     const memoryDir = path.join(workspaceDir, "memory");
-    const sourceFiles = await filterSessionSummaryDailyMemoryFiles(
+    const sourceFiles = await filterOutSessionSummaryDailyMemoryFiles(
       await listWorkspaceDailyFiles(memoryDir),
       { tolerateReadErrors: false },
     );
