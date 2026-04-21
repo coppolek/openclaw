@@ -81,6 +81,7 @@ describe("agent handler session create events", () => {
         addChatRun: vi.fn(),
         registerToolEventRecipient: vi.fn(),
         getSessionEventSubscriberConnIds: () => new Set(["conn-1"]),
+        getSessionMessageSubscriberConnIds: () => new Set(["conn-1"]),
         broadcastToConnIds,
       } as never,
       client: null,

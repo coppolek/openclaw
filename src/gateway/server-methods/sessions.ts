@@ -150,15 +150,42 @@ function shouldAttachPendingMessageSeq(params: { payload: unknown; cached?: bool
   return status === "started";
 }
 
-function emitSessionsChanged(
-  context: Pick<GatewayRequestContext, "broadcastToConnIds" | "getSessionEventSubscriberConnIds">,
+export function emitSessionsChanged(
+  context: Pick<
+    GatewayRequestContext,
+    "broadcastToConnIds" | "getSessionEventSubscriberConnIds" | "getSessionMessageSubscriberConnIds"
+  >,
   payload: { sessionKey?: string; reason: string; compacted?: boolean },
 ) {
-  const connIds = context.getSessionEventSubscriberConnIds();
-  if (connIds.size === 0) {
+  const evSubs = context.getSessionEventSubscriberConnIds();
+  const isTeardown =
+    payload.reason === "reset" || payload.reason === "delete" || payload.reason === "new";
+
+  if (isTeardown) {
+    const msgSubs = payload.sessionKey
+      ? context.getSessionMessageSubscriberConnIds(payload.sessionKey)
+      : new Set<string>();
+    const drainConnIds = new Set<string>([...evSubs, ...msgSubs]);
+
+    if (drainConnIds.size > 0 && payload.sessionKey) {
+      context.broadcastToConnIds(
+        "socket.drain",
+        {
+          sessionKey: payload.sessionKey,
+          reason: payload.reason,
+          ts: Date.now(),
+        },
+        drainConnIds,
+      );
+    }
+  }
+
+  if (evSubs.size === 0) {
     return;
   }
+
   const sessionRow = payload.sessionKey ? loadGatewaySessionRow(payload.sessionKey) : null;
+
   context.broadcastToConnIds(
     "sessions.changed",
     {
@@ -217,8 +244,8 @@ function emitSessionsChanged(
           }
         : {}),
     },
-    connIds,
-    { dropIfSlow: true },
+    evSubs,
+    { dropIfSlow: !isTeardown },
   );
 }
 
