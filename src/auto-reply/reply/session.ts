@@ -122,8 +122,9 @@ function resolveStaleSessionEndReason(params: {
   if (!params.entry || !params.freshness) {
     return undefined;
   }
+  const freshnessAnchor = params.entry.lastInteractionAt ?? params.entry.updatedAt;
   const staleDaily =
-    params.freshness.dailyResetAt != null && params.entry.updatedAt < params.freshness.dailyResetAt;
+    params.freshness.dailyResetAt != null && freshnessAnchor < params.freshness.dailyResetAt;
   const staleIdle =
     params.freshness.idleExpiresAt != null && params.now > params.freshness.idleExpiresAt;
   if (staleIdle) {
@@ -133,6 +134,20 @@ function resolveStaleSessionEndReason(params: {
     return "daily";
   }
   return undefined;
+}
+
+function preserveLatestLastInteractionAt(
+  existing: SessionEntry | undefined,
+  next: SessionEntry,
+): SessionEntry {
+  const existingLastInteractionAt = existing?.lastInteractionAt;
+  if (existingLastInteractionAt == null) {
+    return next;
+  }
+  if (next.lastInteractionAt == null || existingLastInteractionAt > next.lastInteractionAt) {
+    return { ...next, lastInteractionAt: existingLastInteractionAt };
+  }
+  return next;
 }
 
 export type SessionInitResult = {
@@ -436,7 +451,12 @@ export async function initSessionState(params: {
   const entryFreshness = entry
     ? isSystemEvent
       ? ({ fresh: true } satisfies SessionFreshness)
-      : evaluateSessionFreshness({ updatedAt: entry.updatedAt, now, policy: resetPolicy })
+      : evaluateSessionFreshness({
+          updatedAt: entry.updatedAt,
+          lastInteractionAt: entry.lastInteractionAt,
+          now,
+          policy: resetPolicy,
+        })
     : undefined;
   const freshEntry = entryFreshness?.fresh ?? false;
   // Capture the current session entry before any reset so its transcript can be
@@ -575,10 +595,14 @@ export async function initSessionState(params: {
   const lastTo = deliveryFields.lastTo ?? lastToRaw;
   const lastAccountId = deliveryFields.lastAccountId ?? lastAccountIdRaw;
   const lastThreadId = deliveryFields.lastThreadId ?? lastThreadIdRaw;
+  const nowMs = Date.now();
   sessionEntry = {
     ...baseEntry,
     sessionId,
-    updatedAt: Date.now(),
+    updatedAt: nowMs,
+    // Only advance lastInteractionAt for real user interactions so that
+    // system events (heartbeat, cron, exec) do not prevent daily/idle resets.
+    lastInteractionAt: isSystemEvent ? baseEntry?.lastInteractionAt : nowMs,
     systemSent,
     abortedLastRun,
     // Persist previously stored thinking/verbose levels when present.
@@ -728,15 +752,22 @@ export async function initSessionState(params: {
     sessionEntry.contextTokens = undefined;
   }
   // Preserve per-session overrides while resetting compaction state on /new.
-  sessionStore[sessionKey] = { ...sessionStore[sessionKey], ...sessionEntry };
-  await updateSessionStore(
+  sessionStore[sessionKey] = preserveLatestLastInteractionAt(sessionStore[sessionKey], {
+    ...sessionStore[sessionKey],
+    ...sessionEntry,
+  });
+  const persistedSessionEntry = await updateSessionStore(
     storePath,
     (store) => {
       // Preserve per-session overrides while resetting compaction state on /new.
-      store[sessionKey] = { ...store[sessionKey], ...sessionEntry };
+      store[sessionKey] = preserveLatestLastInteractionAt(store[sessionKey], {
+        ...store[sessionKey],
+        ...sessionEntry,
+      });
       if (retiredLegacyMainDelivery) {
         store[retiredLegacyMainDelivery.key] = retiredLegacyMainDelivery.entry;
       }
+      return store[sessionKey];
     },
     {
       activeSessionKey: sessionKey,
@@ -750,6 +781,8 @@ export async function initSessionState(params: {
         }),
     },
   );
+  sessionStore[sessionKey] = persistedSessionEntry;
+  sessionEntry = persistedSessionEntry;
 
   // Archive old transcript so it doesn't accumulate on disk (#14869).
   let previousSessionTranscript: {

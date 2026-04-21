@@ -305,7 +305,9 @@ export function runAgentAttempt(params: {
         if (entry) {
           const updatedEntry = { ...entry };
           clearCliSession(updatedEntry, params.providerOverride);
-          updatedEntry.updatedAt = Date.now();
+          const clearNow = Date.now();
+          updatedEntry.updatedAt = clearNow;
+          updatedEntry.lastInteractionAt = clearNow;
 
           await persistSessionEntry({
             sessionStore: params.sessionStore,
@@ -333,7 +335,9 @@ export function runAgentAttempt(params: {
                 params.providerOverride,
                 result.meta.agentMeta.cliSessionBinding,
               );
-              updatedEntry.updatedAt = Date.now();
+              const bindNow = Date.now();
+              updatedEntry.updatedAt = bindNow;
+              updatedEntry.lastInteractionAt = bindNow;
 
               await persistSessionEntry({
                 sessionStore: params.sessionStore,

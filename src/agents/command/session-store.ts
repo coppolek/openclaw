@@ -29,6 +29,23 @@ function resolveNonNegativeNumber(value: number | undefined): number | undefined
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
+function preserveLatestLastInteractionAt(
+  existing: SessionEntry | undefined,
+  next: SessionEntry,
+): SessionEntry {
+  const existingLastInteractionAt = existing?.lastInteractionAt;
+  if (existingLastInteractionAt == null) {
+    return next;
+  }
+  if (next.lastInteractionAt == null || existingLastInteractionAt > next.lastInteractionAt) {
+    return {
+      ...next,
+      lastInteractionAt: existingLastInteractionAt,
+    };
+  }
+  return next;
+}
+
 export async function updateSessionStoreAfterAgentRun(params: {
   cfg: OpenClawConfig;
   contextTokensOverride?: number;
@@ -71,14 +88,17 @@ export async function updateSessionStoreAfterAgentRun(params: {
           allowAsyncLoad: false,
         }) ?? DEFAULT_CONTEXT_TOKENS);
 
+  const storeNow = Date.now();
   const entry = sessionStore[sessionKey] ?? {
     sessionId,
-    updatedAt: Date.now(),
+    updatedAt: storeNow,
+    lastInteractionAt: storeNow,
   };
   const next: SessionEntry = {
     ...entry,
     sessionId,
-    updatedAt: Date.now(),
+    updatedAt: storeNow,
+    lastInteractionAt: storeNow,
     contextTokens,
   };
   setSessionRuntimeModel(next, {
@@ -146,7 +166,10 @@ export async function updateSessionStoreAfterAgentRun(params: {
     next.compactionCount = (entry.compactionCount ?? 0) + compactionsThisRun;
   }
   const persisted = await updateSessionStore(storePath, (store) => {
-    const merged = mergeSessionEntry(store[sessionKey], next);
+    const merged = preserveLatestLastInteractionAt(
+      store[sessionKey],
+      mergeSessionEntry(store[sessionKey], next),
+    );
     store[sessionKey] = merged;
     return merged;
   });
