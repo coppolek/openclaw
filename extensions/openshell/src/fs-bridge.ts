@@ -442,8 +442,11 @@ function sameFileIdentity(left: fs.Stats, right: fs.Stats): boolean {
   if (left.ino !== right.ino) {
     return false;
   }
-  if (left.dev === right.dev) {
-    return true;
+  if (left.ino === 0 || right.ino === 0) {
+    return false;
   }
-  return process.platform === "win32" && (left.dev === 0 || right.dev === 0);
+  if (left.dev === 0 || right.dev === 0) {
+    return false;
+  }
+  return left.dev === right.dev;
 }

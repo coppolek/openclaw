@@ -396,7 +396,7 @@ describe("openshell fs bridges", () => {
     }
   });
 
-  it("accepts win32 fallback when path stats report an unknown device id", async () => {
+  it("rejects win32 fallback when path stats report an unknown device id", async () => {
     const workspaceDir = await makeTempDir("openclaw-openshell-fs-");
     const targetPath = path.join(workspaceDir, "subdir", "secret.txt");
     await fs.mkdir(path.join(workspaceDir, "subdir"), { recursive: true });
@@ -426,8 +426,8 @@ describe("openshell fs bridges", () => {
     });
 
     try {
-      await expect(bridge.readFile({ filePath: "subdir/secret.txt" })).resolves.toEqual(
-        Buffer.from("inside"),
+      await expect(bridge.readFile({ filePath: "subdir/secret.txt" })).rejects.toThrow(
+        "Sandbox boundary checks failed",
       );
       expect(readlinkSpy).toHaveBeenCalled();
       expect(lstatSpy).toHaveBeenCalledWith(targetPath);
