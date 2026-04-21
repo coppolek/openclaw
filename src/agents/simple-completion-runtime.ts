@@ -138,7 +138,8 @@ function hasMissingApiKeyAllowance(params: {
 function shouldUseRequestAuthenticatedSimpleCompletion(params: { model: Model<Api> }): boolean {
   const requestTransport = getModelProviderRequestTransport(params.model);
   return (
-    Boolean(requestTransport?.auth || requestTransport?.headers) ||
+    Boolean(requestTransport?.auth && requestTransport.auth.mode !== "provider-default") ||
+    hasAuthLikeModelHeaders(requestTransport?.headers) ||
     hasAuthLikeModelHeaders((params.model as { headers?: unknown }).headers)
   );
 }

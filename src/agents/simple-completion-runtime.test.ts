@@ -442,6 +442,52 @@ describe("prepareSimpleCompletionModel", () => {
     );
   });
 
+  it("keeps real api keys when request transport headers are non-auth metadata", async () => {
+    const requestTransportSymbol = Symbol.for("openclaw.modelProviderRequestTransport");
+    hoisted.resolveModelMock.mockReturnValueOnce({
+      model: {
+        provider: "plamo",
+        id: "plamo-3.0-prime-beta",
+        api: "openai-completions",
+        baseUrl: "https://proxy.example.test/v1",
+        headers: {
+          "X-Tenant": "tenant-a",
+        },
+        [requestTransportSymbol]: {
+          headers: {
+            "X-Tenant": "tenant-a",
+          },
+        },
+      },
+      authStorage: {
+        setRuntimeApiKey: hoisted.setRuntimeApiKeyMock,
+      },
+      modelRegistry: {},
+    });
+    hoisted.getApiKeyForModelMock.mockResolvedValueOnce({
+      apiKey: "sk-real-key",
+      source: "env:PLAMO_API_KEY",
+      mode: "api-key",
+    });
+
+    const result = await prepareSimpleCompletionModel({
+      cfg: undefined,
+      provider: "plamo",
+      modelId: "plamo-3.0-prime-beta",
+    });
+
+    expect(hoisted.setRuntimeApiKeyMock).toHaveBeenCalledWith("plamo", "sk-real-key");
+    expect(result).toEqual(
+      expect.objectContaining({
+        auth: expect.objectContaining({
+          apiKey: "sk-real-key",
+          source: "env:PLAMO_API_KEY",
+          mode: "api-key",
+        }),
+      }),
+    );
+  });
+
   it("omits synthetic request-auth markers when auth is carried by model headers alone", async () => {
     hoisted.resolveModelMock.mockReturnValueOnce({
       model: {
