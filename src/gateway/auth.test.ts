@@ -300,6 +300,37 @@ describe("gateway auth", () => {
     expect(mismatch.reason).toBe("password_mismatch");
   });
 
+  it("accepts Rabbit clawdbot-gateway token payloads in password mode", async () => {
+    const res = await authorizeGatewayConnect({
+      auth: { mode: "password", password: "secret", allowTailscale: false },
+      // Rabbit R1 sends the QR secret in `token` during the wss handshake.
+      connectAuth: { token: "secret" },
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.method).toBe("password");
+  });
+
+  it("rejects mismatched Rabbit clawdbot-gateway token payloads in password mode", async () => {
+    const res = await authorizeGatewayConnect({
+      auth: { mode: "password", password: "secret", allowTailscale: false },
+      connectAuth: { token: "wrong" },
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe("password_mismatch");
+  });
+
+  it("prefers connectAuth.password over connectAuth.token in password mode", async () => {
+    const res = await authorizeGatewayConnect({
+      auth: { mode: "password", password: "secret", allowTailscale: false },
+      connectAuth: { password: "secret", token: "wrong" },
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.method).toBe("password");
+  });
+
   it("reports missing password config reason", async () => {
     const res = await authorizeGatewayConnect({
       auth: { mode: "password", allowTailscale: false },
