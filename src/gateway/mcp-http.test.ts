@@ -105,7 +105,7 @@ describe("mcp loopback server", () => {
         sessionKey: "agent:main:telegram:group:chat123",
         accountId: "work",
         messageProvider: "telegram",
-        senderIsOwner: undefined,
+        senderIsOwner: false,
         surface: "loopback",
       }),
     );
@@ -138,7 +138,7 @@ describe("mcp loopback server", () => {
       expect.objectContaining({
         sessionKey: "agent:main:matrix:dm:test",
         messageProvider: "matrix",
-        senderIsOwner: true,
+        senderIsOwner: false,
         surface: "loopback",
       }),
     );
