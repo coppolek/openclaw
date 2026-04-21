@@ -352,7 +352,7 @@ function deferGatewayRestartUntilIdleImpl(
     onCheckError?: (err: unknown) => void;
   } | undefined,
   cfg: { pollMs?: number; maxWaitMs?: number },
-) {
+): ReturnType<typeof setInterval> | undefined {
   const pollMs = cfg.pollMs ?? DEFAULT_DEFERRAL_POLL_MS;
   const maxWaitMs = cfg.maxWaitMs ?? DEFAULT_DEFERRAL_MAX_WAIT_MS;
   const startedAt = Date.now();
