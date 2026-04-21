@@ -182,6 +182,16 @@ export function loadBundledPluginPublicArtifactModuleSync<T extends object>(para
         `Bundled plugin public surface loaded but returned null/undefined: ${location.modulePath}`,
       );
     }
+    // Defensive: verify loaded module is accessible (handles proxy with null target like #62844)
+    // If the module is a Proxy with null/undefined target, property access will throw
+    try {
+      Reflect.has(loaded as object, "constructor");
+    } catch {
+      loadedPublicSurfaceModules.delete(location.modulePath);
+      throw new Error(
+        `Bundled plugin public surface returned inaccessible proxy (null target): ${location.modulePath}`,
+      );
+    }
     Object.assign(sentinel, loaded as T);
     return sentinel;
   } catch (error) {

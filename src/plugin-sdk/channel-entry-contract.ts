@@ -344,6 +344,16 @@ function loadBundledEntryModuleSync(importMetaUrl: string, specifier: string): u
   if (loaded === undefined || loaded === null) {
     throw new Error(`Bundled module loaded but returned null/undefined: ${modulePath}`);
   }
+  // Defensive: verify loaded module is accessible (handles jiti proxy with null target)
+  // If the module is a Proxy with a null/undefined target, property access will throw
+  try {
+    // Use Reflect.has as a low-cost validation - it triggers the proxy and fails
+    // if the target is null/undefined, producing the exact error pattern from #62844
+    Reflect.has(loaded as object, "constructor");
+  } catch {
+    loadedModuleExports.delete(modulePath);
+    throw new Error(`Bundled module returned inaccessible proxy (null/undefined target): ${modulePath}`);
+  }
   loadedModuleExports.set(modulePath, loaded);
   return loaded;
 }

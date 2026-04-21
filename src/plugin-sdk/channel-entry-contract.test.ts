@@ -216,4 +216,65 @@ describe("loadBundledEntryExportSync", () => {
     // Both calls should have invoked jiti — confirms no caching of bad value
     expect(createJiti).toHaveBeenCalled();
   });
+
+  it("throws and does not cache when jiti returns broken proxy with null target", async () => {
+    // Create a proxy with null target - exactly the failure mode from #62844
+    const brokenProxy = new Proxy(
+      {},
+      {
+        get(_target, prop) {
+          // Simulate the exact error: accessing a property throws because target is null
+          throw new TypeError("Cannot read properties of undefined (reading 't')");
+        },
+      },
+    );
+    const createJiti = vi.fn(() => vi.fn(() => brokenProxy));
+    vi.doMock("jiti", () => ({
+      createJiti,
+    }));
+
+    const channelEntryContract = await importFreshModule<
+      typeof import("./channel-entry-contract.js")
+    >(import.meta.url, "./channel-entry-contract.js?scope=broken-proxy");
+
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-channel-entry-contract-"));
+    tempDirs.push(tempRoot);
+
+    const pluginRoot = path.join(tempRoot, "dist", "extensions", "telegram");
+    fs.mkdirSync(pluginRoot, { recursive: true });
+
+    const importerPath = path.join(pluginRoot, "index.js");
+    fs.writeFileSync(importerPath, "export default {};\n", "utf8");
+
+    const brokenModulePath = path.join(pluginRoot, "broken-module.js");
+    fs.writeFileSync(brokenModulePath, "export default {};\n", "utf8");
+
+
+    // First call should throw due to broken proxy validation
+    let thrown: unknown;
+    try {
+      channelEntryContract.loadBundledEntryExportSync(pathToFileURL(importerPath).href, {
+        specifier: "./broken-module.js",
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain("inaccessible proxy");
+
+
+    // Subsequent call should NOT return cached bad proxy — should try to load again and throw again
+    let thrownAgain: unknown;
+    try {
+      channelEntryContract.loadBundledEntryExportSync(pathToFileURL(importerPath).href, {
+        specifier: "./broken-module.js",
+      });
+    } catch (err) {
+      thrownAgain = err;
+    }
+    expect(thrownAgain).toBeInstanceOf(Error);
+    expect((thrownAgain as Error).message).toContain("inaccessible proxy");
+    // Both calls should have invoked jiti — confirms no caching of bad proxy
+    expect(createJiti).toHaveBeenCalled();
+  });
 });

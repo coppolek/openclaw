@@ -183,4 +183,61 @@ describe("bundled plugin public surface loader", () => {
     // Confirms no caching of bad value
     expect(createJiti).toHaveBeenCalled();
   });
+
+  it("throws and does not cache when jiti returns broken proxy with null target", async () => {
+    // Create a proxy with null target - exactly the failure mode from #62844
+    const brokenProxy = new Proxy(
+      {},
+      {
+        get(_target, prop) {
+          // Simulate the exact error: accessing a property throws because target is null
+          throw new TypeError("Cannot read properties of undefined (reading 't')");
+        },
+      },
+    );
+    const createJiti = vi.fn(() => vi.fn(() => brokenProxy));
+    vi.doMock("jiti", () => ({
+      createJiti,
+    }));
+
+    const publicSurfaceLoader = await importFreshModule<
+      typeof import("./public-surface-loader.js")
+    >(import.meta.url, "./public-surface-loader.js?scope=broken-proxy");
+
+    const tempRoot = createTempDir();
+    const bundledPluginsDir = path.join(tempRoot, "dist");
+    process.env.OPENCLAW_BUNDLED_PLUGINS_DIR = bundledPluginsDir;
+
+    const modulePath = path.join(bundledPluginsDir, "demo", "broken-api.js");
+    fs.mkdirSync(path.dirname(modulePath), { recursive: true });
+    fs.writeFileSync(modulePath, "export default {};\n", "utf8");
+
+    // First call should throw due to broken proxy validation
+    let thrown: unknown;
+    try {
+      publicSurfaceLoader.loadBundledPluginPublicArtifactModuleSync<{ marker: string }>({
+        dirName: "demo",
+        artifactBasename: "broken-api.js",
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain("inaccessible proxy");
+
+    // Subsequent call should NOT return cached bad proxy — should try to load again and throw again
+    let thrownAgain: unknown;
+    try {
+      publicSurfaceLoader.loadBundledPluginPublicArtifactModuleSync<{ marker: string }>({
+        dirName: "demo",
+        artifactBasename: "broken-api.js",
+      });
+    } catch (err) {
+      thrownAgain = err;
+    }
+    expect(thrownAgain).toBeInstanceOf(Error);
+    expect((thrownAgain as Error).message).toContain("inaccessible proxy");
+    // Confirms no caching of bad proxy
+    expect(createJiti).toHaveBeenCalled();
+  });
 });
