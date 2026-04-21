@@ -414,6 +414,15 @@ Values are case-insensitive at runtime, so `"Off"` and `"off"` both disable the 
   <Accordion title="Priority processing (service_tier)">
     OpenAI's API exposes priority processing via `service_tier`. Set it per model in OpenClaw:
 
+Related OpenAI docs:
+
+- [Compaction](https://developers.openai.com/api/docs/guides/compaction)
+
+### Enable server-side compaction explicitly
+
+Use this when you want to force `context_management` injection on compatible
+Responses models (for example Azure OpenAI Responses):
+
     ```json5
     {
       agents: {
