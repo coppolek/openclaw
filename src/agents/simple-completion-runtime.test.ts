@@ -395,4 +395,44 @@ describe("prepareSimpleCompletionModel", () => {
       }),
     );
   });
+
+  it("omits synthetic request-auth markers when auth is carried by model headers alone", async () => {
+    hoisted.resolveModelMock.mockReturnValueOnce({
+      model: {
+        provider: "plamo",
+        id: "plamo-3.0-prime-beta",
+        api: "openai-completions",
+        baseUrl: "https://proxy.example.test/v1",
+        headers: {
+          Authorization: "Bearer proxy-token",
+        },
+      },
+      authStorage: {
+        setRuntimeApiKey: hoisted.setRuntimeApiKeyMock,
+      },
+      modelRegistry: {},
+    });
+    hoisted.getApiKeyForModelMock.mockResolvedValueOnce({
+      apiKey: "plamo-request-auth",
+      source: "models.providers.plamo.request (synthetic request auth)",
+      mode: "api-key",
+    });
+
+    const result = await prepareSimpleCompletionModel({
+      cfg: undefined,
+      provider: "plamo",
+      modelId: "plamo-3.0-prime-beta",
+    });
+
+    expect(hoisted.setRuntimeApiKeyMock).not.toHaveBeenCalled();
+    expect(result).toEqual(
+      expect.objectContaining({
+        auth: expect.objectContaining({
+          apiKey: undefined,
+          source: "models.providers.plamo.request (synthetic request auth)",
+          mode: "api-key",
+        }),
+      }),
+    );
+  });
 });

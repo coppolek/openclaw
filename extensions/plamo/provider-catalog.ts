@@ -32,11 +32,7 @@ function resolveExplicitPlamoProviderConfig(ctx: ProviderCatalogContext) {
   )?.[1];
 }
 
-export function hasConfiguredPlamoRequestAuth(request: unknown): boolean {
-  if (!request || typeof request !== "object") {
-    return false;
-  }
-  const headers = (request as { headers?: unknown }).headers;
+export function hasConfiguredPlamoAuthHeaders(headers: unknown): boolean {
   if (headers && typeof headers === "object" && !Array.isArray(headers)) {
     for (const [headerName, headerValue] of Object.entries(headers)) {
       if (
@@ -46,6 +42,17 @@ export function hasConfiguredPlamoRequestAuth(request: unknown): boolean {
         return true;
       }
     }
+  }
+  return false;
+}
+
+export function hasConfiguredPlamoRequestAuth(request: unknown): boolean {
+  if (!request || typeof request !== "object") {
+    return false;
+  }
+  const headers = (request as { headers?: unknown }).headers;
+  if (hasConfiguredPlamoAuthHeaders(headers)) {
+    return true;
   }
   const auth = (request as { auth?: unknown }).auth;
   if (!auth || typeof auth !== "object") {
@@ -66,6 +73,16 @@ export function hasConfiguredPlamoRequestAuth(request: unknown): boolean {
   return false;
 }
 
+export function hasConfiguredPlamoProviderAuth(providerConfig: unknown): boolean {
+  if (!providerConfig || typeof providerConfig !== "object") {
+    return false;
+  }
+  return (
+    hasConfiguredPlamoAuthHeaders((providerConfig as { headers?: unknown }).headers) ||
+    hasConfiguredPlamoRequestAuth((providerConfig as { request?: unknown }).request)
+  );
+}
+
 export async function buildPlamoCatalog(ctx: ProviderCatalogContext) {
   const apiKey =
     ctx.resolveProviderAuth(PROVIDER_ID).apiKey ?? ctx.resolveProviderApiKey(PROVIDER_ID).apiKey;
@@ -73,7 +90,7 @@ export async function buildPlamoCatalog(ctx: ProviderCatalogContext) {
   const explicitBaseUrl =
     typeof explicitProvider?.baseUrl === "string" ? explicitProvider.baseUrl.trim() : "";
 
-  if (!apiKey && !hasConfiguredPlamoRequestAuth(explicitProvider?.request)) {
+  if (!apiKey && !hasConfiguredPlamoProviderAuth(explicitProvider)) {
     return null;
   }
 

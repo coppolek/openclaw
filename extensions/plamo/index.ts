@@ -17,7 +17,7 @@ import {
 import { applyPlamoConfig, PLAMO_DEFAULT_MODEL_REF } from "./onboard.js";
 import {
   buildPlamoCatalog,
-  hasConfiguredPlamoRequestAuth,
+  hasConfiguredPlamoProviderAuth,
   PLAMO_REQUEST_AUTH_MARKER,
 } from "./provider-catalog.js";
 import { createPlamoToolCallWrapper, sanitizePlamoReplayHistory } from "./stream.js";
@@ -96,7 +96,7 @@ export default defineSingleProviderPluginEntry({
       run: buildPlamoCatalog,
     },
     resolveSyntheticAuth: ({ providerConfig }) =>
-      hasConfiguredPlamoRequestAuth(providerConfig?.request)
+      hasConfiguredPlamoProviderAuth(providerConfig)
         ? {
             apiKey: PLAMO_REQUEST_AUTH_MARKER,
             source: "models.providers.plamo.request (synthetic request auth)",

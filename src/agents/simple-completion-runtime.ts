@@ -28,6 +28,14 @@ type CompletionRuntimeCredential = {
 };
 
 type AllowedMissingApiKeyMode = ResolvedProviderAuth["mode"];
+const SIMPLE_COMPLETION_AUTH_HEADER_NAMES = new Set([
+  "authorization",
+  "proxy-authorization",
+  "x-proxy-token",
+  "x-auth-token",
+  "x-api-key",
+  "api-key",
+]);
 
 export type SimpleCompletionModelOptions = {
   maxTokens?: number;
@@ -137,7 +145,22 @@ function shouldUseRequestAuthenticatedSimpleCompletion(params: {
     return false;
   }
   const requestTransport = getModelProviderRequestTransport(params.model);
-  return Boolean(requestTransport?.auth || requestTransport?.headers);
+  return (
+    Boolean(requestTransport?.auth || requestTransport?.headers) ||
+    hasAuthLikeModelHeaders((params.model as { headers?: unknown }).headers)
+  );
+}
+
+function hasAuthLikeModelHeaders(headers: unknown): boolean {
+  if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
+    return false;
+  }
+  return Object.entries(headers).some(
+    ([headerName, headerValue]) =>
+      SIMPLE_COMPLETION_AUTH_HEADER_NAMES.has(headerName.trim().toLowerCase()) &&
+      typeof headerValue === "string" &&
+      headerValue.trim().length > 0,
+  );
 }
 
 export async function prepareSimpleCompletionModel(params: {

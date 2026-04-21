@@ -236,6 +236,28 @@ describe("plamo provider plugin", () => {
         providerConfig: {
           api: "openai-completions",
           baseUrl: "https://proxy.example.test/v1",
+          headers: {
+            Authorization: {
+              source: "env",
+              provider: "default",
+              id: "PLAMO_PROXY_TOKEN",
+            },
+          },
+          models: [],
+        },
+      } as never),
+    ).toEqual({
+      apiKey: PLAMO_REQUEST_AUTH_MARKER,
+      source: "models.providers.plamo.request (synthetic request auth)",
+      mode: "api-key",
+    });
+
+    expect(
+      provider.resolveSyntheticAuth?.({
+        provider: "plamo",
+        providerConfig: {
+          api: "openai-completions",
+          baseUrl: "https://proxy.example.test/v1",
           request: {
             headers: {
               "X-Proxy-Token": {
@@ -357,6 +379,43 @@ describe("plamo provider plugin", () => {
                     provider: "default",
                     id: "PLAMO_PROXY_TOKEN",
                   },
+                },
+              },
+              models: [],
+            },
+          },
+        },
+      },
+      env: {},
+      resolveProviderApiKey: () => ({ apiKey: undefined }),
+      resolveProviderAuth: () => ({
+        apiKey: undefined,
+        mode: "none",
+        source: "none",
+      }),
+    } as never);
+
+    expect(catalog).toMatchObject({
+      provider: {
+        api: "openai-completions",
+        baseUrl: "https://proxy.example.test/v1",
+      },
+    });
+  });
+
+  it("keeps the PLaMo catalog available when auth is supplied via top-level provider headers", async () => {
+    const provider = await registerSingleProviderPlugin(plamoPlugin);
+    const catalog = await provider.catalog!.run({
+      config: {
+        models: {
+          providers: {
+            plamo: {
+              baseUrl: "https://proxy.example.test/v1",
+              headers: {
+                Authorization: {
+                  source: "env",
+                  provider: "default",
+                  id: "PLAMO_PROXY_TOKEN",
                 },
               },
               models: [],
