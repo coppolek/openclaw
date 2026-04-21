@@ -1,3 +1,4 @@
+import nodeFs from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -308,7 +309,7 @@ describe("openshell fs bridges", () => {
     expect(backend.syncLocalPathToRemote).not.toHaveBeenCalled();
   });
 
-  it("reads through a pinned boundary-opened file instead of the unresolved host path", async () => {
+  it("rejects a parent symlink swap that lands outside the sandbox root", async () => {
     const workspaceDir = await makeTempDir("openclaw-openshell-fs-");
     const outsideDir = await makeTempDir("openclaw-openshell-outside-");
     await fs.mkdir(path.join(workspaceDir, "subdir"), { recursive: true });
@@ -326,22 +327,25 @@ describe("openshell fs bridges", () => {
 
     const { createOpenShellFsBridge } = await import("./fs-bridge.js");
     const bridge = createOpenShellFsBridge({ sandbox, backend });
-    const originalReadFile = fs.readFile.bind(fs);
-    const readFileSpy = vi.spyOn(fs, "readFile").mockImplementation(async (filePath, options) => {
-      await fs.rm(path.join(workspaceDir, "subdir"), { recursive: true, force: true });
-      await fs.symlink(outsideDir, path.join(workspaceDir, "subdir"));
-      return options === undefined
-        ? await originalReadFile(filePath)
-        : await originalReadFile(filePath, options as never);
+    const originalOpenSync = nodeFs.openSync.bind(nodeFs);
+    const targetPath = path.join(workspaceDir, "subdir", "secret.txt");
+    let swapped = false;
+    const openSyncSpy = vi.spyOn(nodeFs, "openSync").mockImplementation((filePath, flags, mode) => {
+      if (!swapped && filePath === targetPath) {
+        swapped = true;
+        nodeFs.rmSync(path.join(workspaceDir, "subdir"), { recursive: true, force: true });
+        nodeFs.symlinkSync(outsideDir, path.join(workspaceDir, "subdir"));
+      }
+      return originalOpenSync(filePath, flags, mode);
     });
 
     try {
-      await expect(bridge.readFile({ filePath: "subdir/secret.txt" })).resolves.toEqual(
-        Buffer.from("inside"),
+      await expect(bridge.readFile({ filePath: "subdir/secret.txt" })).rejects.toThrow(
+        "Sandbox boundary checks failed",
       );
-      expect(readFileSpy).not.toHaveBeenCalled();
+      expect(openSyncSpy).toHaveBeenCalled();
     } finally {
-      readFileSpy.mockRestore();
+      openSyncSpy.mockRestore();
     }
   });
 

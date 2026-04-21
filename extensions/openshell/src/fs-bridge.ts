@@ -365,23 +365,14 @@ async function openPinnedReadableFile(params: {
   const canonicalRoot = await fsPromises
     .realpath(params.rootPath)
     .catch(() => path.resolve(params.rootPath));
-  const resolvedPath = await fsPromises.realpath(params.absolutePath);
-  if (!isPathInside(canonicalRoot, resolvedPath)) {
-    throw new Error(`Sandbox path escapes allowed mounts; cannot access: ${params.containerPath}`);
-  }
-
-  const preOpenStat = await fsPromises.lstat(resolvedPath);
-  if (!preOpenStat.isFile()) {
-    throw new Error(`Sandbox boundary checks failed; cannot read files: ${params.containerPath}`);
-  }
-
   const openReadFlags =
     fs.constants.O_RDONLY |
     (typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0);
-  const fd = fs.openSync(resolvedPath, openReadFlags);
+  const fd = fs.openSync(params.absolutePath, openReadFlags);
   try {
     const openedStat = fs.fstatSync(fd);
-    if (!openedStat.isFile() || !sameFileIdentity(preOpenStat, openedStat)) {
+    const resolvedPath = await resolveOpenedReadablePath(fd);
+    if (!openedStat.isFile() || !isPathInside(canonicalRoot, resolvedPath)) {
       throw new Error(`Sandbox boundary checks failed; cannot read files: ${params.containerPath}`);
     }
     return { fd };
@@ -391,14 +382,22 @@ async function openPinnedReadableFile(params: {
   }
 }
 
-function sameFileIdentity(left: fs.Stats, right: fs.Stats): boolean {
-  if (left.ino !== right.ino) {
-    return false;
+async function resolveOpenedReadablePath(fd: number): Promise<string> {
+  for (const fdPath of [`/proc/self/fd/${fd}`, `/dev/fd/${fd}`]) {
+    try {
+      const openedPath = await fsPromises.readlink(fdPath);
+      return normalizeOpenedReadablePath(openedPath);
+    } catch {
+      continue;
+    }
   }
-  if (left.dev === right.dev) {
-    return true;
-  }
-  const leftDevUnknown = left.dev === 0;
-  const rightDevUnknown = right.dev === 0;
-  return process.platform === "win32" && (leftDevUnknown || rightDevUnknown);
+  throw new Error("Sandbox boundary checks failed; cannot resolve opened file path");
+}
+
+function normalizeOpenedReadablePath(openedPath: string): string {
+  const deletedSuffix = " (deleted)";
+  const withoutDeletedSuffix = openedPath.endsWith(deletedSuffix)
+    ? openedPath.slice(0, -deletedSuffix.length)
+    : openedPath;
+  return path.resolve(withoutDeletedSuffix);
 }
