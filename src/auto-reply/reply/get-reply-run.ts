@@ -523,9 +523,13 @@ export async function runPreparedReply(
       sessionStore[sessionKey] = sessionEntry;
       if (storePath) {
         const { updateSessionStore } = await loadSessionStoreRuntime();
-        await updateSessionStore(storePath, (store) => {
-          store[sessionKey] = sessionEntry;
-        });
+        await updateSessionStore(
+          storePath,
+          (store) => {
+            store[sessionKey] = sessionEntry;
+          },
+          { baseStore: sessionStore },
+        );
       }
     }
   }
