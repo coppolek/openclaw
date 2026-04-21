@@ -5,6 +5,7 @@ import {
   stripLeadingSilentToken,
   stripSilentToken,
 } from "../auto-reply/tokens.js";
+import { DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH } from "../config/agent-limits.js";
 import { defaultRuntime } from "../runtime.js";
 import { isCronSessionKey } from "../sessions/session-key-utils.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
@@ -68,7 +69,116 @@ function loadSubagentRegistryRuntime() {
   return subagentRegistryRuntimePromise;
 }
 
-export { buildSubagentSystemPrompt } from "./subagent-system-prompt.js";
+export function buildSubagentSystemPrompt(params: {
+  requesterSessionKey?: string;
+  requesterOrigin?: DeliveryContext;
+  childSessionKey: string;
+  label?: string;
+  task?: string;
+  /** Whether ACP-specific routing guidance should be included. Defaults to true. */
+  acpEnabled?: boolean;
+  /** Depth of the child being spawned (1 = sub-agent, 2 = sub-sub-agent). */
+  childDepth?: number;
+  /** Config value: max allowed spawn depth. */
+  maxSpawnDepth?: number;
+}) {
+  const taskText =
+    typeof params.task === "string" && params.task.trim()
+      ? params.task.replace(/\s+/g, " ").trim()
+      : "{{TASK_DESCRIPTION}}";
+  const childDepth = typeof params.childDepth === "number" ? params.childDepth : 1;
+  const maxSpawnDepth =
+    typeof params.maxSpawnDepth === "number"
+      ? params.maxSpawnDepth
+      : DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH;
+  const acpEnabled = params.acpEnabled !== false;
+  const canSpawn = childDepth < maxSpawnDepth;
+  const parentLabel = childDepth >= 2 ? "parent orchestrator" : "main agent";
+
+  const lines = [
+    "# Subagent Context",
+    "",
+    `You are a **subagent** spawned by the ${parentLabel} for a specific task.`,
+    "",
+    "## Your Role",
+    `- You were created to handle: ${taskText}`,
+    "- Complete this task. That's your entire purpose.",
+    `- You are NOT the ${parentLabel}. Don't try to be.`,
+    "",
+    "## Rules",
+    "1. **Stay focused** - Do your assigned task, nothing else",
+    `2. **Complete the task** - Your final message will be automatically reported to the ${parentLabel}`,
+    "3. **Don't initiate** - No heartbeats, no proactive actions, no side quests",
+    "4. **Be ephemeral** - You may be terminated after task completion. That's fine.",
+    "5. **Trust push-based completion** - Descendant results are auto-announced back to you; do not busy-poll for status.",
+    "6. **Recover from truncated tool output** - If you see a notice like `[... N more characters truncated]`, assume prior output was reduced. Re-read only what you need using smaller chunks (`read` with offset/limit, or targeted `rg`/`head`/`tail`) instead of full-file `cat`.",
+    "",
+    "## Output Format",
+    "When complete, your final response should include:",
+    `- What you accomplished or found`,
+    `- Any relevant details the ${parentLabel} should know`,
+    "- Keep it concise but informative",
+    "",
+    "## What You DON'T Do",
+    `- NO user conversations (that's ${parentLabel}'s job)`,
+    "- NO external messages (email, tweets, etc.) unless explicitly tasked with a specific recipient/channel",
+    "- NO cron jobs or persistent state",
+    `- NO pretending to be the ${parentLabel}`,
+    `- Only use the \`message\` tool when explicitly instructed to contact a specific external recipient; otherwise return plain text and let the ${parentLabel} deliver it`,
+    "",
+  ];
+
+  if (canSpawn) {
+    lines.push(
+      "## Sub-Agent Spawning",
+      "You CAN spawn your own sub-agents for parallel or complex work using `sessions_spawn`.",
+      "Use the `subagents` tool to steer, kill, or do an on-demand status check for your spawned sub-agents.",
+      "Your sub-agents will announce their results back to you automatically (not to the main agent).",
+      "Default workflow: spawn work, continue orchestrating, and wait for auto-announced completions.",
+      "Auto-announce is push-based. After spawning children, do NOT call sessions_list, sessions_history, exec sleep, or any polling tool.",
+      "Wait for completion events to arrive as user messages.",
+      "Track expected child session keys and only send your final answer after completion events for ALL expected children arrive.",
+      "If a child completion event arrives AFTER you already sent your final answer, reply ONLY with NO_REPLY.",
+      "Do NOT repeatedly poll `subagents list` in a loop unless you are actively debugging or intervening.",
+      "Coordinate their work and synthesize results before reporting back.",
+      ...(acpEnabled
+        ? [
+            'For ACP harness sessions (codex/claudecode/gemini), use `sessions_spawn` with `runtime: "acp"` (set `agentId` unless `acp.defaultAgent` is configured).',
+            '`agents_list` and `subagents` apply to OpenClaw sub-agents (`runtime: "subagent"`); ACP harness ids are controlled by `acp.allowedAgents`.',
+            "Do not ask users to run slash commands or CLI when `sessions_spawn` can do it directly.",
+            "Do not use `exec` (`openclaw ...`, `acpx ...`) to spawn ACP sessions.",
+            'Use `subagents` only for OpenClaw subagents (`runtime: "subagent"`).',
+            "Subagent results auto-announce back to you; ACP sessions continue in their bound thread.",
+            "Avoid polling loops; spawn, orchestrate, and synthesize results.",
+          ]
+        : []),
+      "",
+    );
+  } else if (childDepth >= 2) {
+    lines.push(
+      "## Sub-Agent Spawning",
+      "You are a leaf worker and CANNOT spawn further sub-agents. Focus on your assigned task.",
+      "",
+    );
+  }
+
+  lines.push(
+    "## Session Context",
+    ...[
+      params.label ? `- Label: ${params.label}` : undefined,
+      params.requesterSessionKey
+        ? `- Requester session: ${params.requesterSessionKey}.`
+        : undefined,
+      params.requesterOrigin?.channel
+        ? `- Requester channel: ${params.requesterOrigin.channel}.`
+        : undefined,
+      `- Your session: ${params.childSessionKey}.`,
+    ].filter((line): line is string => line !== undefined),
+    "",
+  );
+  return lines.join("\n");
+}
+
 export { captureSubagentCompletionReply } from "./subagent-announce-output.js";
 export type { SubagentRunOutcome } from "./subagent-announce-output.js";
 
@@ -103,6 +213,118 @@ function hasUsableSessionEntry(entry: unknown): boolean {
   return typeof sessionId !== "string" || sessionId.trim() !== "";
 }
 
+function sanitizeAnnounceReply(text: string | undefined): string | null {
+  const normalized = normalizeOptionalString(text);
+  if (!normalized) {
+    return null;
+  }
+  if (isAnnounceSkip(normalized) || isSilentReplyText(normalized, SILENT_REPLY_TOKEN)) {
+    return null;
+  }
+
+  let cleaned = normalized;
+  const hadLeadingToken = startsWithSilentToken(cleaned, SILENT_REPLY_TOKEN);
+  if (hadLeadingToken) {
+    cleaned = stripLeadingSilentToken(cleaned, SILENT_REPLY_TOKEN);
+  }
+  if (hadLeadingToken || cleaned.toUpperCase().includes(SILENT_REPLY_TOKEN)) {
+    cleaned = stripSilentToken(cleaned, SILENT_REPLY_TOKEN);
+  }
+
+  cleaned = normalizeOptionalString(cleaned) ?? "";
+  if (!cleaned || isAnnounceSkip(cleaned) || isSilentReplyText(cleaned, SILENT_REPLY_TOKEN)) {
+    return null;
+  }
+  return cleaned;
+}
+
+type ResolvedAnnounceTarget =
+  | {
+      kind: "resolved";
+      requesterSessionKey: string;
+      requesterOrigin?: DeliveryContext;
+      requesterDepth: number;
+      requesterIsInternal: boolean;
+      fallbackUsed: boolean;
+    }
+  | {
+      kind: "ignore";
+    }
+  | {
+      kind: "no-fallback";
+      requesterIsInternal: boolean;
+    };
+
+async function resolveSubagentAnnounceTarget(params: {
+  requesterSessionKey: string;
+  requesterOrigin?: DeliveryContext;
+  subagentRegistryRuntime?: Awaited<ReturnType<typeof loadSubagentRegistryRuntime>>;
+}): Promise<ResolvedAnnounceTarget> {
+  let requesterSessionKey = params.requesterSessionKey;
+  let requesterOrigin = normalizeDeliveryContext(params.requesterOrigin);
+  let requesterDepth = getSubagentDepthFromSessionStore(requesterSessionKey);
+  let requesterIsInternal = requesterDepth >= 1 || isCronSessionKey(requesterSessionKey);
+  let fallbackUsed = false;
+
+  if (!requesterIsInternal) {
+    return {
+      kind: "resolved",
+      requesterSessionKey,
+      requesterOrigin,
+      requesterDepth,
+      requesterIsInternal,
+      fallbackUsed,
+    };
+  }
+
+  if (isCronSessionKey(requesterSessionKey)) {
+    return {
+      kind: "resolved",
+      requesterSessionKey,
+      requesterOrigin,
+      requesterDepth,
+      requesterIsInternal: true,
+      fallbackUsed,
+    };
+  }
+
+  const runtime =
+    params.subagentRegistryRuntime ?? (await subagentAnnounceDeps.loadSubagentRegistryRuntime());
+  if (!runtime.isSubagentSessionRunActive(requesterSessionKey)) {
+    if (runtime.shouldIgnorePostCompletionAnnounceForSession(requesterSessionKey)) {
+      return { kind: "ignore" };
+    }
+  }
+
+  const parentSessionEntry = loadSessionEntryByKey(requesterSessionKey);
+  const requesterSessionEntry = loadRequesterSessionEntry(requesterSessionKey).entry;
+  const parentSessionAlive =
+    runtime.isSubagentSessionRunActive(requesterSessionKey) ||
+    hasUsableSessionEntry(parentSessionEntry) ||
+    hasUsableSessionEntry(requesterSessionEntry);
+
+  if (!parentSessionAlive) {
+    const fallback = runtime.resolveRequesterForChildSession(requesterSessionKey);
+    if (!fallback?.requesterSessionKey) {
+      return { kind: "no-fallback", requesterIsInternal: true };
+    }
+    requesterSessionKey = fallback.requesterSessionKey;
+    requesterOrigin = normalizeDeliveryContext(fallback.requesterOrigin) ?? requesterOrigin;
+    requesterDepth = getSubagentDepthFromSessionStore(requesterSessionKey);
+    requesterIsInternal = requesterDepth >= 1 || isCronSessionKey(requesterSessionKey);
+    fallbackUsed = true;
+  }
+
+  return {
+    kind: "resolved",
+    requesterSessionKey,
+    requesterOrigin,
+    requesterDepth,
+    requesterIsInternal,
+    fallbackUsed,
+  };
+}
+
 function buildDescendantWakeMessage(params: { findings: string; taskLabel: string }): string {
   return [
     "[Subagent Context] Your prior run ended while waiting for descendant subagent completions.",
@@ -131,27 +353,6 @@ function isWakeContinuationRun(runId: string): boolean {
     return false;
   }
   return stripWakeRunSuffixes(trimmed) !== trimmed;
-}
-
-function stripAndClassifyReply(text: string): string | null {
-  let result = text;
-  let didStrip = false;
-  const hasLeadingSilentToken = startsWithSilentToken(result, SILENT_REPLY_TOKEN);
-  if (hasLeadingSilentToken) {
-    result = stripLeadingSilentToken(result, SILENT_REPLY_TOKEN);
-    didStrip = true;
-  }
-  if (hasLeadingSilentToken || result.toLowerCase().includes(SILENT_REPLY_TOKEN.toLowerCase())) {
-    result = stripSilentToken(result, SILENT_REPLY_TOKEN);
-    didStrip = true;
-  }
-  if (
-    didStrip &&
-    (!result.trim() || isSilentReplyText(result, SILENT_REPLY_TOKEN) || isAnnounceSkip(result))
-  ) {
-    return null;
-  }
-  return result;
 }
 
 async function wakeSubagentRunAfterDescendants(params: {
@@ -210,7 +411,8 @@ async function wakeSubagentRunAfterDescendants(params: {
     return false;
   }
 
-  const { replaceSubagentRunAfterSteer } = await loadSubagentRegistryRuntime();
+  const { replaceSubagentRunAfterSteer } =
+    await subagentAnnounceDeps.loadSubagentRegistryRuntime();
   return replaceSubagentRunAfterSteer({
     previousRunId: params.runId,
     nextRunId: wakeRunId,
@@ -287,8 +489,6 @@ export async function runSubagentAnnounceFlow(params: {
     }
 
     let requesterDepth = getSubagentDepthFromSessionStore(targetRequesterSessionKey);
-    const requesterIsInternalSession = () =>
-      requesterDepth >= 1 || isCronSessionKey(targetRequesterSessionKey);
 
     let childCompletionFindings: string | undefined;
     let subagentRegistryRuntime:
@@ -367,10 +567,8 @@ export async function runSubagentAnnounceFlow(params: {
     }
 
     if (!childCompletionFindings) {
-      const fallbackReply = normalizeOptionalString(params.fallbackReply);
-      const fallbackIsSilent =
-        Boolean(fallbackReply) &&
-        (isAnnounceSkip(fallbackReply) || isSilentReplyText(fallbackReply, SILENT_REPLY_TOKEN));
+      const fallbackReply = sanitizeAnnounceReply(params.fallbackReply);
+      const fallbackIsSilent = !fallbackReply;
 
       if (!reply) {
         reply = await readSubagentOutput(params.childSessionKey, outcome);
@@ -410,30 +608,12 @@ export async function runSubagentAnnounceFlow(params: {
         }
       }
 
-      if (isAnnounceSkip(reply) || isSilentReplyText(reply, SILENT_REPLY_TOKEN)) {
+      reply = sanitizeAnnounceReply(reply) ?? undefined;
+      if (!reply) {
         if (fallbackReply && !fallbackIsSilent) {
-          const cleaned = stripAndClassifyReply(fallbackReply);
-          if (cleaned === null) {
-            return true;
-          }
-          reply = cleaned;
+          reply = fallbackReply;
         } else {
           return true;
-        }
-      } else if (reply) {
-        const cleaned = stripAndClassifyReply(reply);
-        if (cleaned === null) {
-          if (fallbackReply && !fallbackIsSilent) {
-            const cleanedFallback = stripAndClassifyReply(fallbackReply);
-            if (cleanedFallback === null) {
-              return true;
-            }
-            reply = cleanedFallback;
-          } else {
-            return true;
-          }
-        } else {
-          reply = cleaned;
         }
       }
     }
@@ -456,34 +636,25 @@ export async function runSubagentAnnounceFlow(params: {
     const announceSessionId = childSessionId || "unknown";
     const findings = childCompletionFindings || reply || "(no output)";
 
-    let requesterIsSubagent = requesterIsInternalSession();
-    if (requesterIsSubagent) {
-      const {
-        isSubagentSessionRunActive,
-        resolveRequesterForChildSession,
-        shouldIgnorePostCompletionAnnounceForSession,
-      } = subagentRegistryRuntime ?? (await loadSubagentRegistryRuntime());
-      if (!isSubagentSessionRunActive(targetRequesterSessionKey)) {
-        if (shouldIgnorePostCompletionAnnounceForSession(targetRequesterSessionKey)) {
-          return true;
-        }
-        const parentSessionEntry = loadSessionEntryByKey(targetRequesterSessionKey);
-        const parentSessionAlive = hasUsableSessionEntry(parentSessionEntry);
-
-        if (!parentSessionAlive) {
-          const fallback = resolveRequesterForChildSession(targetRequesterSessionKey);
-          if (!fallback?.requesterSessionKey) {
-            shouldDeleteChildSession = false;
-            return false;
-          }
-          targetRequesterSessionKey = fallback.requesterSessionKey;
-          targetRequesterOrigin =
-            normalizeDeliveryContext(fallback.requesterOrigin) ?? targetRequesterOrigin;
-          requesterDepth = getSubagentDepthFromSessionStore(targetRequesterSessionKey);
-          requesterIsSubagent = requesterIsInternalSession();
-        }
-      }
+    const resolvedTarget = await resolveSubagentAnnounceTarget({
+      requesterSessionKey: targetRequesterSessionKey,
+      requesterOrigin: targetRequesterOrigin,
+      subagentRegistryRuntime,
+    });
+    if (resolvedTarget.kind === "ignore") {
+      return true;
     }
+    if (resolvedTarget.kind === "no-fallback") {
+      shouldDeleteChildSession = false;
+      if (resolvedTarget.requesterIsInternal) {
+        return false;
+      }
+      return true;
+    }
+    targetRequesterSessionKey = resolvedTarget.requesterSessionKey;
+    targetRequesterOrigin = resolvedTarget.requesterOrigin;
+    requesterDepth = resolvedTarget.requesterDepth;
+    let requesterIsSubagent = resolvedTarget.requesterIsInternal;
 
     const replyInstruction = buildAnnounceReplyInstruction({
       requesterIsSubagent,
