@@ -1,0 +1,45 @@
+{
+  "id": "copilot-sdk",
+  "enabledByDefault": true,
+  "providers": ["copilot-sdk"],
+  "autoEnableWhenConfiguredProviders": ["copilot-sdk"],
+  "providerAuthChoices": [
+    {
+      "provider": "copilot-sdk",
+      "method": "sdk",
+      "choiceId": "copilot-sdk",
+      "choiceLabel": "Copilot SDK (experimental)",
+      "choiceHint": "Proxy chat completions through the @github/copilot CLI",
+      "groupId": "copilot",
+      "groupLabel": "Copilot",
+      "groupHint": "GitHub + local proxy"
+    }
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "port": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 65535,
+        "default": 9527,
+        "description": "Local loopback port for the OpenAI-compatible shim server. Must be fixed so the baseUrl stored in models.json is stable across restarts. Falls back to ephemeral on EADDRINUSE."
+      },
+      "rejectToolRequests": {
+        "type": "boolean",
+        "default": false,
+        "description": "When true, reject chat-completion requests that declare `tools` with HTTP 400. When false (default), tools are silently stripped with a warning. The Copilot CLI cannot execute OpenClaw-dispatched tool calls through this path."
+      },
+      "allowBuiltinTools": {
+        "type": "boolean",
+        "default": true,
+        "description": "When true (default), the Copilot CLI's built-in tools (bash, file operations, grep, etc.) are available to the model. The SDK manages the full agentic tool loop internally. When false, the model acts as a pure LLM with no tool access."
+      },
+      "cliPath": {
+        "type": "string",
+        "description": "Optional override for the @github/copilot CLI binary path (defaults to the SDK-bundled CLI)."
+      }
+    }
+  }
+}
