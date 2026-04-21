@@ -109,7 +109,7 @@ import {
 } from "./compaction-safety-timeout.js";
 import { applyFinalEffectiveToolPolicy } from "./effective-tool-policy.js";
 import { buildEmbeddedExtensionFactories } from "./extensions.js";
-import { applyExtraParamsToAgent } from "./extra-params.js";
+import { applyExtraParamsToAgent, resolveModelConfigExtraParams } from "./extra-params.js";
 import { getDmHistoryLimitFromSessionKey, limitHistoryTurns } from "./history.js";
 import { log } from "./logger.js";
 import { hardenManualCompactionBoundary } from "./manual-compaction-boundary.js";
@@ -208,6 +208,7 @@ function prepareCompactionSessionAgent(params: {
     params.effectiveWorkspace,
     params.effectiveModel,
     params.agentDir,
+    resolveModelConfigExtraParams(params.effectiveModel),
   );
 }
 

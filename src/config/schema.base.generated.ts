@@ -2837,6 +2837,13 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                           type: "string",
                         },
                       },
+                      extraParams: {
+                        type: "object",
+                        propertyNames: {
+                          type: "string",
+                        },
+                        additionalProperties: {},
+                      },
                       compat: {
                         type: "object",
                         properties: {
