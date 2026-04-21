@@ -14,6 +14,7 @@ import {
   SESSION_SUMMARY_DAILY_MEMORY_SENTINEL,
 } from "./daily-session-summary.js";
 const SESSION_SUMMARY_SNIPPET_TRANSCRIPT_LINE_RE = /^(?:assistant|user|system):\s+\S/;
+const LEGACY_SESSION_SUMMARY_TRANSCRIPT_START_LINE_MIN = 8;
 
 export type SessionSummaryDailyMemoryDependency = {
   kind: "file" | "directory";
@@ -40,10 +41,16 @@ function normalizeSessionSummarySnippet(rawSnippet: string | undefined): string 
 
 function hasExplicitSessionSummaryMetadataSnippetMarkers(snippet: string): boolean {
   return (
+    hasStrongSessionSummaryMetadataSnippetMarkers(snippet) ||
+    snippet.includes("## conversation summary")
+  );
+}
+
+function hasStrongSessionSummaryMetadataSnippetMarkers(snippet: string): boolean {
+  return (
     snippet.includes("# session:") ||
     /\bsession key\s*:/i.test(snippet) ||
-    /\bsession id\s*:/i.test(snippet) ||
-    snippet.includes("## conversation summary")
+    /\bsession id\s*:/i.test(snippet)
   );
 }
 
@@ -270,6 +277,7 @@ export function isLikelyMissingSessionSummaryDailyMemory(params: {
   startLine?: number;
   hasSiblingVariantMatch?: boolean;
   rememberedSessionSummary?: boolean;
+  allowLegacySemanticSlugTranscriptFallback?: boolean;
 }): boolean {
   const parsed = parseDailyMemoryPathInfo(params.filePath);
   if (!parsed) {
@@ -280,15 +288,21 @@ export function isLikelyMissingSessionSummaryDailyMemory(params: {
   }
   const snippet = normalizeSessionSummarySnippet(params.snippet);
   if (parsed.canonical) {
-    return hasExplicitSessionSummaryMetadataSnippetMarkers(snippet);
+    return hasStrongSessionSummaryMetadataSnippetMarkers(snippet);
   }
   if (params.hasSiblingVariantMatch) {
     return false;
   }
+  const startLine = Math.max(1, Math.floor(params.startLine ?? 0));
+  const hasLegacySemanticSlugTranscriptFallback =
+    params.allowLegacySemanticSlugTranscriptFallback === true &&
+    startLine >= LEGACY_SESSION_SUMMARY_TRANSCRIPT_START_LINE_MIN &&
+    hasTranscriptLikeSessionSummarySnippet(snippet);
   return (
     hasExplicitSessionSummaryMetadataSnippetMarkers(snippet) ||
     (hasLikelySessionSummarySlug(params.filePath) &&
-      hasTranscriptLikeSessionSummarySnippet(snippet))
+      hasTranscriptLikeSessionSummarySnippet(snippet)) ||
+    hasLegacySemanticSlugTranscriptFallback
   );
 }
 
@@ -428,6 +442,7 @@ export async function isSessionSummaryDailyMemoryPath(params: {
   snippet?: string;
   startLine?: number;
   recordDependency?: SessionSummaryDailyMemoryDependencyRecorder;
+  allowLegacySemanticSlugTranscriptFallback?: boolean;
 }): Promise<boolean> {
   const normalizedPath = normalizeSessionSummaryPath(params.filePath);
   const probeInputPath = resolveSessionSummaryProbeInputPath(params.workspaceDir, params.filePath);
@@ -528,6 +543,7 @@ export async function isSessionSummaryDailyMemoryPath(params: {
       startLine: params.startLine,
       hasSiblingVariantMatch,
       rememberedSessionSummary: rememberedEntry?.sessionSummary === true,
+      allowLegacySemanticSlugTranscriptFallback: params.allowLegacySemanticSlugTranscriptFallback,
     });
   const cacheableDeletedSummaryFallback =
     isDeletedSummaryFallback && rememberedEntry?.sessionSummary === true;
