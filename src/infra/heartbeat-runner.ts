@@ -11,7 +11,7 @@ import {
   resolveDefaultAgentId,
 } from "../agents/agent-scope.js";
 import { appendCronStyleCurrentTimeLine } from "../agents/current-time.js";
-import { resolveEffectiveMessagesConfig } from "../agents/identity.js";
+import { resolveEffectiveMessagesConfig, resolveIdentityName } from "../agents/identity.js";
 import { resolveEmbeddedSessionLane } from "../agents/pi-embedded-runner.js";
 import { DEFAULT_HEARTBEAT_FILENAME } from "../agents/workspace.js";
 import { resolveHeartbeatReplyPayload } from "../auto-reply/heartbeat-reply-payload.js";
@@ -925,9 +925,7 @@ export async function runHeartbeatOnce(opts: {
 
     const store = loadSessionStore(storePath);
     const current = store[sessionKey];
-    // Initialize stub entry on first run when current doesn't exist
     const base = current ?? {
-      // Generate valid sessionId - derive from sessionKey without colons
       sessionId: sessionKey.replace(/:/g, "_"),
       updatedAt: startedAt,
       createdAt: startedAt,
@@ -954,10 +952,12 @@ export async function runHeartbeatOnce(opts: {
     consumeSystemEventEntries(sessionKey, preflight.pendingEventEntries);
   };
 
+  const identityName = resolveIdentityName(cfg, agentId);
   const ctx = {
     Body: appendCronStyleCurrentTimeLine(prompt, cfg, startedAt),
     From: sender,
     To: sender,
+    ConversationLabel: identityName ?? agentId,
     OriginatingChannel:
       !suppressOriginatingContext && delivery.channel !== "none" ? delivery.channel : undefined,
     OriginatingTo: !suppressOriginatingContext ? delivery.to : undefined,

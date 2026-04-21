@@ -46,11 +46,19 @@ export function resolveAckReaction(
   return emoji || DEFAULT_ACK_REACTION;
 }
 
-export function resolveIdentityNamePrefix(
+export function resolveIdentityName(
   cfg: OpenClawConfig,
   agentId: string,
 ): string | undefined {
   const name = resolveAgentIdentity(cfg, agentId)?.name?.trim();
+  return name || undefined;
+}
+
+export function resolveIdentityNamePrefix(
+  cfg: OpenClawConfig,
+  agentId: string,
+): string | undefined {
+  const name = resolveIdentityName(cfg, agentId);
   if (!name) {
     return undefined;
   }
