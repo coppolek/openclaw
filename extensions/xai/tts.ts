@@ -1,6 +1,5 @@
 import {
   asObject,
-  normalizeLanguageCode,
   readResponseTextLimited,
   trimToUndefined,
   truncateErrorDetail,
@@ -91,7 +90,7 @@ export async function xaiTTS(params: {
   voiceId: string;
   language?: string;
   speed?: number;
-  responseFormat?: "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm";
+  responseFormat?: "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm" | "mulaw" | "alaw";
   timeoutMs: number;
 }): Promise<Buffer> {
   const {
