@@ -270,12 +270,11 @@ function resolveFailoverClassificationFromError(err: unknown): FailoverClassific
       reason: err.reason,
     };
   }
-  // Session lock contention is local infrastructure pressure, not a provider failure.
-  if (isSessionLockError(err)) {
-    return null;
-  }
+  const signal = normalizeErrorSignal(err);
+  const hasExplicitFailoverMetadata =
+    typeof signal.status === "number" || typeof signal.code === "string";
 
-  const classification = classifyFailoverSignal(normalizeErrorSignal(err));
+  const classification = classifyFailoverSignal(signal);
   if (!classification || classification.kind === "context_overflow") {
     // Let wrapped causes override parent timeout/overflow guesses.
     const cause = getErrorCause(err);
@@ -288,7 +287,14 @@ function resolveFailoverClassificationFromError(err: unknown): FailoverClassific
   }
 
   if (classification) {
+    if (isSessionLockError(err) && !hasExplicitFailoverMetadata) {
+      return null;
+    }
     return classification;
+  }
+
+  if (isSessionLockError(err)) {
+    return null;
   }
 
   if (isTimeoutError(err)) {
