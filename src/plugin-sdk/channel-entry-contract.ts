@@ -346,11 +346,10 @@ function loadBundledEntryModuleSync(importMetaUrl: string, specifier: string): u
   }
   // Defensive: verify loaded module is accessible (handles jiti proxy with null target)
   // If the module is a Proxy with a null/undefined target, property access will throw.
-  // We must use a direct property read to trigger the get trap — Object.getPrototypeOf
-  // bypasses the proxy and won't catch a broken get trap.
+  // Use void to explicitly acknowledge the intentionally unused result — this triggers
+  // the proxy get trap (catches #62844) without needing an eslint disable comment.
   try {
-    // eslint-disable-next-line @typescript-eslint/no-unused-expressions -- trigger get trap
-    loaded["constructor"];
+    void (loaded as object)["constructor"];
   } catch {
     loadedModuleExports.delete(modulePath);
     throw new Error(`Bundled module returned inaccessible proxy (null/undefined target): ${modulePath}`);
