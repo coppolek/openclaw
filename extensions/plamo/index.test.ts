@@ -1351,6 +1351,8 @@ describe("plamo provider plugin", () => {
 
   it("does not inject bearer auth for synthetic request-auth markers", async () => {
     const { provider, catalog } = await loadPlamoCatalog();
+    const previousApiKey = process.env.PLAMO_API_KEY;
+    process.env.PLAMO_API_KEY = "env-test-key";
 
     let resolveRequest:
       | ((value: {
@@ -1429,6 +1431,11 @@ describe("plamo provider plugin", () => {
       result = await stream.result();
     } finally {
       server.close();
+      if (previousApiKey === undefined) {
+        delete process.env.PLAMO_API_KEY;
+      } else {
+        process.env.PLAMO_API_KEY = previousApiKey;
+      }
     }
 
     expect(result).toMatchObject({

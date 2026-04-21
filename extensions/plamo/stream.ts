@@ -772,8 +772,8 @@ function resolvePlamoApiKey(model: RuntimeModel, options: RuntimeOptions): strin
     return undefined;
   }
   const explicitApiKey = options?.apiKey?.trim();
-  if (explicitApiKey && !isNonSecretApiKeyMarker(explicitApiKey)) {
-    return explicitApiKey;
+  if (explicitApiKey) {
+    return isNonSecretApiKeyMarker(explicitApiKey) ? undefined : explicitApiKey;
   }
   return resolveEnvApiKey(model.provider)?.apiKey || undefined;
 }
