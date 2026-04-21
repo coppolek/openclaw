@@ -752,15 +752,13 @@ function getCompatibleActivePluginRegistry(
     loadContext.runtimeSubagentMode === "default" &&
     activeRuntimeSubagentMode === "gateway-bindable"
   ) {
-    return (
-      tryCompatibleVariant({
-        ...options,
-        runtimeOptions: {
-          ...options.runtimeOptions,
-          allowGatewaySubagentBinding: true,
-        },
-      }) ?? undefined
-    );
+    return tryCompatibleVariant({
+      ...options,
+      runtimeOptions: {
+        ...options.runtimeOptions,
+        allowGatewaySubagentBinding: true,
+      },
+    });
   }
   return undefined;
 }
