@@ -158,6 +158,8 @@ export function emitSessionsChanged(
   payload: { sessionKey?: string; reason: string; compacted?: boolean },
 ) {
   const evSubs = context.getSessionEventSubscriberConnIds();
+  // Covers: sessions.reset (reason="reset"|"new") and sessions.delete (reason="delete").
+  // Note: the archival "deleted" string is separate and never passed here.
   const isTeardown =
     payload.reason === "reset" || payload.reason === "delete" || payload.reason === "new";
 
