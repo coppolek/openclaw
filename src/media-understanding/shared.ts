@@ -139,6 +139,19 @@ function sanitizeAuditContext(auditContext: string | undefined): string | undefi
   return cleaned.slice(0, MAX_AUDIT_CONTEXT_CHARS);
 }
 
+function resolveTranscriptionPinDns(
+  body: BodyInit,
+  pinDns: boolean | undefined,
+): boolean | undefined {
+  if (pinDns !== undefined) {
+    return pinDns;
+  }
+  if (typeof FormData !== "undefined" && body instanceof FormData) {
+    return false;
+  }
+  return undefined;
+}
+
 export function resolveProviderHttpRequestConfig(params: {
   baseUrl?: string;
   defaultBaseUrl: string;
@@ -345,6 +358,7 @@ export async function postTranscriptionRequest(params: {
    */
   mode?: GuardedFetchMode;
 }) {
+  const pinDns = resolveTranscriptionPinDns(params.body, params.pinDns);
   return fetchWithTimeoutGuarded(
     params.url,
     {

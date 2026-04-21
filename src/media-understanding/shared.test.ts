@@ -541,10 +541,6 @@ describe("fetchWithTimeoutGuarded", () => {
   });
 
   it("does not auto-upgrade when only ALL_PROXY is configured (HTTP(S) proxy gate)", async () => {
-    // ALL_PROXY is ignored by EnvHttpProxyAgent; `hasEnvHttpProxyConfigured`
-    // reflects that by returning false when only ALL_PROXY is set. Auto-upgrade
-    // must NOT fire, otherwise the request would skip pinned-DNS/SSRF checks
-    // and then be dispatched directly.
     hasEnvHttpProxyConfiguredMock.mockReturnValue(false);
     fetchWithSsrFGuardMock.mockResolvedValue({
       response: new Response(null, { status: 200 }),
@@ -565,9 +561,6 @@ describe("fetchWithTimeoutGuarded", () => {
   });
 
   it("does not auto-upgrade when caller passes explicit dispatcherPolicy", async () => {
-    // Callers with custom proxy URL / proxyTls / connect options must keep
-    // control over the dispatcher. Auto-upgrade would build an
-    // EnvHttpProxyAgent that silently drops those overrides.
     hasEnvHttpProxyConfiguredMock.mockReturnValue(true);
     fetchWithSsrFGuardMock.mockResolvedValue({
       response: new Response(null, { status: 200 }),
@@ -591,10 +584,6 @@ describe("fetchWithTimeoutGuarded", () => {
   });
 
   it("does not auto-upgrade when target URL matches NO_PROXY", async () => {
-    // With HTTP_PROXY + NO_PROXY, EnvHttpProxyAgent makes direct connections
-    // for NO_PROXY matches, but in TRUSTED_ENV_PROXY mode fetchWithSsrFGuard
-    // skips pinned-DNS checks — so auto-upgrading those targets would bypass
-    // SSRF protection. Keep strict mode for NO_PROXY matches.
     hasEnvHttpProxyConfiguredMock.mockReturnValue(true);
     matchesNoProxyMock.mockReturnValue(true);
     fetchWithSsrFGuardMock.mockResolvedValue({
@@ -613,5 +602,29 @@ describe("fetchWithTimeoutGuarded", () => {
     const call = fetchWithSsrFGuardMock.mock.calls[0]?.[0];
     expect(call).toBeDefined();
     expect(call).not.toHaveProperty("mode");
+  });
+
+  it("disables pinDns automatically for FormData transcription requests", async () => {
+    fetchWithSsrFGuardMock.mockResolvedValue({
+      response: new Response(null, { status: 200 }),
+      finalUrl: "https://example.com",
+      release: async () => {},
+    });
+
+    const body = new FormData();
+    body.append("model", "gpt-4o-mini-transcribe");
+
+    await postTranscriptionRequest({
+      url: "https://api.example.com/v1/transcriptions",
+      headers: new Headers(),
+      body,
+      fetchFn: fetch,
+    });
+
+    expect(fetchWithSsrFGuardMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pinDns: false,
+      }),
+    );
   });
 });

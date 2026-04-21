@@ -1,4 +1,5 @@
 import path from "node:path";
+import { extensionForMime } from "../media/mime.js";
 import {
   assertOkOrThrowHttpError,
   postTranscriptionRequest,
@@ -18,18 +19,22 @@ function resolveModel(model: string | undefined, fallback: string): string {
   return trimmed || fallback;
 }
 
-function resolveUploadFileName(fileName?: string, mime?: string): string {
-  const trimmed = fileName?.trim();
-  const baseName = trimmed ? path.basename(trimmed) : "audio";
-  const lowerMime = mime?.trim().toLowerCase();
-
-  if (/\.aac$/i.test(baseName)) {
-    return `${baseName.slice(0, -4) || "audio"}.m4a`;
+function resolveAudioUploadFileName(
+  fileName: string | undefined,
+  mime: string | undefined,
+): string {
+  const trimmed = fileName?.trim() || "audio";
+  const parsed = path.parse(trimmed);
+  const mimeExt = extensionForMime(mime);
+  if (!mimeExt || parsed.ext.toLowerCase() === mimeExt) {
+    return trimmed;
   }
-  if (!path.extname(baseName) && lowerMime === "audio/aac") {
-    return `${baseName || "audio"}.m4a`;
-  }
-  return baseName;
+  return path.format({
+    ...parsed,
+    base: "",
+    ext: mimeExt,
+    name: parsed.name || parsed.base || "audio",
+  });
 }
 
 export async function transcribeOpenAiCompatibleAudio(
@@ -54,7 +59,7 @@ export async function transcribeOpenAiCompatibleAudio(
 
   const model = resolveModel(params.model, params.defaultModel);
   const form = new FormData();
-  const fileName = resolveUploadFileName(params.fileName, params.mime);
+  const fileName = resolveAudioUploadFileName(params.fileName, params.mime);
   const bytes = new Uint8Array(params.buffer);
   const blob = new Blob([bytes], {
     type: params.mime ?? "application/octet-stream",
