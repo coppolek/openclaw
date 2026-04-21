@@ -1,7 +1,6 @@
 import { normalizeResolvedSecretInputString } from "openclaw/plugin-sdk/secret-input";
 import {
   asFiniteNumber,
-  normalizeLanguageCode,
   trimToUndefined,
   type SpeechDirectiveTokenParseContext,
   type SpeechProviderConfig,
@@ -11,6 +10,7 @@ import {
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 import {
   isValidXaiTtsVoice,
+  normalizeXaiLanguageCode,
   normalizeXaiTtsBaseUrl,
   XAI_BASE_URL,
   XAI_TTS_VOICES,
@@ -84,7 +84,7 @@ function normalizeXaiProviderConfig(rawConfig: Record<string, unknown>): XaiTtsP
         XAI_BASE_URL,
     ),
     voiceId: trimToUndefined(rawConfig?.voiceId ?? rawConfig?.voice) ?? "eve",
-    language: normalizeLanguageCode(
+    language: normalizeXaiLanguageCode(
       trimToUndefined(rawConfig?.language ?? rawConfig?.languageCode),
     ),
     speed: asFiniteNumber(rawConfig?.speed),
@@ -99,7 +99,7 @@ function readXaiProviderConfig(config: SpeechProviderConfig): XaiTtsProviderConf
     baseUrl: trimToUndefined(config.baseUrl) ?? normalized.baseUrl,
     voiceId: trimToUndefined(config.voiceId ?? config.voice) ?? normalized.voiceId,
     language:
-      normalizeLanguageCode(trimToUndefined(config.language ?? config.languageCode)) ??
+      normalizeXaiLanguageCode(trimToUndefined(config.language ?? config.languageCode)) ??
       normalized.language,
     speed: asFiniteNumber(config.speed) ?? normalized.speed,
     responseFormat:
@@ -113,7 +113,7 @@ function readXaiOverrides(overrides: SpeechProviderOverrides | undefined): XaiTt
   }
   return {
     voiceId: trimToUndefined(overrides.voiceId ?? overrides.voice),
-    language: normalizeLanguageCode(trimToUndefined(overrides.language)),
+    language: normalizeXaiLanguageCode(trimToUndefined(overrides.language)),
     speed: asFiniteNumber(overrides.speed),
   };
 }
@@ -171,12 +171,12 @@ export function buildXaiSpeechProvider(): SpeechProviderPlugin {
         ...(trimToUndefined(talkProviderConfig.voiceId) == null
           ? {}
           : { voiceId: trimToUndefined(talkProviderConfig.voiceId) }),
-        ...(normalizeLanguageCode(
+        ...(normalizeXaiLanguageCode(
           trimToUndefined(talkProviderConfig.language ?? talkProviderConfig.languageCode),
         ) == null
           ? {}
           : {
-              language: normalizeLanguageCode(
+              language: normalizeXaiLanguageCode(
                 trimToUndefined(talkProviderConfig.language ?? talkProviderConfig.languageCode),
               ),
             }),
@@ -190,10 +190,10 @@ export function buildXaiSpeechProvider(): SpeechProviderPlugin {
       ...(trimToUndefined(params.voiceId ?? params.voice) == null
         ? {}
         : { voiceId: trimToUndefined(params.voiceId ?? params.voice) }),
-      ...(normalizeLanguageCode(trimToUndefined(params.language ?? params.languageCode)) == null
+      ...(normalizeXaiLanguageCode(trimToUndefined(params.language ?? params.languageCode)) == null
         ? {}
         : {
-            language: normalizeLanguageCode(
+            language: normalizeXaiLanguageCode(
               trimToUndefined(params.language ?? params.languageCode),
             ),
           }),

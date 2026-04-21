@@ -31,6 +31,20 @@ export function isValidXaiTtsVoice(voice: string, baseUrl?: string): voice is Xa
   return XAI_TTS_VOICES.includes(voice as XaiTtsVoice);
 }
 
+export function normalizeXaiLanguageCode(value: unknown): string | undefined {
+  const trimmed = trimToUndefined(value);
+  if (!trimmed) {
+    return undefined;
+  }
+  const normalized = trimmed.toLowerCase();
+  if (normalized === "auto" || /^[a-z]{2,3}(?:-[a-z]{2,4})?$/.test(normalized)) {
+    return normalized;
+  }
+  throw new Error(
+    `xAI language must be "auto" or a BCP-47 tag (e.g. "en", "pt-br", "zh-cn"); got: ${normalized}`,
+  );
+}
+
 function formatXaiErrorPayload(payload: unknown): string | undefined {
   const root = asObject(payload);
   const subject = asObject(root?.error) ?? root;
@@ -90,7 +104,7 @@ export async function xaiTTS(params: {
     responseFormat = "mp3",
     timeoutMs,
   } = params;
-  const language = normalizeLanguageCode(rawLanguage) ?? "en";
+  const language = normalizeXaiLanguageCode(rawLanguage) ?? "en";
 
   if (!isValidXaiTtsVoice(voiceId, baseUrl)) {
     throw new Error(`Invalid voice: ${voiceId}`);
