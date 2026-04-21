@@ -1872,7 +1872,11 @@ function resolveWorkspaceRelativeShortTermPath(
   const normalizedPath = normalizeMemoryPath(filePath);
   const absolutePath = path.resolve(workspaceDir, normalizedPath);
   const relativePath = normalizeMemoryPath(path.relative(workspaceDir, absolutePath));
-  if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+  if (
+    !relativePath ||
+    relativePath.startsWith("..") ||
+    isCrossPlatformAbsoluteMemoryPath(relativePath)
+  ) {
     return null;
   }
   return relativePath;
@@ -1963,10 +1967,13 @@ function resolveShortTermSourcePathCandidatesLegacy(
   workspaceDir: string,
   candidatePath: string,
 ): string[] {
-  const normalizedPath = normalizeMemoryPath(candidatePath);
-  const basenames = [normalizedPath];
-  if (!normalizedPath.startsWith("memory/")) {
-    basenames.push(path.posix.join("memory", path.posix.basename(normalizedPath)));
+  const rootRelativePath = resolveWorkspaceRelativeShortTermPath(workspaceDir, candidatePath);
+  if (!rootRelativePath) {
+    return [];
+  }
+  const basenames = [rootRelativePath];
+  if (!rootRelativePath.startsWith("memory/")) {
+    basenames.push(path.posix.join("memory", path.posix.basename(rootRelativePath)));
   }
   const seen = new Set<string>();
   const resolved: string[] = [];
@@ -2630,6 +2637,8 @@ export const __testing = {
   calculatePhaseSignalBoost,
   buildClaimHash,
   findExistingDailyVariantEntryKey,
+  resolveShortTermSourcePathCandidates,
+  resolveShortTermSourcePathCandidatesLegacy,
   totalSignalCountForEntry,
   isContaminatedDreamingSnippet,
 };
