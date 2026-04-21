@@ -42,6 +42,25 @@ describe("resolveAnnounceOrigin telegram forum topics", () => {
     });
   });
 
+  it("preserves stored forum topic thread ids for legacy sessions without channel metadata", () => {
+    expect(
+      resolveAnnounceOrigin(
+        {
+          lastTo: "telegram:-1001234567890:topic:99",
+          lastThreadId: 99,
+        },
+        {
+          channel: "telegram",
+          to: "group:-1001234567890",
+        },
+      ),
+    ).toEqual({
+      channel: "telegram",
+      to: "group:-1001234567890",
+      threadId: 99,
+    });
+  });
+
   it("still strips stale thread ids when the stored telegram route points at a different chat", () => {
     expect(
       resolveAnnounceOrigin(

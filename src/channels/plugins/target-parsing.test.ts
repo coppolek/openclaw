@@ -91,6 +91,42 @@ function setMinimalTargetParsingRegistry(): void {
           },
         },
       },
+      {
+        pluginId: "throwing-target",
+        source: "test",
+        plugin: {
+          id: "throwing-target",
+          meta: {
+            id: "throwing-target",
+            label: "Throwing Target",
+            selectionLabel: "Throwing Target",
+            docsPath: "/channels/throwing-target",
+            blurb: "test stub",
+          },
+          capabilities: { chatTypes: ["direct", "group"] },
+          config: {
+            listAccountIds: () => [],
+            resolveAccount: () => ({}),
+          },
+          messaging: {
+            normalizeTarget: (raw: string) => {
+              if (raw.includes("bad")) {
+                throw new Error("invalid target");
+              }
+              return raw.trim();
+            },
+            parseExplicitTarget: ({ raw }: { raw: string }) => {
+              if (raw.includes("explode")) {
+                throw new Error("parse failure");
+              }
+              return {
+                to: raw.trim().toUpperCase(),
+                chatType: "direct" as const,
+              };
+            },
+          },
+        },
+      },
     ]),
   );
 }
@@ -172,5 +208,24 @@ describe("parseExplicitTargetForChannel", () => {
         right: bareTarget,
       }),
     ).toBe(true);
+  });
+
+  it("returns null when loaded target normalization throws", () => {
+    expect(parseExplicitTargetForLoadedChannel("throwing-target", "bad target")).toBeNull();
+  });
+
+  it("falls back to the raw target when comparable target parsing throws", () => {
+    expect(
+      resolveComparableTargetForChannel({
+        channel: "throwing-target",
+        rawTarget: "explode target",
+        fallbackThreadId: 77,
+      }),
+    ).toEqual({
+      rawTo: "explode target",
+      to: "explode target",
+      threadId: 77,
+      chatType: undefined,
+    });
   });
 });

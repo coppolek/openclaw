@@ -1,4 +1,8 @@
 import {
+  comparableChannelTargetsShareRoute,
+  resolveComparableTargetForChannel,
+} from "../channels/plugins/target-parsing.js";
+import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
   normalizeOptionalThreadValue,
@@ -126,6 +130,30 @@ function shouldStripThreadFromAnnounceEntry(
     const entryTarget = normalizeTelegramAnnounceTarget(normalizedEntry?.to);
     if (requesterTarget && entryTarget) {
       return requesterTarget !== entryTarget;
+    }
+  }
+  if (requesterChannel) {
+    const requesterTarget = resolveComparableTargetForChannel({
+      channel: requesterChannel,
+      rawTarget: normalizedRequester.to,
+    });
+    const entryChannel =
+      normalizeOptionalLowercaseString(normalizedEntry?.channel) ?? requesterChannel;
+    const entryTarget = normalizedEntry?.to
+      ? resolveComparableTargetForChannel({
+          channel: entryChannel,
+          rawTarget: normalizedEntry.to,
+        })
+      : null;
+    if (
+      requesterTarget &&
+      entryTarget &&
+      (requesterTarget.chatType === "group" || entryTarget.chatType === "group")
+    ) {
+      return !comparableChannelTargetsShareRoute({
+        left: requesterTarget,
+        right: entryTarget,
+      });
     }
   }
   const requesterTarget = normalizeOptionalString(normalizedRequester.to);

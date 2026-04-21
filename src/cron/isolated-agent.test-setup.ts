@@ -91,6 +91,7 @@ function resolveTestSender(
 
 const telegramOutboundForTest: ChannelOutboundAdapter = {
   deliveryMode: "direct",
+  shouldPreferFinalAssistantVisibleText: () => true,
   sendText: async () => ({ channel: "telegram", messageId: "telegram-msg" }),
   resolveTarget: ({ to }) => {
     const resolved = resolveRequiredTarget("Telegram", to);
@@ -170,6 +171,15 @@ export function setupIsolatedAgentTurnMocks(params?: { fast?: boolean }): void {
                 threadId: target.messageThreadId,
                 chatType: target.chatType === "unknown" ? undefined : target.chatType,
               };
+            },
+            resolveSessionTarget: ({ id, threadId }) => {
+              const normalizedThreadId =
+                typeof threadId === "number"
+                  ? String(threadId)
+                  : typeof threadId === "string"
+                    ? threadId.trim()
+                    : "";
+              return normalizedThreadId ? `${id}:topic:${normalizedThreadId}` : id;
             },
           },
         }),

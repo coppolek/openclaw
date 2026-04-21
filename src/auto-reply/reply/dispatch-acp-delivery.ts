@@ -76,16 +76,12 @@ async function shouldTreatDeliveredTextAsVisible(params: {
   const outbound = getChannelPlugin(channelId)?.outbound;
   const visibilityOverride =
     outbound?.shouldTreatDeliveredTextAsVisible ?? outbound?.shouldTreatRoutedTextAsVisible;
-  if (visibilityOverride) {
-    return visibilityOverride({
-      kind: params.kind,
-      text: params.text,
-    });
-  }
-  if (!params.routed) {
-    return channelId === "telegram";
-  }
-  return false;
+  return visibilityOverride
+    ? visibilityOverride({
+        kind: params.kind,
+        text: params.text,
+      })
+    : false;
 }
 
 async function maybeApplyAcpTts(params: {
