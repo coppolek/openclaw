@@ -155,7 +155,7 @@ function buildManagedDreamingCronJob(
       expr: config.cron,
       ...(config.timezone ? { tz: config.timezone } : {}),
     },
-    sessionTarget: "main",
+    sessionTarget: "isolated",
     wakeMode: "now",
     payload: {
       kind: "systemEvent",
@@ -255,8 +255,8 @@ function buildManagedDreamingPatch(
   }
 
   const sessionTarget = normalizeLowercaseStringOrEmpty(normalizeTrimmedString(job.sessionTarget));
-  if (sessionTarget !== "main") {
-    patch.sessionTarget = "main";
+  if (sessionTarget !== "isolated") {
+    patch.sessionTarget = "isolated";
   }
   const wakeMode = normalizeLowercaseStringOrEmpty(normalizeTrimmedString(job.wakeMode));
   if (wakeMode !== "now") {
