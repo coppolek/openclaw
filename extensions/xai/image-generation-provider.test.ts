@@ -65,7 +65,7 @@ describe("xai image generation provider", () => {
     expect(provider.capabilities.generate.maxCount).toBe(4);
     expect(provider.capabilities.generate.supportsAspectRatio).toBe(true);
     expect(provider.capabilities.edit.enabled).toBe(true);
-    expect(provider.capabilities.edit.maxInputImages).toBe(2);
+    expect(provider.capabilities.edit.maxInputImages).toBe(5);
     expect(provider.isConfigured).toBeDefined();
     expect(provider.generateImage).toBeDefined();
   });

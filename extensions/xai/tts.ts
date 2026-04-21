@@ -88,7 +88,7 @@ export async function xaiTTS(params: {
   voiceId: string;
   language?: string;
   speed?: number;
-  responseFormat?: "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm" | "mulaw" | "alaw";
+  responseFormat?: "mp3" | "wav" | "pcm" | "mulaw" | "alaw";
   timeoutMs: number;
 }): Promise<Buffer> {
   const {

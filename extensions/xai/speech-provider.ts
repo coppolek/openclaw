@@ -17,7 +17,7 @@ import {
   xaiTTS,
 } from "./tts.js";
 
-const XAI_SPEECH_RESPONSE_FORMATS = ["mp3", "opus", "wav", "pcm", "mulaw", "alaw"] as const;
+const XAI_SPEECH_RESPONSE_FORMATS = ["mp3", "wav", "pcm", "mulaw", "alaw"] as const;
 
 type XaiSpeechResponseFormat = (typeof XAI_SPEECH_RESPONSE_FORMATS)[number];
 
@@ -59,10 +59,8 @@ function resolveSpeechResponseFormat(
 
 function responseFormatToFileExtension(
   format: XaiSpeechResponseFormat,
-): ".mp3" | ".pcm" | ".opus" | ".wav" | ".mulaw" | ".alaw" {
+): ".mp3" | ".pcm" | ".wav" | ".mulaw" | ".alaw" {
   switch (format) {
-    case "opus":
-      return ".opus";
     case "wav":
       return ".wav";
     case "pcm":

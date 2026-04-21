@@ -121,7 +121,7 @@ export function buildXaiImageGenerationProvider(): ImageGenerationProvider {
       edit: {
         enabled: true,
         maxCount: 4,
-        maxInputImages: 2,
+        maxInputImages: 5,
         supportsAspectRatio: true,
         supportsResolution: true,
         supportsSize: false,
