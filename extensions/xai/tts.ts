@@ -110,7 +110,9 @@ export async function xaiTTS(params: {
         text,
         voice_id: voiceId,
         language,
-        ...(responseFormat !== "mp3" && { response_format: responseFormat }),
+        output_format: {
+          codec: responseFormat,
+        },
         ...(speed != null && { speed }),
       }),
       signal: controller.signal,
