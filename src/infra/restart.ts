@@ -306,8 +306,41 @@ export function triggerOpenClawRestart(): RestartAttempt {
   if (!res.error && res.status === 0) {
     return { ok: true, method: "launchd", tried };
   }
-  const detail = formatSpawnDetail(res);
-  return { ok: false, method: "launchd", detail, tried };
+
+  // kickstart fails when the service was previously booted out (deregistered from launchd).
+  // Fall back to bootstrap (re-register from plist) + kickstart.
+  // Use env HOME to match how launchd.ts resolves the plist install path.
+  const home = process.env.HOME?.trim() || os.homedir();
+  const plistPath = path.join(home, "Library", "LaunchAgents", `${label}.plist`);
+  const bootstrapArgs = ["bootstrap", domain, plistPath];
+  tried.push(`launchctl ${bootstrapArgs.join(" ")}`);
+  const boot = spawnSync("launchctl", bootstrapArgs, {
+    encoding: "utf8",
+    timeout: SPAWN_TIMEOUT_MS,
+  });
+  if (boot.error || (boot.status !== 0 && boot.status !== null)) {
+    return {
+      ok: false,
+      method: "launchd",
+      detail: formatSpawnDetail(boot),
+      tried,
+    };
+  }
+  const retryArgs = ["kickstart", "-k", target];
+  tried.push(`launchctl ${retryArgs.join(" ")}`);
+  const retry = spawnSync("launchctl", retryArgs, {
+    encoding: "utf8",
+    timeout: SPAWN_TIMEOUT_MS,
+  });
+  if (!retry.error && retry.status === 0) {
+    return { ok: true, method: "launchd", tried };
+  }
+  return {
+    ok: false,
+    method: "launchd",
+    detail: formatSpawnDetail(retry),
+    tried,
+  };
 }
 
 function deferGatewayRestartUntilIdleImpl(
@@ -340,7 +373,14 @@ function deferGatewayRestartUntilIdleImpl(
 
   poll = setInterval(() => {
     checkCount += 1;
-    const pending = getPendingCount();
+    let pending: number;
+    try {
+      pending = getPendingCount();
+    } catch (err) {
+      hooks?.onCheckError?.(err);
+      // On error, treat as non-zero to avoid restarting while work is uncertain.
+      pending = 1;
+    }
     const elapsedMs = Date.now() - startedAt;
     if (pending === 0) {
       onReady();
