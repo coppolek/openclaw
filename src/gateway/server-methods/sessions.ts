@@ -1592,6 +1592,8 @@ export const sessionsHandlers: GatewayRequestHandlers = {
           entryToUpdate.compactionCount = Math.max(0, entryToUpdate.compactionCount ?? 0) + 1;
           delete entryToUpdate.inputTokens;
           delete entryToUpdate.outputTokens;
+          delete entryToUpdate.cacheRead;
+          delete entryToUpdate.cacheWrite;
           if (
             typeof result.result?.tokensAfter === "number" &&
             Number.isFinite(result.result.tokensAfter) &&
