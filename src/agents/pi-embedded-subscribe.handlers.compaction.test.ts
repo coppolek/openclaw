@@ -2,12 +2,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { HookRunner } from "../plugins/hooks.js";
 import {
   drainSessionStoreLockQueuesForTest,
   resetSessionStoreLockRuntimeForTests,
   setSessionWriteLockAcquirerForTests,
 } from "../config/sessions.js";
+import type { HookRunner } from "../plugins/hooks.js";
 import {
   readCompactionCount,
   seedSessionStore,
@@ -29,8 +29,8 @@ vi.mock("../plugins/hook-runner-global.js", () => ({
 }));
 
 import {
-  handleAutoCompactionEnd,
-  handleAutoCompactionStart,
+  handleCompactionEnd,
+  handleCompactionStart,
   reconcileSessionStoreCompactionCountAfterSuccess,
 } from "./pi-embedded-subscribe.handlers.compaction.js";
 import type { EmbeddedPiSubscribeContext } from "./pi-embedded-subscribe.handlers.types.js";
@@ -136,7 +136,7 @@ describe("reconcileSessionStoreCompactionCountAfterSuccess", () => {
   });
 });
 
-describe("handleAutoCompactionStart", () => {
+describe("handleCompactionStart", () => {
   it("passes messageProvider into before_compaction hook context", async () => {
     hookRunnerMocks.hasHooks.mockImplementation((hookName) => hookName === "before_compaction");
     const ctx = createCompactionContext({
@@ -146,7 +146,7 @@ describe("handleAutoCompactionStart", () => {
       messageProvider: "feishu",
     });
 
-    handleAutoCompactionStart(ctx);
+    handleCompactionStart(ctx);
     await vi.waitFor(() => expect(hookRunnerMocks.runBeforeCompaction).toHaveBeenCalledTimes(1));
     expect(hookRunnerMocks.runBeforeCompaction).toHaveBeenCalledWith(
       expect.objectContaining({ messageCount: 0 }),
@@ -166,7 +166,7 @@ describe("handleAutoCompactionStart", () => {
       messageProvider: "Telegram",
     });
 
-    handleAutoCompactionStart(ctx);
+    handleCompactionStart(ctx);
     await vi.waitFor(() => expect(hookRunnerMocks.runBeforeCompaction).toHaveBeenCalledTimes(1));
     expect(hookRunnerMocks.runBeforeCompaction).toHaveBeenCalledWith(
       expect.objectContaining({ messageCount: 0 }),
@@ -178,7 +178,7 @@ describe("handleAutoCompactionStart", () => {
   });
 });
 
-describe("handleAutoCompactionEnd", () => {
+describe("handleCompactionEnd", () => {
   it("reconciles the session store after a successful compaction end event", async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-compaction-handler-"));
     const storePath = path.join(tmp, "sessions.json");
@@ -195,8 +195,8 @@ describe("handleAutoCompactionEnd", () => {
       initialCount: 1,
     });
 
-    handleAutoCompactionEnd(ctx, {
-      type: "auto_compaction_end",
+    handleCompactionEnd(ctx, {
+      type: "compaction_end",
       result: { kept: 12 },
       willRetry: false,
       aborted: false,

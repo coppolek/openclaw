@@ -1,11 +1,11 @@
 import type { AgentEvent } from "@mariozechner/pi-agent-core";
 import { emitAgentEvent } from "../infra/agent-events.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
+import { resolveHookMessageProvider } from "../utils/hook-message-provider.js";
 import type { EmbeddedPiSubscribeContext } from "./pi-embedded-subscribe.handlers.types.js";
 import { makeZeroUsageSnapshot } from "./usage.js";
-import { resolveHookMessageProvider } from "../utils/hook-message-provider.js";
 
-export function handleAutoCompactionStart(ctx: EmbeddedPiSubscribeContext) {
+export function handleCompactionStart(ctx: EmbeddedPiSubscribeContext) {
   ctx.state.compactionInFlight = true;
   ctx.state.livenessState = "paused";
   ctx.ensureCompactionPromise();
@@ -44,7 +44,7 @@ export function handleAutoCompactionStart(ctx: EmbeddedPiSubscribeContext) {
   }
 }
 
-export function handleAutoCompactionEnd(
+export function handleCompactionEnd(
   ctx: EmbeddedPiSubscribeContext,
   evt: AgentEvent & { willRetry?: unknown; result?: unknown; aborted?: unknown },
 ) {
