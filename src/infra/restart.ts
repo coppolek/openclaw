@@ -435,8 +435,10 @@ export function deferGatewayRestartUntilIdle(opts: {
     pollMs: opts.pollMs,
     maxWaitMs,
   });
-  activeDeferralPolls.add(poll);
-  poll.addListener && poll.addListener("close", () => activeDeferralPolls.delete(poll));
+  if (poll) {
+    activeDeferralPolls.add(poll);
+    poll.addListener && poll.addListener("close", () => activeDeferralPolls.delete(poll));
+  }
 }
 
 export type ScheduledRestart = {
