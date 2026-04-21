@@ -732,11 +732,12 @@ function getCompatibleActivePluginRegistry(
   };
   const activeCoreGatewayMethodNames = getActivePluginCoreGatewayMethodNames();
   const tryCompatibleVariant = (variant: PluginLoadOptions): PluginRegistry | undefined => {
-    const exactMatch = tryExactVariant(variant);
-    if (exactMatch) {
-      return exactMatch;
+    const variantLoadContext = resolvePluginLoadCacheContext(variant);
+    if (variantLoadContext.cacheKey === activeCacheKey) {
+      return activeRegistry;
     }
     if (
+      variantLoadContext.runtimeSubagentMode !== "gateway-bindable" ||
       activeRuntimeSubagentMode !== "gateway-bindable" ||
       variant.coreGatewayHandlers !== undefined ||
       activeCoreGatewayMethodNames.length === 0
