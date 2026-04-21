@@ -68,15 +68,13 @@ export function scheduleChatScroll(host: ScrollHost, force = false, smooth = fal
   cancelPendingChatScroll(host);
   const pickScrollTarget = () => {
     const container = host.querySelector(".chat-thread") as HTMLElement | null;
-    if (container) {
-      const overflowY = getComputedStyle(container).overflowY;
-      const canScroll =
-        overflowY === "auto" ||
-        overflowY === "scroll" ||
-        container.scrollHeight - container.clientHeight > 1;
-      if (canScroll) {
-        return container;
-      }
+    if (
+      container &&
+      (container.scrollHeight - container.clientHeight <= 1 ||
+        (getComputedStyle(container).overflowY !== "hidden" &&
+          container.scrollHeight - container.clientHeight > 1))
+    ) {
+      return container;
     }
     return (document.scrollingElement ?? document.documentElement) as HTMLElement | null;
   };
@@ -144,6 +142,7 @@ export function scheduleChatScroll(host: ScrollHost, force = false, smooth = fal
         host.chatSmoothAutoScrolling = false;
         host.chatSmoothInterrupted = false;
         host.chatLastScrollTop = Math.max(0, latest.scrollHeight - latest.clientHeight);
+        host.chatNewMessagesBelow = false;
       }, retryDelay);
     });
   });
@@ -199,6 +198,7 @@ export function handleChatScroll(host: ScrollHost, event: Event) {
       host.chatUserNearBottom = false;
       host.chatFollowLocked = true;
     } else if (backAtBottom || !scrollingUp) {
+      // Keep the interrupt until we truly re-enter the back-at-bottom path.
       host.chatSmoothAutoScrolling = false;
     }
   } else if (host.chatSmoothInterrupted && scrollingUp) {
@@ -216,7 +216,7 @@ export function handleChatScroll(host: ScrollHost, event: Event) {
     host.chatUserNearBottom = true;
     host.chatFollowLocked = false;
     host.chatSmoothInterrupted = false;
-  } else if (!host.chatFollowLocked && nearBottom) {
+  } else if (!host.chatFollowLocked && nearBottom && !host.chatSmoothInterrupted) {
     // Fallback for hosts that start out-of-sync before the scroll-state invariant settles.
     host.chatUserNearBottom = true;
     host.chatSmoothInterrupted = false;
