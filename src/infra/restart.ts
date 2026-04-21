@@ -212,7 +212,7 @@ export function isGatewaySigusr1RestartAuthorized(): boolean {
   return sigusr1AuthorizedCount > 0;
 }
 
-function formatSpawnDetail(result: { status: number | null; error: NodeJS.ErrnoException | null; stderr: string }) {
+function formatSpawnDetail(result: { status: number | null; error?: Error; stderr: string }) {
   const parts = [];
   if (result.error) {
     parts.push(`error=${result.error.message}`);
@@ -437,7 +437,6 @@ export function deferGatewayRestartUntilIdle(opts: {
   });
   if (poll) {
     activeDeferralPolls.add(poll);
-    poll.addListener && poll.addListener("close", () => activeDeferralPolls.delete(poll));
   }
 }
 
