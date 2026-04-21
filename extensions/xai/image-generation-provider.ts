@@ -13,7 +13,10 @@ import {
   resolveProviderHttpRequestConfig,
   resolveProviderOperationTimeoutMs,
 } from "openclaw/plugin-sdk/provider-http";
-import { normalizeOptionalLowercaseString, normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
+import {
+  normalizeOptionalLowercaseString,
+  normalizeOptionalString,
+} from "openclaw/plugin-sdk/text-runtime";
 import {
   resolveXaiBaseUrl,
   XAI_BASE_URL,
@@ -80,13 +83,18 @@ function buildBody(req: ImageGenerationRequest, edit: boolean): Record<string, u
   }
 
   if (edit) {
-    if ((req.inputImages?.length ?? 0) > 1) {
-      throw new Error("xAI currently supports at most one input image for edits.");
+    const inputImages = req.inputImages ?? [];
+    if (inputImages.length > 1) {
+      body.images = inputImages.map((input) => ({
+        url: resolveImageForEdit(input),
+        type: "image_url",
+      }));
+    } else {
+      body.image = {
+        url: resolveImageForEdit(inputImages[0]),
+        type: "image_url",
+      };
     }
-    body.image = {
-      url: resolveImageForEdit(req.inputImages?.[0]),
-      type: "image_url",
-    };
   }
 
   return body;
@@ -113,7 +121,7 @@ export function buildXaiImageGenerationProvider(): ImageGenerationProvider {
       edit: {
         enabled: true,
         maxCount: 4,
-        maxInputImages: 1,
+        maxInputImages: 2,
         supportsAspectRatio: true,
         supportsResolution: true,
         supportsSize: false,

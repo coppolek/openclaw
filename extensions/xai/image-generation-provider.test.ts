@@ -41,7 +41,8 @@ vi.mock("openclaw/plugin-sdk/provider-http", () => ({
 
 vi.mock("openclaw/plugin-sdk/text-runtime", () => ({
   normalizeOptionalString: (v: unknown) => (typeof v === "string" ? v.trim() : undefined),
-  normalizeOptionalLowercaseString: (v: unknown) => (typeof v === "string" ? v.trim().toLowerCase() : undefined),
+  normalizeOptionalLowercaseString: (v: unknown) =>
+    typeof v === "string" ? v.trim().toLowerCase() : undefined,
   readStringValue: (v: unknown) => (typeof v === "string" ? v.trim() : undefined),
 }));
 
@@ -64,7 +65,7 @@ describe("xai image generation provider", () => {
     expect(provider.capabilities.generate.maxCount).toBe(4);
     expect(provider.capabilities.generate.supportsAspectRatio).toBe(true);
     expect(provider.capabilities.edit.enabled).toBe(true);
-    expect(provider.capabilities.edit.maxInputImages).toBe(1);
+    expect(provider.capabilities.edit.maxInputImages).toBe(2);
     expect(provider.isConfigured).toBeDefined();
     expect(provider.generateImage).toBeDefined();
   });

@@ -77,22 +77,20 @@ function responseFormatToFileExtension(
 }
 
 function normalizeXaiProviderConfig(rawConfig: Record<string, unknown>): XaiTtsProviderConfig {
+  const providers = rawConfig?.providers as Record<string, unknown> | undefined;
+  const xai = (providers?.xai ?? rawConfig) as Record<string, unknown>;
   return {
     apiKey: normalizeResolvedSecretInputString({
-      value: rawConfig?.apiKey,
+      value: xai?.apiKey,
       path: "messages.tts.providers.xai.apiKey",
     }),
     baseUrl: normalizeXaiTtsBaseUrl(
-      trimToUndefined(rawConfig?.baseUrl) ??
-        trimToUndefined(process.env.XAI_BASE_URL) ??
-        XAI_BASE_URL,
+      trimToUndefined(xai?.baseUrl) ?? trimToUndefined(process.env.XAI_BASE_URL) ?? XAI_BASE_URL,
     ),
-    voiceId: trimToUndefined(rawConfig?.voiceId ?? rawConfig?.voice) ?? "eve",
-    language: normalizeXaiLanguageCode(
-      trimToUndefined(rawConfig?.language ?? rawConfig?.languageCode),
-    ),
-    speed: asFiniteNumber(rawConfig?.speed),
-    responseFormat: normalizeXaiSpeechResponseFormat(rawConfig?.responseFormat),
+    voiceId: trimToUndefined(xai?.voiceId ?? xai?.voice) ?? "eve",
+    language: normalizeXaiLanguageCode(trimToUndefined(xai?.language ?? xai?.languageCode)),
+    speed: asFiniteNumber(xai?.speed),
+    responseFormat: normalizeXaiSpeechResponseFormat(xai?.responseFormat),
   };
 }
 
@@ -213,10 +211,7 @@ export function buildXaiSpeechProvider(): SpeechProviderPlugin {
       if (!apiKey) {
         throw new Error("xAI API key missing");
       }
-      const responseFormat = resolveSpeechResponseFormat(
-        req.target,
-        config.responseFormat,
-      );
+      const responseFormat = resolveSpeechResponseFormat(req.target, config.responseFormat);
       const audioBuffer = await xaiTTS({
         text: req.text,
         apiKey,
