@@ -222,7 +222,7 @@ describe("loadBundledEntryExportSync", () => {
     const brokenProxy = new Proxy(
       {},
       {
-        get(_target, prop) {
+        get(_target, _prop) {
           // Simulate the exact error: accessing a property throws because target is null
           throw new TypeError("Cannot read properties of undefined (reading 't')");
         },
