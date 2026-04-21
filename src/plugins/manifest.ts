@@ -155,6 +155,15 @@ export type PluginManifestConfigContracts = {
 export type PluginManifest = {
   id: string;
   configSchema: Record<string, unknown>;
+  /**
+   * JSON Schema for this plugin's provider config read from
+   * `models.providers.<providerId>`. Distinct from `configSchema`, which
+   * describes the plugin-overlay config read from
+   * `plugins.entries.<id>.config`. Plugins that own a model provider and
+   * whose provider config is not already covered by the core provider schema
+   * opt into provider-config validation by declaring this field.
+   */
+  providerConfigSchema?: Record<string, unknown>;
   enabledByDefault?: boolean;
   /** Legacy plugin ids that should normalize to this plugin id. */
   legacyPluginIds?: string[];
@@ -741,6 +750,9 @@ export function loadPluginManifest(
   if (!configSchema) {
     return { ok: false, error: "plugin manifest requires configSchema", manifestPath };
   }
+  const providerConfigSchema = isRecord(raw.providerConfigSchema)
+    ? raw.providerConfigSchema
+    : undefined;
 
   const kind = parsePluginKind(raw.kind);
   const enabledByDefault = raw.enabledByDefault === true;
@@ -782,6 +794,7 @@ export function loadPluginManifest(
     manifest: {
       id,
       configSchema,
+      ...(providerConfigSchema ? { providerConfigSchema } : {}),
       ...(enabledByDefault ? { enabledByDefault } : {}),
       ...(legacyPluginIds.length > 0 ? { legacyPluginIds } : {}),
       ...(autoEnableWhenConfiguredProviders.length > 0

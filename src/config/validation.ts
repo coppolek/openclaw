@@ -44,6 +44,11 @@ const LEGACY_REMOVED_PLUGIN_IDS = new Set(["google-antigravity-auth", "google-ge
 
 type UnknownIssueRecord = Record<string, unknown>;
 type ConfigPathSegment = string | number;
+type PluginOwnedModelProviderConfig = {
+  providerId: string;
+  record: ReturnType<typeof loadPluginManifestRegistry>["plugins"][number];
+  value: Record<string, unknown>;
+};
 type AllowedValuesCollection = {
   values: unknown[];
   incomplete: boolean;
@@ -82,6 +87,93 @@ function formatConfigPath(segments: readonly ConfigPathSegment[]): string {
 
 function asJsonSchemaLike(value: unknown): JsonSchemaLike | null {
   return value && typeof value === "object" ? (value as JsonSchemaLike) : null;
+}
+
+function resolveRawWorkspaceDir(raw: unknown): string | undefined {
+  if (!isRecord(raw)) {
+    return undefined;
+  }
+  try {
+    return (
+      resolveAgentWorkspaceDir(
+        raw as OpenClawConfig,
+        resolveDefaultAgentId(raw as OpenClawConfig),
+      ) ?? undefined
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+function extractPluginOwnedModelProviderConfigs(params: {
+  raw: unknown;
+  env?: NodeJS.ProcessEnv;
+}): { sanitizedRaw: unknown; pluginProviders: PluginOwnedModelProviderConfig[] } {
+  if (
+    !isRecord(params.raw) ||
+    !isRecord(params.raw.models) ||
+    !isRecord(params.raw.models.providers)
+  ) {
+    return { sanitizedRaw: params.raw, pluginProviders: [] };
+  }
+
+  // This is called before core zod validation, so it must use the raw config.
+  // `ensureRegistry()` below loads the registry again against the post-compat
+  // config; the short manifest-registry TTL cache absorbs the duplicate load.
+  const registry = loadPluginManifestRegistry({
+    config: params.raw as OpenClawConfig,
+    workspaceDir: resolveRawWorkspaceDir(params.raw),
+    env: params.env,
+  });
+  // Only providers whose plugin declares an explicit `providerConfigSchema`
+  // participate here. Plugin-overlay `configSchema` targets
+  // `plugins.entries.<id>.config` and must not be applied to
+  // `models.providers.<id>`, or unrelated providers (e.g. openai) would get
+  // their core-schema keys rejected by the overlay schema.
+  const pluginProviderById = new Map<
+    string,
+    ReturnType<typeof loadPluginManifestRegistry>["plugins"][number]
+  >();
+  for (const record of registry.plugins) {
+    if (!record.providerConfigSchema) {
+      continue;
+    }
+    for (const providerId of record.providers) {
+      if (!providerId || pluginProviderById.has(providerId)) {
+        continue;
+      }
+      pluginProviderById.set(providerId, record);
+    }
+  }
+
+  const rawModels = params.raw.models;
+  const rawProviders = rawModels.providers as Record<string, unknown>;
+  let nextProviders: Record<string, unknown> | null = null;
+  const pluginProviders: PluginOwnedModelProviderConfig[] = [];
+  for (const [providerId, value] of Object.entries(rawProviders)) {
+    const record = pluginProviderById.get(providerId);
+    if (!record || !isRecord(value)) {
+      continue;
+    }
+    nextProviders ??= { ...rawProviders };
+    delete nextProviders[providerId];
+    pluginProviders.push({ providerId, record, value });
+  }
+
+  if (pluginProviders.length === 0 || !nextProviders) {
+    return { sanitizedRaw: params.raw, pluginProviders: [] };
+  }
+
+  return {
+    sanitizedRaw: {
+      ...params.raw,
+      models: {
+        ...rawModels,
+        providers: nextProviders,
+      },
+    },
+    pluginProviders,
+  };
 }
 
 function lookupJsonSchemaNode(
@@ -677,7 +769,13 @@ function validateConfigObjectWithPluginsBase(
   raw: unknown,
   opts: { applyDefaults: boolean; env?: NodeJS.ProcessEnv },
 ): ValidateConfigWithPluginsResult {
-  const base = opts.applyDefaults ? validateConfigObject(raw) : validateConfigObjectRaw(raw);
+  const { sanitizedRaw, pluginProviders } = extractPluginOwnedModelProviderConfigs({
+    raw,
+    env: opts.env,
+  });
+  const base = opts.applyDefaults
+    ? validateConfigObject(sanitizedRaw)
+    : validateConfigObjectRaw(sanitizedRaw);
   if (!base.ok) {
     return { ok: false, issues: base.issues, warnings: [] };
   }
@@ -859,6 +957,8 @@ function validateConfigObjectWithPluginsBase(
 
   let mutatedConfig = config;
   let channelsCloned = false;
+  let modelsCloned = false;
+  let modelProvidersCloned = false;
   let pluginsCloned = false;
   let pluginEntriesCloned = false;
 
@@ -873,6 +973,28 @@ function validateConfigObjectWithPluginsBase(
       channelsCloned = true;
     }
     (mutatedConfig.channels as Record<string, unknown>)[channelId] = nextValue;
+  };
+
+  const replaceModelProviderConfig = (providerId: string, nextValue: Record<string, unknown>) => {
+    if (!modelsCloned) {
+      mutatedConfig = {
+        ...mutatedConfig,
+        models: {
+          ...mutatedConfig.models,
+        },
+      };
+      modelsCloned = true;
+    }
+    if (!modelProvidersCloned) {
+      mutatedConfig.models = {
+        ...mutatedConfig.models,
+        providers: {
+          ...mutatedConfig.models?.providers,
+        },
+      };
+      modelProvidersCloned = true;
+    }
+    (mutatedConfig.models!.providers as Record<string, unknown>)[providerId] = nextValue;
   };
 
   const replacePluginEntryConfig = (pluginId: string, nextValue: Record<string, unknown>) => {
@@ -998,6 +1120,41 @@ function validateConfigObjectWithPluginsBase(
     for (const [index, entry] of config.agents.list.entries()) {
       validateHeartbeatTarget(entry?.heartbeat?.target, `agents.list.${index}.heartbeat.target`);
     }
+  }
+
+  for (const providerEntry of pluginProviders) {
+    const providerConfigSchema = providerEntry.record.providerConfigSchema;
+    if (!providerConfigSchema) {
+      // `extractPluginOwnedModelProviderConfigs` only queues records with a
+      // `providerConfigSchema`, but narrow the type here.
+      continue;
+    }
+    const res = validateJsonSchemaValue({
+      schema: providerConfigSchema,
+      cacheKey:
+        providerEntry.record.providerConfigSchemaCacheKey ??
+        providerEntry.record.manifestPath ??
+        providerEntry.providerId,
+      value: providerEntry.value,
+      // Match the outer raw/defaults flow so plugin provider config
+      // normalization lines up with how the rest of the config was validated.
+      applyDefaults: opts.applyDefaults,
+    });
+    if (!res.ok) {
+      for (const error of res.errors) {
+        issues.push({
+          path:
+            error.path === "<root>"
+              ? `models.providers.${providerEntry.providerId}`
+              : `models.providers.${providerEntry.providerId}.${error.path}`,
+          message: `invalid config: ${error.message}`,
+          allowedValues: error.allowedValues,
+          allowedValuesHiddenCount: error.allowedValuesHiddenCount,
+        });
+      }
+      continue;
+    }
+    replaceModelProviderConfig(providerEntry.providerId, res.value as Record<string, unknown>);
   }
 
   if (!hasExplicitPluginsConfig) {

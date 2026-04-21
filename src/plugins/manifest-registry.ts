@@ -110,6 +110,8 @@ export type PluginManifestRecord = {
   manifestPath: string;
   schemaCacheKey?: string;
   configSchema?: Record<string, unknown>;
+  providerConfigSchema?: Record<string, unknown>;
+  providerConfigSchemaCacheKey?: string;
   configUiHints?: Record<string, PluginConfigUiHint>;
   contracts?: PluginManifestContracts;
   configContracts?: PluginManifestConfigContracts;
@@ -308,6 +310,8 @@ function buildRecord(params: {
   manifestPath: string;
   schemaCacheKey?: string;
   configSchema?: Record<string, unknown>;
+  providerConfigSchema?: Record<string, unknown>;
+  providerConfigSchemaCacheKey?: string;
 }): PluginManifestRecord {
   const channelConfigs = mergePackageChannelMetaIntoChannelConfigs({
     channelConfigs: params.manifest.channelConfigs,
@@ -357,6 +361,8 @@ function buildRecord(params: {
     manifestPath: params.manifestPath,
     schemaCacheKey: params.schemaCacheKey,
     configSchema: params.configSchema,
+    providerConfigSchema: params.providerConfigSchema,
+    providerConfigSchemaCacheKey: params.providerConfigSchemaCacheKey,
     configUiHints: params.manifest.uiHints,
     contracts: params.manifest.contracts,
     configContracts: params.manifest.configContracts,
@@ -417,6 +423,8 @@ function buildBundleRecord(params: {
     manifestPath: params.manifestPath,
     schemaCacheKey: undefined,
     configSchema: undefined,
+    providerConfigSchema: undefined,
+    providerConfigSchemaCacheKey: undefined,
     configUiHints: undefined,
     configContracts: undefined,
     channelConfigs: undefined,
@@ -571,15 +579,23 @@ export function loadPluginManifestRegistry(
     }
 
     const configSchema = "configSchema" in manifest ? manifest.configSchema : undefined;
-    const schemaCacheKey = (() => {
-      if (!configSchema) {
-        return undefined;
+    const providerConfigSchema =
+      "providerConfigSchema" in manifest ? manifest.providerConfigSchema : undefined;
+    let cachedManifestMtimeKey: string | undefined;
+    const resolveManifestMtimeKey = (): string => {
+      if (cachedManifestMtimeKey !== undefined) {
+        return cachedManifestMtimeKey;
       }
       const manifestMtime = safeStatMtimeMs(manifestRes.manifestPath);
-      return manifestMtime
+      cachedManifestMtimeKey = manifestMtime
         ? `${manifestRes.manifestPath}:${manifestMtime}`
         : manifestRes.manifestPath;
-    })();
+      return cachedManifestMtimeKey;
+    };
+    const schemaCacheKey = configSchema ? resolveManifestMtimeKey() : undefined;
+    const providerConfigSchemaCacheKey = providerConfigSchema
+      ? `${resolveManifestMtimeKey()}:providerConfigSchema`
+      : undefined;
 
     const record = isBundleRecord
       ? buildBundleRecord({
@@ -593,6 +609,8 @@ export function loadPluginManifestRegistry(
           manifestPath: manifestRes.manifestPath,
           schemaCacheKey,
           configSchema,
+          providerConfigSchema,
+          providerConfigSchemaCacheKey,
         });
 
     const existing = seenIds.get(manifest.id);
