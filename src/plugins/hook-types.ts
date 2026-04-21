@@ -82,7 +82,8 @@ export type PluginHookName =
   | "gateway_stop"
   | "before_dispatch"
   | "reply_dispatch"
-  | "before_install";
+  | "before_install"
+  | "before_response_emit";
 
 export const PLUGIN_HOOK_NAMES = [
   "before_model_resolve",
@@ -114,6 +115,7 @@ export const PLUGIN_HOOK_NAMES = [
   "before_dispatch",
   "reply_dispatch",
   "before_install",
+  "before_response_emit",
 ] as const satisfies readonly PluginHookName[];
 
 type MissingPluginHookNames = Exclude<PluginHookName, (typeof PLUGIN_HOOK_NAMES)[number]>;
@@ -554,6 +556,22 @@ export type PluginHookBeforeInstallContext = {
   origin?: string;
 };
 
+// before_response_emit hook (modifying — sequential)
+export type PluginHookBeforeResponseEmitEvent = {
+  runId: string;
+  content: string;
+  allContent: string[];
+  channel?: string;
+  messageCount: number;
+};
+
+export type PluginHookBeforeResponseEmitResult = {
+  content?: string;
+  allContent?: string[];
+  block?: boolean;
+  blockReason?: string;
+};
+
 export type PluginHookBeforeInstallEvent = {
   targetType: PluginInstallTargetType;
   targetName: string;
@@ -685,6 +703,13 @@ export type PluginHookHandlerMap = {
     event: PluginHookGatewayStopEvent,
     ctx: PluginHookGatewayContext,
   ) => Promise<void> | void;
+  before_response_emit: (
+    event: PluginHookBeforeResponseEmitEvent,
+    ctx: PluginHookAgentContext,
+  ) =>
+    | Promise<PluginHookBeforeResponseEmitResult | void>
+    | PluginHookBeforeResponseEmitResult
+    | void;
   before_install: (
     event: PluginHookBeforeInstallEvent,
     ctx: PluginHookBeforeInstallContext,
