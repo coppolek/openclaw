@@ -14,6 +14,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Microsoft/TTS: default the Edge/Microsoft speech provider to `ogg-48khz-16bit-mono-opus` when the TTS dispatcher requests a voice-note target (WhatsApp, Telegram, Discord, Matrix, Feishu) so auto-TTS replies play as native voice notes instead of MP3 attachments WhatsApp cannot render. Explicit `messages.tts.providers.microsoft.outputFormat` overrides still win. (#69435)
 - Telegram/status reactions: honor `messages.removeAckAfterReply` when lifecycle status reactions are enabled, clearing or restoring the reaction after success/error using the configured hold timings. (#68067) Thanks @poiskgit.
 - Web search/plugins: resolve plugin-scoped SecretRef API keys for bundled Exa, Firecrawl, Gemini, Kimi, Perplexity, Tavily, and Grok web-search providers when they are selected through the shared web-search config. (#68424) Thanks @afurm.
 - Telegram/polling: raise the default polling watchdog threshold from 90s to 120s and add configurable `channels.telegram.pollingStallThresholdMs` (also per-account) so long-running Telegram work gets more room before polling is treated as stalled. (#57737) Thanks @Vitalcheffe.
