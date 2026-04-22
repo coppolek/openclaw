@@ -1995,4 +1995,174 @@ describe("memory-core dreaming phases", () => {
     // Before the fix, it stayed at 1 because dayBucket was the file date.
     expect(after2[0]?.dailyCount).toBe(2);
   });
+
+  it("skips light dreaming when within cooldown period", async () => {
+    const workspaceDir = await createTempWorkspace("openclaw-dreaming-cooldown-");
+    const { readPhaseCooldownStore, writePhaseCooldownStore, isPhaseOnCooldown, constants } =
+      __testing;
+    const nowMs = DREAMING_TEST_BASE_TIME.getTime();
+
+    // No cooldown entry — should NOT be on cooldown.
+    const emptyStore = await readPhaseCooldownStore(workspaceDir);
+    expect(isPhaseOnCooldown(emptyStore, "light", nowMs, constants.DEFAULT_LIGHT_COOLDOWN_MS)).toBe(
+      false,
+    );
+
+    // Record a recent run.
+    const recentRunMs = nowMs - 1 * 60 * 60 * 1000; // 1 hour ago
+    await writePhaseCooldownStore(workspaceDir, {
+      version: 1,
+      phases: {
+        light: { lastRunAtMs: recentRunMs, lastRunAtIso: new Date(recentRunMs).toISOString() },
+      },
+    });
+
+    const storeWithRecent = await readPhaseCooldownStore(workspaceDir);
+    // 1 hour ago, default cooldown is 6 hours, 80% = 4.8 hours — should be on cooldown.
+    expect(
+      isPhaseOnCooldown(storeWithRecent, "light", nowMs, constants.DEFAULT_LIGHT_COOLDOWN_MS),
+    ).toBe(true);
+
+    // Record an old run.
+    const oldRunMs = nowMs - 7 * 60 * 60 * 1000; // 7 hours ago
+    await writePhaseCooldownStore(workspaceDir, {
+      version: 1,
+      phases: { light: { lastRunAtMs: oldRunMs, lastRunAtIso: new Date(oldRunMs).toISOString() } },
+    });
+
+    const storeWithOld = await readPhaseCooldownStore(workspaceDir);
+    // 7 hours ago, past the 4.8-hour cooldown — should NOT be on cooldown.
+    expect(
+      isPhaseOnCooldown(storeWithOld, "light", nowMs, constants.DEFAULT_LIGHT_COOLDOWN_MS),
+    ).toBe(false);
+  });
+
+  it("skips rem dreaming when within cooldown period", async () => {
+    const workspaceDir = await createTempWorkspace("openclaw-dreaming-cooldown-");
+    const { readPhaseCooldownStore, writePhaseCooldownStore, isPhaseOnCooldown, constants } =
+      __testing;
+    const nowMs = DREAMING_TEST_BASE_TIME.getTime();
+
+    // Record rem phase run 2 days ago — well within 7-day cooldown (80% = 5.6 days).
+    const recentRunMs = nowMs - 2 * 24 * 60 * 60 * 1000;
+    await writePhaseCooldownStore(workspaceDir, {
+      version: 1,
+      phases: {
+        rem: { lastRunAtMs: recentRunMs, lastRunAtIso: new Date(recentRunMs).toISOString() },
+      },
+    });
+
+    const store = await readPhaseCooldownStore(workspaceDir);
+    expect(isPhaseOnCooldown(store, "rem", nowMs, constants.DEFAULT_REM_COOLDOWN_MS)).toBe(true);
+
+    // Record rem phase run 8 days ago — past cooldown.
+    const oldRunMs = nowMs - 8 * 24 * 60 * 60 * 1000;
+    await writePhaseCooldownStore(workspaceDir, {
+      version: 1,
+      phases: { rem: { lastRunAtMs: oldRunMs, lastRunAtIso: new Date(oldRunMs).toISOString() } },
+    });
+
+    const storeOld = await readPhaseCooldownStore(workspaceDir);
+    expect(isPhaseOnCooldown(storeOld, "rem", nowMs, constants.DEFAULT_REM_COOLDOWN_MS)).toBe(
+      false,
+    );
+  });
+
+  it("estimates cron interval correctly for common patterns", () => {
+    const { estimateCronIntervalMs } = __testing;
+
+    // Every 6 hours
+    expect(estimateCronIntervalMs("0 */6 * * *")).toBe(6 * 60 * 60 * 1000);
+
+    // Weekly (Sunday at 5am)
+    expect(estimateCronIntervalMs("0 5 * * 0")).toBe(7 * 24 * 60 * 60 * 1000);
+
+    // Daily at 3am
+    expect(estimateCronIntervalMs("0 3 * * *")).toBe(24 * 60 * 60 * 1000);
+
+    // Every 30 minutes
+    expect(estimateCronIntervalMs("*/30 * * * *")).toBe(30 * 60 * 1000);
+
+    // Multiple hours (every 8 hours roughly)
+    expect(estimateCronIntervalMs("0 0,8,16 * * *")).toBe(8 * 60 * 60 * 1000);
+
+    // Invalid expression
+    expect(estimateCronIntervalMs("invalid")).toBeNull();
+
+    // Weekday range (Mon-Fri) — fires daily
+    expect(estimateCronIntervalMs("0 3 * * 1-5")).toBe(24 * 60 * 60 * 1000);
+
+    // Two days per week (Sun, Wed) — ~3.5 days
+    expect(estimateCronIntervalMs("0 3 * * 0,3")).toBe(Math.round((7 * 24 * 60 * 60 * 1000) / 2));
+
+    // Single DOW — still weekly
+    expect(estimateCronIntervalMs("0 3 * * 0")).toBe(7 * 24 * 60 * 60 * 1000);
+  });
+
+  it("skips REM subagent when a REM run occurred within the last few days under default config", async () => {
+    const workspaceDir = await createTempWorkspace("openclaw-dreaming-cooldown-");
+    const { writePhaseCooldownStore, readPhaseCooldownStore } = __testing;
+    const nowMs = DREAMING_TEST_BASE_TIME.getTime();
+
+    // Seed a REM run 3 days ago — well within the 7-day cooldown (80% = 5.6 days).
+    const remRunMs = nowMs - 3 * 24 * 60 * 60 * 1000;
+    await writePhaseCooldownStore(workspaceDir, {
+      version: 1,
+      phases: {
+        rem: { lastRunAtMs: remRunMs, lastRunAtIso: new Date(remRunMs).toISOString() },
+      },
+    });
+
+    const logMessages: string[] = [];
+    const logger = {
+      info: (msg: string) => logMessages.push(msg),
+      warn: (msg: string) => logMessages.push(msg),
+      error: (msg: string) => logMessages.push(msg),
+      debug: (msg: string) => logMessages.push(msg),
+    };
+
+    // Run sweep with default plugin config (no explicit cron overrides).
+    // REM should be skipped because the fixed DEFAULT_REM_COOLDOWN_MS (7 days)
+    // has not elapsed. Light is disabled by limit=0 to isolate the REM path.
+    await runDreamingSweepPhases({
+      workspaceDir,
+      pluginConfig: {
+        dreaming: {
+          enabled: true,
+          phases: {
+            light: { enabled: true, limit: 0 },
+            rem: { enabled: true, limit: 5 },
+          },
+        },
+      },
+      logger: logger as never,
+      nowMs,
+    });
+
+    // The cooldown store should NOT have been updated (REM did not run).
+    const storeAfter = await readPhaseCooldownStore(workspaceDir);
+    expect(storeAfter.phases.rem?.lastRunAtMs).toBe(remRunMs);
+
+    // Logger should have captured the REM skip message.
+    expect(
+      logMessages.some((m) => m.includes("rem dreaming skipped") && m.includes("cooldown")),
+    ).toBe(true);
+  });
+
+  it("records phase run and persists cooldown state", async () => {
+    const workspaceDir = await createTempWorkspace("openclaw-dreaming-cooldown-");
+    const { readPhaseCooldownStore, recordPhaseRun } = __testing;
+    const nowMs = DREAMING_TEST_BASE_TIME.getTime();
+
+    await recordPhaseRun(workspaceDir, "light", nowMs);
+    const store = await readPhaseCooldownStore(workspaceDir);
+    expect(store.phases.light?.lastRunAtMs).toBe(nowMs);
+
+    // Record rem phase separately — both should coexist.
+    const laterMs = nowMs + 1000;
+    await recordPhaseRun(workspaceDir, "rem", laterMs);
+    const store2 = await readPhaseCooldownStore(workspaceDir);
+    expect(store2.phases.light?.lastRunAtMs).toBe(nowMs);
+    expect(store2.phases.rem?.lastRunAtMs).toBe(laterMs);
+  });
 });
