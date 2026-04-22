@@ -105,6 +105,15 @@ function containsLegacyFeishuCardCommandValue(node: unknown): boolean {
   return Object.values(node).some((value) => containsLegacyFeishuCardCommandValue(value));
 }
 
+function isValidFeishuCard(card: Record<string, unknown> | undefined): boolean {
+  if (!card) {
+    return false;
+  }
+  // Feishu cards must have at least one key to be valid
+  // Empty objects {} are not valid and will cause 400 errors from Feishu API
+  return Object.keys(card).length > 0;
+}
+
 const meta: ChannelMeta = {
   id: "feishu",
   label: "Feishu",
@@ -695,13 +704,17 @@ export const feishuPlugin: ChannelPlugin<ResolvedFeishuAccount, FeishuProbeResul
             const presentation = normalizeMessagePresentation(ctx.params.presentation);
             const text = readFirstString(ctx.params, ["text", "message"]);
             const mediaUrl = readFeishuMediaParam(ctx.params);
-            const card = presentation
-              ? buildFeishuPresentationCard({ presentation, fallbackText: text })
-              : undefined;
-            if (card && mediaUrl) {
+            const card =
+              presentation !== undefined
+                ? buildFeishuPresentationCard({ presentation, fallbackText: text })
+                : ctx.params.card && typeof ctx.params.card === "object"
+                  ? (ctx.params.card as Record<string, unknown>)
+                  : undefined;
+            const hasValidCard = isValidFeishuCard(card);
+            if (hasValidCard && mediaUrl) {
               throw new Error(`Feishu ${ctx.action} does not support card with media.`);
             }
-            if (!card && !text && !mediaUrl) {
+            if (!hasValidCard && !text && !mediaUrl) {
               throw new Error(`Feishu ${ctx.action} requires text/message, media, or card.`);
             }
             const runtime = await loadFeishuChannelRuntime();
@@ -711,7 +724,7 @@ export const feishuPlugin: ChannelPlugin<ResolvedFeishuAccount, FeishuProbeResul
             }
             const sendMedia = maybeSendMedia;
             let result;
-            if (card) {
+            if (hasValidCard) {
               if (containsLegacyFeishuCardCommandValue(card)) {
                 throw new Error(
                   "Feishu card buttons that trigger text or commands must use structured interaction envelopes.",
@@ -720,7 +733,7 @@ export const feishuPlugin: ChannelPlugin<ResolvedFeishuAccount, FeishuProbeResul
               result = await runtime.sendCardFeishu({
                 cfg: ctx.cfg,
                 to,
-                card,
+                card: card!,
                 accountId: ctx.accountId ?? undefined,
                 replyToMessageId,
                 replyInThread: ctx.action === "thread-reply",
@@ -791,12 +804,13 @@ export const feishuPlugin: ChannelPlugin<ResolvedFeishuAccount, FeishuProbeResul
               ctx.params.card && typeof ctx.params.card === "object"
                 ? (ctx.params.card as Record<string, unknown>)
                 : undefined;
+            const hasValidCard = isValidFeishuCard(card);
             const { editMessageFeishu } = await loadFeishuChannelRuntime();
             const result = await editMessageFeishu({
               cfg: ctx.cfg,
               messageId,
               text,
-              card,
+              card: hasValidCard ? card : undefined,
               accountId: ctx.accountId ?? undefined,
             });
             return jsonActionResult({
