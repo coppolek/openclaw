@@ -9,6 +9,7 @@ let findModelInCatalog: typeof import("./model-catalog.js").findModelInCatalog;
 let loadModelCatalog: typeof import("./model-catalog.js").loadModelCatalog;
 let resetModelCatalogCacheForTest: typeof import("./model-catalog.js").resetModelCatalogCacheForTest;
 let augmentCatalogMock: ReturnType<typeof vi.fn>;
+let resolveProviderPluginsForHooksMock: ReturnType<typeof vi.fn>;
 
 vi.mock("./model-suppression.runtime.js", () => ({
   shouldSuppressBuiltInModel: (params: { provider?: string; id?: string }) =>
@@ -66,6 +67,9 @@ describe("loadModelCatalog", () => {
     vi.doMock("../plugins/provider-runtime.runtime.js", () => ({
       augmentModelCatalogWithProviderPlugins: vi.fn().mockResolvedValue([]),
     }));
+    vi.doMock("../plugins/provider-hook-runtime.js", () => ({
+      resolveProviderPluginsForHooks: vi.fn().mockReturnValue([]),
+    }));
 
     ({
       __setModelCatalogImportForTest,
@@ -75,10 +79,16 @@ describe("loadModelCatalog", () => {
     } = await import("./model-catalog.js"));
     const providerRuntime = await import("../plugins/provider-runtime.runtime.js");
     augmentCatalogMock = vi.mocked(providerRuntime.augmentModelCatalogWithProviderPlugins);
+    const providerHookRuntime = await import("../plugins/provider-hook-runtime.js");
+    resolveProviderPluginsForHooksMock = vi.mocked(
+      providerHookRuntime.resolveProviderPluginsForHooks,
+    );
   });
 
   beforeEach(() => {
     resetModelCatalogCacheForTest();
+    resolveProviderPluginsForHooksMock.mockReset();
+    resolveProviderPluginsForHooksMock.mockReturnValue([]);
   });
 
   afterEach(() => {
@@ -91,6 +101,7 @@ describe("loadModelCatalog", () => {
     vi.doUnmock("./models-config.js");
     vi.doUnmock("./agent-paths.js");
     vi.doUnmock("../plugins/provider-runtime.runtime.js");
+    vi.doUnmock("../plugins/provider-hook-runtime.js");
   });
 
   it("retries after import failure without poisoning the cache", async () => {
@@ -375,6 +386,29 @@ describe("loadModelCatalog", () => {
     );
     expect(matches).toHaveLength(1);
     expect(matches[0]?.name).toBe("Kilo Auto");
+  });
+
+  it("returns partial results when plugin-hook resolution throws during sort", async () => {
+    setLoggerOverride({ level: "silent", consoleLevel: "warn" });
+    try {
+      mockPiDiscoveryModels([
+        { id: "gpt-4.1", provider: "openai", name: "GPT-4.1" },
+        { id: "claude-sonnet-4.6", provider: "anthropic", name: "Claude Sonnet 4.6" },
+      ]);
+      resolveProviderPluginsForHooksMock.mockImplementation(() => {
+        throw new Error("broken provider manifest");
+      });
+
+      const result = await loadModelCatalog({ config: {} as OpenClawConfig });
+
+      expect(result).toEqual([
+        expect.objectContaining({ provider: "anthropic", id: "claude-sonnet-4.6" }),
+        expect.objectContaining({ provider: "openai", id: "gpt-4.1" }),
+      ]);
+    } finally {
+      setLoggerOverride(null);
+      resetLogger();
+    }
   });
 
   it("matches models across canonical provider aliases", () => {

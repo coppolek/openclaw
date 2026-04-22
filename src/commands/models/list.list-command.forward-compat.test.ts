@@ -66,6 +66,8 @@ const mocks = vi.hoisted(() => {
     printModelTable: vi.fn(),
     listProfilesForProvider: vi.fn(),
     resolveModelWithRegistry: vi.fn(),
+    resolveProviderRuntimePlugin: vi.fn(),
+    resolveProviderPluginsForHooks: vi.fn(),
   };
 });
 
@@ -100,6 +102,8 @@ function resetMocks() {
   mocks.printModelTable.mockReset();
   mocks.listProfilesForProvider.mockReturnValue([]);
   mocks.resolveModelWithRegistry.mockReturnValue({ ...OPENAI_CODEX_MODEL });
+  mocks.resolveProviderRuntimePlugin.mockReturnValue(undefined);
+  mocks.resolveProviderPluginsForHooks.mockReturnValue([]);
 }
 
 function createRuntime() {
@@ -150,6 +154,11 @@ function installModelsListCommandForwardCompatMocks() {
     resolveEnvApiKey: vi.fn().mockReturnValue(undefined),
     resolveAwsSdkEnvVarName: vi.fn().mockReturnValue(undefined),
     hasUsableCustomProviderApiKey: vi.fn().mockReturnValue(false),
+  }));
+
+  vi.doMock("../../plugins/provider-hook-runtime.js", () => ({
+    resolveProviderRuntimePlugin: mocks.resolveProviderRuntimePlugin,
+    resolveProviderPluginsForHooks: mocks.resolveProviderPluginsForHooks,
   }));
 }
 
@@ -507,6 +516,90 @@ describe("modelsListCommand forward-compat", () => {
         expect.objectContaining({
           key: "z.ai/glm-4.5",
         }),
+      ]);
+    });
+  });
+
+  describe("preserve-order plugin lookup resilience", () => {
+    it("still prints discovered rows and surfaces a warning when the plugin lookup throws", async () => {
+      const prevExitCode = process.exitCode;
+      process.exitCode = undefined;
+      mocks.resolveConfiguredEntries.mockReturnValueOnce({ entries: [] });
+      mocks.loadModelRegistry.mockResolvedValueOnce({
+        models: [{ ...OPENAI_CODEX_MODEL }],
+        availableKeys: new Set(["openai-codex/gpt-5.4"]),
+        registry: {
+          getAll: () => [{ ...OPENAI_CODEX_MODEL }],
+        },
+      });
+      mocks.resolveProviderRuntimePlugin.mockImplementationOnce(() => {
+        throw new Error("boom: malformed provider manifest");
+      });
+
+      const runtime = createRuntime();
+
+      try {
+        await modelsListCommand(
+          { all: true, provider: "openai-codex", json: true },
+          runtime as never,
+        );
+
+        expect(mocks.printModelTable).toHaveBeenCalled();
+        expect(lastPrintedRows<{ key: string }>()).toEqual([
+          expect.objectContaining({ key: "openai-codex/gpt-5.4" }),
+        ]);
+        expect(process.exitCode).toBeUndefined();
+        const errorCalls = (runtime.error as ReturnType<typeof vi.fn>).mock.calls.map(
+          (call: unknown[]) => String(call[0]),
+        );
+        expect(errorCalls.some((message) => message.includes("falling back to name sort"))).toBe(
+          true,
+        );
+      } finally {
+        process.exitCode = prevExitCode;
+      }
+    });
+  });
+
+  describe("per-provider preserve discovery order", () => {
+    it("preserves curated order for preserve-order providers in unfiltered --all output", async () => {
+      mocks.resolveConfiguredEntries.mockReturnValueOnce({ entries: [] });
+      const deepinfraCurated = [
+        { ...OPENAI_CODEX_MODEL, provider: "deepinfra", id: "z-top-curated" },
+        { ...OPENAI_CODEX_MODEL, provider: "deepinfra", id: "a-second" },
+        { ...OPENAI_CODEX_MODEL, provider: "deepinfra", id: "m-third" },
+      ];
+      const otherProvider = [
+        { ...OPENAI_CODEX_MODEL, provider: "openai-codex", id: "gpt-5.4-pro" },
+        { ...OPENAI_CODEX_MODEL, provider: "openai-codex", id: "gpt-5.4" },
+      ];
+      const allModels = [...deepinfraCurated, ...otherProvider];
+      mocks.loadModelRegistry.mockResolvedValueOnce({
+        models: allModels,
+        availableKeys: new Set(allModels.map((model) => `${model.provider}/${model.id}`)),
+        registry: {
+          getAll: () => allModels,
+        },
+      });
+      mocks.resolveProviderPluginsForHooks.mockReturnValueOnce([
+        {
+          id: "deepinfra",
+          aliases: [],
+          hookAliases: [],
+          catalog: { preserveDiscoveryOrder: true },
+        },
+      ]);
+
+      const runtime = createRuntime();
+      await modelsListCommand({ all: true, json: true }, runtime as never);
+
+      expect(mocks.printModelTable).toHaveBeenCalled();
+      expect(lastPrintedRows<{ key: string }>().map((row) => row.key)).toEqual([
+        "deepinfra/z-top-curated",
+        "deepinfra/a-second",
+        "deepinfra/m-third",
+        "openai-codex/gpt-5.4",
+        "openai-codex/gpt-5.4-pro",
       ]);
     });
   });

@@ -1,5 +1,10 @@
 import type { ModelRegistry } from "@mariozechner/pi-coding-agent";
 import { parseModelRef } from "../../agents/model-selection.js";
+import { normalizeProviderId } from "../../agents/provider-id.js";
+import {
+  resolveProviderPluginsForHooks,
+  resolveProviderRuntimePlugin,
+} from "../../plugins/provider-hook-runtime.js";
 import type { RuntimeEnv } from "../../runtime.js";
 import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
 import { resolveConfiguredEntries } from "./list.configured.js";
@@ -84,10 +89,44 @@ export async function modelsListCommand(
   };
 
   if (opts.all) {
+    const preserveDiscoveryOrderProviders = new Set<string>();
+    try {
+      // When filtered, only the selected provider plugin can contribute the
+      // preserve-order flag. When unfiltered, honor every provider plugin that
+      // opts in so providers like DeepInfra keep their curated upstream order
+      // even in mixed output, matching the ProviderPluginCatalog contract.
+      const plugins =
+        providerFilter !== undefined
+          ? (() => {
+              const plugin = resolveProviderRuntimePlugin({
+                provider: providerFilter,
+                config: cfg,
+              });
+              return plugin ? [plugin] : [];
+            })()
+          : resolveProviderPluginsForHooks({ config: cfg, env: process.env });
+      for (const plugin of plugins) {
+        if (plugin.catalog?.preserveDiscoveryOrder !== true) {
+          continue;
+        }
+        for (const id of [plugin.id, ...(plugin.aliases ?? []), ...(plugin.hookAliases ?? [])]) {
+          const normalized = normalizeProviderId(id);
+          if (normalized) {
+            preserveDiscoveryOrderProviders.add(normalized);
+          }
+        }
+      }
+    } catch (err) {
+      runtime.error(
+        `Provider plugin lookup failed for preserve-order flag; falling back to name sort: ${formatErrorWithStack(err)}`,
+      );
+    }
+
     const seenKeys = appendDiscoveredRows({
       rows,
       models: modelRegistry?.getAll() ?? [],
       context: rowContext,
+      preserveDiscoveryOrderProviders,
     });
 
     if (modelRegistry) {
