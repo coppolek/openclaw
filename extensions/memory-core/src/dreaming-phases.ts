@@ -375,6 +375,7 @@ type DailyIngestionFileState = {
 type DailyIngestionState = {
   version: 1;
   files: Record<string, DailyIngestionFileState>;
+  pendingPaths?: string[];
 };
 
 function resolveDailyIngestionStatePath(workspaceDir: string): string {
@@ -384,10 +385,19 @@ function resolveDailyIngestionStatePath(workspaceDir: string): string {
 function normalizeDailyIngestionState(raw: unknown): DailyIngestionState {
   const record = asRecord(raw);
   const filesRaw = asRecord(record?.files);
+  const pendingPathsRaw = Array.isArray(record?.pendingPaths) ? record.pendingPaths : [];
   if (!filesRaw) {
     return {
       version: 1,
       files: {},
+      ...(pendingPathsRaw.length > 0
+        ? {
+            pendingPaths: [...new Set(pendingPathsRaw.filter((value) => typeof value === "string"))]
+              .map((value) => value.trim())
+              .filter(Boolean)
+              .toSorted(),
+          }
+        : {}),
     };
   }
   const files: Record<string, DailyIngestionFileState> = {};
@@ -410,6 +420,14 @@ function normalizeDailyIngestionState(raw: unknown): DailyIngestionState {
   return {
     version: 1,
     files,
+    ...(pendingPathsRaw.length > 0
+      ? {
+          pendingPaths: [...new Set(pendingPathsRaw.filter((value) => typeof value === "string"))]
+            .map((value) => value.trim())
+            .filter(Boolean)
+            .toSorted(),
+        }
+      : {}),
   };
 }
 
@@ -1045,6 +1063,18 @@ function dailyIngestionFilesEqual(
   });
 }
 
+function dailyIngestionPendingPathsEqual(
+  left: string[] | undefined,
+  right: string[] | undefined,
+): boolean {
+  const leftValues = left ?? [];
+  const rightValues = right ?? [];
+  if (leftValues.length !== rightValues.length) {
+    return false;
+  }
+  return leftValues.every((value, index) => value === rightValues[index]);
+}
+
 async function collectDailyIngestionBatches(params: {
   workspaceDir: string;
   lookbackDays: number;
@@ -1089,6 +1119,7 @@ async function collectDailyIngestionBatches(params: {
 
   const batches: DailyIngestionBatch[] = [];
   const nextFiles: Record<string, DailyIngestionFileState> = {};
+  const pendingPaths = new Set<string>();
   const changedCandidates: DailyIngestionCandidate[] = [];
   let trackedFileCount = 0;
   for (const file of files) {
@@ -1156,6 +1187,8 @@ async function collectDailyIngestionBatches(params: {
     if (exhausted) {
       if (candidate.previous) {
         nextFiles[candidate.relativePath] = candidate.previous;
+      } else {
+        pendingPaths.add(candidate.relativePath);
       }
       continue;
     }
@@ -1187,13 +1220,17 @@ async function collectDailyIngestionBatches(params: {
     }
   }
 
+  const nextPendingPaths = [...pendingPaths].toSorted();
   return {
     batches,
     nextState: {
       version: 1,
       files: nextFiles,
+      ...(nextPendingPaths.length > 0 ? { pendingPaths: nextPendingPaths } : {}),
     },
-    changed: !dailyIngestionFilesEqual(params.state.files, nextFiles),
+    changed:
+      !dailyIngestionFilesEqual(params.state.files, nextFiles) ||
+      !dailyIngestionPendingPathsEqual(params.state.pendingPaths, nextPendingPaths),
   };
 }
 
