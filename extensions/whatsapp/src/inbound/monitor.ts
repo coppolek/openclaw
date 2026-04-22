@@ -32,6 +32,15 @@ import { DisconnectReason, isJidGroup, saveMediaBuffer } from "./runtime-api.js"
 import { createWebSendApi } from "./send-api.js";
 import type { WebInboundMessage, WebListenerCloseReason } from "./types.js";
 
+export type HealthProbeState = {
+  lastProbeAt: number | null;
+  ok: boolean;
+  error?: string;
+};
+
+const HEALTH_PROBE_INTERVAL_MS = 60_000;
+const HEALTH_PROBE_TIMEOUT_MS = 10_000;
+
 const LOGGED_OUT_STATUS = DisconnectReason?.loggedOut ?? 401;
 const RECONNECT_IN_PROGRESS_ERROR = "no active socket - reconnection in progress";
 
@@ -672,6 +681,81 @@ export async function attachWebInboxToSocket(
     handleConnectionUpdate as unknown as (...args: unknown[]) => void,
   );
 
+  // Application-level health probe: periodically call fetchStatus(selfJid)
+  // to verify the WA server is responding, not just that the socket is alive.
+  const healthProbeState: HealthProbeState = { lastProbeAt: null, ok: true };
+  const selfJid = self.jid ?? sock.user?.id ?? null;
+  let healthProbeInterval: ReturnType<typeof setInterval> | null = null;
+  let probeClosed = false;
+  let probeInFlight = false;
+  let consecutiveFailures = 0;
+
+  if (selfJid && typeof sock.fetchStatus === "function") {
+    const doProbe = async () => {
+      if (probeClosed || probeInFlight) {
+        return;
+      }
+      probeInFlight = true;
+      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+      let timedOut = false;
+      let fetchPromise: Promise<unknown> | null = null;
+      try {
+        fetchPromise = sock.fetchStatus(selfJid);
+        const timeout = new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(() => {
+            timedOut = true;
+            reject(new Error("probe timeout"));
+          }, HEALTH_PROBE_TIMEOUT_MS);
+        });
+        await Promise.race([fetchPromise, timeout]);
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+        }
+        if (probeClosed) {
+          return;
+        }
+        healthProbeState.lastProbeAt = Date.now();
+        healthProbeState.ok = true;
+        healthProbeState.error = undefined;
+        consecutiveFailures = 0;
+        if (shouldLogVerbose()) {
+          logVerbose("WA health probe: ok");
+        }
+      } catch (err) {
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+        }
+        if (probeClosed) {
+          return;
+        }
+        healthProbeState.lastProbeAt = Date.now();
+        healthProbeState.ok = false;
+        healthProbeState.error = String(err);
+        consecutiveFailures++;
+        inboundLogger.warn({ error: String(err), consecutiveFailures }, "WA health probe failed");
+
+        if (consecutiveFailures >= 3) {
+          inboundLogger.warn(
+            { consecutiveFailures },
+            "WA health probe: 3 consecutive failures, triggering reconnect",
+          );
+          resolveClose({ status: 499, isLoggedOut: false, error: "health probe failures" });
+        }
+      } finally {
+        if (timedOut && fetchPromise) {
+          // fetchStatus is still pending but timed out — release the lock immediately
+          // so future probes can run, but let the hung promise clean up on its own.
+          probeInFlight = false;
+          void fetchPromise.catch(() => {}); // Prevent unhandled rejection
+        } else {
+          probeInFlight = false;
+        }
+      }
+    };
+    void doProbe();
+    healthProbeInterval = setInterval(() => void doProbe(), HEALTH_PROBE_INTERVAL_MS);
+  }
+
   void (async () => {
     try {
       const groups = await sock.groupFetchAllParticipating();
@@ -707,6 +791,15 @@ export async function attachWebInboxToSocket(
   return {
     close: async () => {
       try {
+        if (healthProbeInterval) {
+          clearInterval(healthProbeInterval);
+          healthProbeInterval = null;
+        }
+        probeClosed = true;
+        // Note: Don't clear _activeProbeTimeout here. If a probe is in-flight
+        // awaiting Promise.race([fetchStatus, timeout]) and fetchStatus is hung,
+        // clearing the timeout removes the only settle path for the race.
+        // Let the timeout fire normally; probeClosed guard prevents state mutations.
         detachMessagesUpsert();
         detachConnectionUpdate();
         closeInboundMonitorSocket(sock);
@@ -718,6 +811,7 @@ export async function attachWebInboxToSocket(
     signalClose: (reason?: WebListenerCloseReason) => {
       resolveClose(reason ?? { status: undefined, isLoggedOut: false, error: "closed" });
     },
+    getHealthProbeState: (): HealthProbeState => ({ ...healthProbeState }),
     // IPC surface (sendMessage/sendPoll/sendReaction/sendComposingTo)
     ...sendApi,
   } as const;
