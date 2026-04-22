@@ -15,6 +15,8 @@ type ExecApprovalsModule = typeof import("./exec-approvals.js");
 
 let addAllowlistEntry: ExecApprovalsModule["addAllowlistEntry"];
 let addDurableCommandApproval: ExecApprovalsModule["addDurableCommandApproval"];
+let assertNoSymlinkPathComponents: ExecApprovalsModule["assertNoSymlinkPathComponents"];
+let assertSecureOwnership: ExecApprovalsModule["assertSecureOwnership"];
 let ensureExecApprovals: ExecApprovalsModule["ensureExecApprovals"];
 let mergeExecApprovalsSocketDefaults: ExecApprovalsModule["mergeExecApprovalsSocketDefaults"];
 let normalizeExecApprovals: ExecApprovalsModule["normalizeExecApprovals"];
@@ -34,6 +36,8 @@ beforeAll(async () => {
   ({
     addAllowlistEntry,
     addDurableCommandApproval,
+    assertNoSymlinkPathComponents,
+    assertSecureOwnership,
     ensureExecApprovals,
     mergeExecApprovalsSocketDefaults,
     normalizeExecApprovals,
@@ -187,17 +191,132 @@ describe("exec approvals store helpers", () => {
     expect(fs.readFileSync(targetPath, "utf8")).toBe('{"sentinel":true}\n');
   });
 
-  it("refuses to traverse a symlinked parent component in the approvals path", () => {
+  it("allows a symlinked OPENCLAW_HOME (top-level symlink is resolved)", () => {
     const realHome = makeTempDir();
     const linkedHome = `${realHome}-link`;
-    tempDirs.push(realHome);
+    tempDirs.push(realHome, linkedHome);
     fs.symlinkSync(realHome, linkedHome);
     process.env.OPENCLAW_HOME = linkedHome;
 
+    // A symlinked OPENCLAW_HOME should be resolved and accepted
+    saveExecApprovals({ version: 1, defaults: { security: "full" }, agents: {} });
+    expect(fs.existsSync(path.join(realHome, ".openclaw"))).toBe(true);
+  });
+
+  it("allows a symlinked .openclaw directory under OPENCLAW_HOME (dotfile manager)", () => {
+    const realHome = makeTempDir();
+    // Create the real .openclaw target elsewhere
+    const realOcDir = path.join(realHome, "real-openclaw-dir");
+    fs.mkdirSync(realOcDir, { recursive: true });
+    // Make .openclaw a symlink inside the home dir (GNU Stow / dotfile manager)
+    const symlinkOcDir = path.join(realHome, ".openclaw");
+    fs.symlinkSync(realOcDir, symlinkOcDir);
+    process.env.OPENCLAW_HOME = realHome;
+
+    // A symlinked .openclaw should be resolved and accepted
+    saveExecApprovals({ version: 1, defaults: { security: "full" }, agents: {} });
+    expect(fs.existsSync(path.join(realOcDir, "exec-approvals.json"))).toBe(true);
+  });
+
+  it("refuses a symlinked .openclaw whose target is not owned by the current user", () => {
+    // Skip on Windows where process.getuid is unavailable
+    if (typeof process.getuid !== "function") {
+      return;
+    }
+
+    const realHome = makeTempDir();
+    const realOcDir = path.join(realHome, "real-openclaw-dir");
+    fs.mkdirSync(realOcDir, { recursive: true });
+    const symlinkOcDir = path.join(realHome, ".openclaw");
+    fs.symlinkSync(realOcDir, symlinkOcDir);
+    process.env.OPENCLAW_HOME = realHome;
+
+    // Mock statSync to return a different uid for the resolved .openclaw target
+    const originalStatSync = fs.statSync;
+    const spy = vi
+      .spyOn(fs, "statSync")
+      .mockImplementation((...args: Parameters<typeof fs.statSync>) => {
+        const result = originalStatSync(...args);
+        // When checking the resolved .openclaw target, fake a different uid
+        if (String(args[0]).includes("real-openclaw-dir")) {
+          const fakeUid = (process.getuid!() ?? 0) + 999;
+          Object.defineProperty(result, "uid", { value: fakeUid });
+        }
+        return result;
+      });
+
     expect(() =>
       saveExecApprovals({ version: 1, defaults: { security: "full" }, agents: {} }),
+    ).toThrow(/target not owned by current user/);
+    spy.mockRestore();
+  });
+
+  it("refuses a symlinked .openclaw whose target is group/other-writable", () => {
+    // Skip on Windows where process.getuid is unavailable
+    if (typeof process.getuid !== "function") return;
+
+    const realHome = makeTempDir();
+    const realOcDir = path.join(realHome, "real-openclaw-dir");
+    fs.mkdirSync(realOcDir, { recursive: true });
+    // Make the target group-writable (0o775)
+    fs.chmodSync(realOcDir, 0o775);
+    const symlinkOcDir = path.join(realHome, ".openclaw");
+    fs.symlinkSync(realOcDir, symlinkOcDir);
+    process.env.OPENCLAW_HOME = realHome;
+
+    expect(() =>
+      saveExecApprovals({ version: 1, defaults: { security: "full" }, agents: {} }),
+    ).toThrow(/target is group\/other-writable/);
+  });
+
+  it("refuses a symlinked OPENCLAW_HOME whose target is not owned by the current user", () => {
+    // Skip on Windows where process.getuid is unavailable
+    if (typeof process.getuid !== "function") return;
+
+    const realHome = makeTempDir();
+    // Resolve through any OS-level symlinks (e.g. /var -> /private/var on macOS)
+    const resolvedRealHome = fs.realpathSync(realHome);
+    const linkedHome = `${realHome}-link`;
+    tempDirs.push(linkedHome);
+    fs.symlinkSync(realHome, linkedHome);
+    process.env.OPENCLAW_HOME = linkedHome;
+
+    // Mock statSync to return a different uid for the resolved OPENCLAW_HOME target
+    const originalStatSync = fs.statSync;
+    const spy = vi
+      .spyOn(fs, "statSync")
+      .mockImplementation((...args: Parameters<typeof fs.statSync>) => {
+        const result = originalStatSync(...args);
+        if (String(args[0]) === resolvedRealHome) {
+          const fakeUid = (process.getuid!() ?? 0) + 999;
+          Object.defineProperty(result, "uid", { value: fakeUid });
+        }
+        return result;
+      });
+
+    expect(() =>
+      saveExecApprovals({ version: 1, defaults: { security: "full" }, agents: {} }),
+    ).toThrow(/target not owned by current user/);
+    spy.mockRestore();
+  });
+
+  it("refuses to traverse a symlink deeper inside the .openclaw directory", () => {
+    const realHome = makeTempDir();
+    const ocDir = path.join(realHome, ".openclaw");
+    fs.mkdirSync(ocDir, { recursive: true });
+    // Create a symlinked subdirectory inside .openclaw
+    const realSubDir = path.join(realHome, "elsewhere");
+    fs.mkdirSync(realSubDir);
+    const linkedSubDir = path.join(ocDir, "subdir");
+    fs.symlinkSync(realSubDir, linkedSubDir);
+
+    // Directly test the guard function with a path that traverses the
+    // deeper symlink. The exec-approvals.json path itself doesn't go
+    // through "subdir", but assertNoSymlinkPathComponents must reject
+    // any path that does — this protects against future deeper paths.
+    expect(() =>
+      assertNoSymlinkPathComponents(path.join(ocDir, "subdir", "some-file.json"), realHome),
     ).toThrow(/Refusing to traverse symlink in exec approvals path/);
-    expect(fs.existsSync(path.join(realHome, ".openclaw"))).toBe(false);
   });
 
   it("adds trimmed allowlist entries once and persists generated ids", () => {

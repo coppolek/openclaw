@@ -231,30 +231,92 @@ function ensureDir(filePath: string) {
   const dir = path.dirname(filePath);
   assertNoSymlinkPathComponents(dir, resolveRequiredHomeDir());
   fs.mkdirSync(dir, { recursive: true });
-  const dirStat = fs.lstatSync(dir);
-  if (!dirStat.isDirectory() || dirStat.isSymbolicLink()) {
+  // Use statSync (not lstatSync) so that a symlinked top-level ~/.openclaw
+  // directory is followed to its real target. assertNoSymlinkPathComponents
+  // already guards against symlinks *inside* the resolved root.
+  const dirStat = fs.statSync(dir);
+  if (!dirStat.isDirectory()) {
     throw new Error(`Refusing to use unsafe exec approvals directory: ${dir}`);
   }
   return dir;
 }
 
-function assertNoSymlinkPathComponents(targetPath: string, trustedRoot: string): void {
+/**
+ * On Unix, verify that the given path is owned by the current user and is not
+ * group/other-writable (rejects mode bits 0o022). On Windows this is a no-op
+ * since `process.getuid` is unavailable.
+ * @internal Exported for testing only.
+ */
+export function assertSecureOwnership(resolvedPath: string, label: string): void {
+  const currentUid = process.getuid?.();
+  if (currentUid === undefined) return; // Windows — skip
+  const stat = fs.statSync(resolvedPath);
+  if (stat.uid !== currentUid) {
+    throw new Error(
+      `Refusing to follow ${label} symlink: target not owned by current user: ${resolvedPath}`,
+    );
+  }
+  // eslint-disable-next-line no-bitwise
+  if (stat.mode & 0o022) {
+    throw new Error(
+      `Refusing to follow ${label} symlink: target is group/other-writable: ${resolvedPath}`,
+    );
+  }
+}
+
+/** @internal Exported for testing only. */
+export function assertNoSymlinkPathComponents(targetPath: string, trustedRoot: string): void {
   const resolvedTarget = path.resolve(targetPath);
-  const resolvedRoot = path.resolve(trustedRoot);
-  if (resolvedTarget !== resolvedRoot && !resolvedTarget.startsWith(`${resolvedRoot}${path.sep}`)) {
-    return;
+  const lexicalRoot = path.resolve(trustedRoot);
+
+  // If trustedRoot itself is a symlink, resolve and validate ownership + permissions.
+  try {
+    const rootLstat = fs.lstatSync(lexicalRoot);
+    if (rootLstat.isSymbolicLink()) {
+      const resolvedRoot = fs.realpathSync(lexicalRoot);
+      assertSecureOwnership(resolvedRoot, "OPENCLAW_HOME");
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw err;
+    }
   }
 
-  const relative = path.relative(resolvedRoot, resolvedTarget);
+  if (resolvedTarget !== lexicalRoot && !resolvedTarget.startsWith(`${lexicalRoot}${path.sep}`)) {
+    return; // outside trusted root, skip check
+  }
+
+  const relative = path.relative(lexicalRoot, resolvedTarget);
   const segments = relative && relative !== "." ? relative.split(path.sep) : [];
-  let current = resolvedRoot;
-  for (const segment of [".", ...segments]) {
-    if (segment !== ".") {
-      current = path.join(current, segment);
-    }
+
+  // Walk from the lexical root through each child segment, but allow
+  // the immediate first child to be a symlink when it is the well-known
+  // .openclaw config directory. This supports setups where ~/.openclaw is
+  // a symlink managed by GNU Stow or similar dotfile managers.
+  let current = lexicalRoot;
+  for (let i = 0; i < segments.length; i++) {
+    current = path.join(current, segments[i]);
     try {
       const stat = fs.lstatSync(current);
       if (stat.isSymbolicLink()) {
+        // Allow the first-level .openclaw symlink directly under the home dir
+        if (i === 0 && segments[i] === ".openclaw") {
+          // Resolve through the symlink and continue checking from the real path
+          let resolved: string;
+          try {
+            resolved = fs.realpathSync(current);
+          } catch {
+            // If realpathSync fails, the original error applies
+            throw new Error(`Refusing to traverse symlink in exec approvals path: ${current}`);
+          }
+          // On Unix, verify the symlink target is owned by the current user
+          // and is not group/other-writable, to prevent tampering in
+          // multi-user setups. On Windows, process.getuid is unavailable;
+          // skip the check (NTFS symlinks already require elevated privileges).
+          assertSecureOwnership(resolved, ".openclaw");
+          current = resolved;
+          continue;
+        }
         throw new Error(`Refusing to traverse symlink in exec approvals path: ${current}`);
       }
     } catch (err) {
