@@ -13,6 +13,7 @@ export type DoctorConfigResult = {
   path?: string;
   shouldWriteConfig?: boolean;
   sourceConfigValid?: boolean;
+  sourceConfig?: Record<string, unknown>;
 };
 
 export type DoctorHealthFlowContext = {
@@ -461,7 +462,125 @@ async function runWriteConfigHealth(ctx: DoctorHealthFlowContext): Promise<void>
       command: "doctor",
       mode: resolveDoctorMode(ctx.cfg),
     });
-    await writeConfigFile(ctx.cfg);
+    // Merge with source config to preserve unknown keys during repair.
+    // We must not parse or validate runtime config here because that would
+    // trigger strict schema parsing on invalid configs (causing doctor to
+    // crash on the very files it should repair). The previous approach used
+    // runtime-shape merge utilities, but they required access to the runtime
+    // parse which is unsafe in this context. Instead we perform a safe,
+    // isolated deep merge that only restores truly unknown top-level keys from
+    // the original source config and never resurrects known/deprecated core
+    // keys that the doctor intentionally removed.
+    //
+    // Rule:
+    // - For each top-level key in the source config:
+    //   - if the key is unknown (not part of the standard OpenClaw top-level
+    //     schema), deep-merge/preserve it onto the repaired config.
+    //   - if the key is known, do not copy anything from the source (this
+    //     prevents resurrecting deleted core keys).
+    if (ctx.configResult.sourceConfig) {
+      const KNOWN_TOP_LEVEL = new Set<string>([
+        "$schema",
+        "meta",
+        "auth",
+        "acp",
+        "env",
+        "wizard",
+        "diagnostics",
+        "logging",
+        "cli",
+        "update",
+        "browser",
+        "ui",
+        "secrets",
+        "skills",
+        "plugins",
+        "surfaces",
+        "models",
+        "nodeHost",
+        "agents",
+        "tools",
+        "bindings",
+        "broadcast",
+        "audio",
+        "media",
+        "messages",
+        "commands",
+        "approvals",
+        "session",
+        "web",
+        "channels",
+        "cron",
+        "hooks",
+        "discovery",
+        "canvasHost",
+        "talk",
+        "gateway",
+        "memory",
+        "mcp",
+        // Legacy roots that may have been removed by doctor; treat them as
+        // known top-level keys to avoid resurrecting them from disk.
+        "memorySearch",
+        "heartbeat",
+      ]);
+
+      const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+        !!v && typeof v === "object" && !Array.isArray(v);
+
+      const deepMergeInto = (target: unknown, source: unknown): void => {
+        if (!isPlainObject(source)) {
+          return;
+        }
+        if (!isPlainObject(target)) {
+          return;
+        }
+        const t = target;
+        const s = source;
+        for (const [k, v] of Object.entries(s)) {
+          // Prevent prototype pollution via specially-named keys.
+          if (k === "__proto__" || k === "constructor" || k === "prototype") {
+            continue;
+          }
+          if (isPlainObject(v)) {
+            if (!isPlainObject(t[k])) {
+              t[k] = structuredClone(v);
+            } else {
+              deepMergeInto(t[k], v);
+            }
+          } else if (Array.isArray(v)) {
+            if (t[k] === undefined) {
+              t[k] = structuredClone(v);
+            }
+          } else {
+            if (t[k] === undefined) {
+              t[k] = v;
+            }
+          }
+        }
+      };
+
+      const src = ctx.configResult.sourceConfig;
+      for (const [key, val] of Object.entries(src)) {
+        // Block prototype-pollution style keys
+        if (key === "__proto__" || key === "constructor" || key === "prototype") {
+          continue;
+        }
+        if (!KNOWN_TOP_LEVEL.has(key)) {
+          const cfgRecord = ctx.cfg as Record<string, unknown>;
+          if (cfgRecord[key] === undefined) {
+            cfgRecord[key] = structuredClone(val);
+          } else {
+            deepMergeInto(cfgRecord[key], val);
+          }
+        }
+      }
+    }
+    // When doctor repairs the on-disk config we may intentionally preserve
+    // unknown/custom top-level keys that the strict runtime schema would
+    // otherwise reject. We must not call the runtime parser here; instead
+    // persist the merged result and skip strict validation. The write helper
+    // supports skipValidation for this purpose.
+    await writeConfigFile(ctx.cfg, { skipValidation: true, skipRuntimeSnapshotRefresh: true });
     logConfigUpdated(ctx.runtime);
     const backupPath = `${CONFIG_PATH}.bak`;
     if (fs.existsSync(backupPath)) {

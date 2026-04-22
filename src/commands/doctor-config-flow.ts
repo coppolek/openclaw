@@ -2,6 +2,11 @@ import { formatCliCommand } from "../cli/command-format.js";
 import { findLegacyConfigIssues } from "../config/legacy.js";
 import { CONFIG_PATH } from "../config/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { isPlainObject } from "../infra/plain-object.js";
+import {
+  collectRelevantDoctorPluginIds,
+  listPluginDoctorLegacyConfigRules,
+} from "../plugins/doctor-contract-registry.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { note } from "../terminal/note.js";
 import { noteOpencodeProviderOverrides } from "./doctor-config-analysis.js";
@@ -255,5 +260,9 @@ export async function loadAndMaybeMigrateDoctorConfig(params: {
     path: snapshot.path ?? CONFIG_PATH,
     shouldWriteConfig: finalized.shouldWriteConfig,
     sourceConfigValid: snapshot.valid,
+    // Only forward parsed source config when it's a plain object. If the
+    // file parsed to an array (malformed) or other value, avoid exposing it
+    // to downstream write/merge logic which expects an object.
+    sourceConfig: isPlainObject(snapshot.parsed) ? snapshot.parsed : undefined,
   };
 }
