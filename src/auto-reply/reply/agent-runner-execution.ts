@@ -1286,9 +1286,11 @@ export async function runAgentTurnWithFallback(params: {
 
       // Some embedded runs surface context overflow as an error payload instead of throwing.
       // Treat those as a session-level failure and auto-recover by starting a fresh session.
+      // Plugin-blocked errors are intentional policy decisions — never treat as overflow.
       const embeddedError = runResult.meta?.error;
       if (
         embeddedError &&
+        (embeddedError as { kind?: string }).kind !== "plugin_blocked" &&
         isContextOverflowError(embeddedError.message) &&
         !didResetAfterCompactionFailure &&
         (await params.resetSessionAfterCompactionFailure(embeddedError.message))
@@ -1532,6 +1534,13 @@ export async function runAgentTurnWithFallback(params: {
   const finalEmbeddedError = runResult?.meta?.error;
   const hasPayloadText = runResult?.payloads?.some((p) => normalizeOptionalString(p.text));
   if (finalEmbeddedError && !hasPayloadText) {
+    // Plugin-blocked errors are intentional — not overflow.
+    if ((finalEmbeddedError as { kind?: string }).kind === "plugin_blocked") {
+      return {
+        kind: "final",
+        payload: { text: finalEmbeddedError.message ?? "Blocked by security policy." },
+      };
+    }
     const errorMsg = finalEmbeddedError.message ?? "";
     if (isContextOverflowError(errorMsg)) {
       params.replyOperation?.fail("run_failed", finalEmbeddedError);
@@ -1569,8 +1578,13 @@ export async function runAgentTurnWithFallback(params: {
           (p) => p.isError && hasNonEmptyString(p.text) && !p.text.startsWith("⚠️"),
         )?.text ?? "";
       const errorCandidate = metaErrorMsg || rawErrorPayloadText;
+      // Plugin-blocked errors are intentional policy decisions — never rewrite
+      // them as rate-limit/overload messages even if the block reason text
+      // happens to contain matching phrases.
+      const isPluginBlocked = (finalEmbeddedError as { kind?: string })?.kind === "plugin_blocked";
       if (
         errorCandidate &&
+        !isPluginBlocked &&
         (isRateLimitErrorMessage(errorCandidate) || isOverloadedErrorMessage(errorCandidate))
       ) {
         const isOverloaded = isOverloadedErrorMessage(errorCandidate);

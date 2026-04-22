@@ -78,6 +78,7 @@ import { log } from "./logger.js";
 import { resolveModelAsync } from "./model.js";
 import { createEmbeddedRunReplayState, observeReplayMetadata } from "./replay-state.js";
 import { handleAssistantFailover } from "./run/assistant-failover.js";
+import { PluginBlockedError } from "./run/attempt.js";
 import { createEmbeddedRunAuthController } from "./run/auth-controller.js";
 import { runEmbeddedAttemptWithBackend } from "./run/backend.js";
 import { createFailoverDecisionLogger } from "./run/failover-observation.js";
@@ -852,7 +853,8 @@ export async function runEmbeddedPiAgent(
             !attempt.didSendDeterministicApprovalPrompt &&
             !attempt.lastToolError &&
             attempt.toolMetas.length === 0 &&
-            attempt.assistantTexts.length === 0;
+            attempt.assistantTexts.length === 0 &&
+            !attempt.wasOutputModifiedByPlugin;
           if (preflightRecovery?.handled) {
             log.info(
               `[context-overflow-precheck] early recovery route=${preflightRecovery.route} ` +
@@ -983,6 +985,12 @@ export async function runEmbeddedPiAgent(
           const contextOverflowError = !aborted
             ? (() => {
                 if (promptError) {
+                  // Plugin block decisions are not overflow errors — skip overflow
+                  // classification so the dedicated PluginBlockedError handler below
+                  // processes them correctly.
+                  if (promptError instanceof PluginBlockedError) {
+                    return null;
+                  }
                   const errorText = formatErrorMessage(promptError);
                   if (isLikelyContextOverflowError(errorText)) {
                     return { text: errorText, source: "promptError" as const };
@@ -1235,6 +1243,33 @@ export async function runEmbeddedPiAgent(
           }
 
           if (promptError && !aborted && promptErrorSource !== "compaction") {
+            // Plugin-blocked calls are intentional policy decisions, not transient
+            // provider failures. Skip all failover/retry classification so the
+            // block reason text is not misinterpreted as auth/rate-limit/timeout.
+            if (promptError instanceof PluginBlockedError) {
+              return {
+                payloads: [
+                  {
+                    text: promptError.message,
+                    isError: true,
+                  },
+                ],
+                meta: {
+                  durationMs: Date.now() - started,
+                  agentMeta: buildErrorAgentMeta({
+                    sessionId: sessionIdUsed,
+                    provider,
+                    model: model.id,
+                    usageAccumulator,
+                    lastRunPromptUsage,
+                    lastAssistant: sessionLastAssistant,
+                    lastTurnTotal,
+                  }),
+                  systemPromptReport: attempt.systemPromptReport,
+                  error: { kind: "plugin_blocked", message: promptError.message },
+                },
+              };
+            }
             // Normalize wrapped errors (e.g. abort-wrapped RESOURCE_EXHAUSTED) into
             // FailoverError so rate-limit classification works even for nested shapes.
             //

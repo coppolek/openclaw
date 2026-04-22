@@ -129,6 +129,7 @@ export const isPluginHookName = (hookName: unknown): hookName is PluginHookName 
 export const PROMPT_INJECTION_HOOK_NAMES = [
   "before_prompt_build",
   "before_agent_start",
+  "llm_input",
 ] as const satisfies readonly PluginHookName[];
 
 export type PromptInjectionHookName = (typeof PROMPT_INJECTION_HOOK_NAMES)[number];
@@ -172,6 +173,17 @@ export type PluginHookLlmInputEvent = {
   imagesCount: number;
 };
 
+export type PluginHookLlmInputResult = {
+  /** If true, the LLM call is blocked entirely. */
+  block?: boolean;
+  /** Reason for blocking — logged and surfaced to the user. */
+  blockReason?: string;
+  /** Override the prompt text sent to the LLM. */
+  prompt?: string;
+  /** Override the system prompt sent to the LLM. */
+  systemPrompt?: string;
+};
+
 export type PluginHookLlmOutputEvent = {
   runId: string;
   sessionId: string;
@@ -186,6 +198,11 @@ export type PluginHookLlmOutputEvent = {
     cacheWrite?: number;
     total?: number;
   };
+};
+
+export type PluginHookLlmOutputResult = {
+  /** Replace the assistant response texts. Useful for redaction or filtering. */
+  assistantTexts?: string[];
 };
 
 export type PluginHookAgentEndEvent = {
@@ -592,11 +609,14 @@ export type PluginHookHandlerMap = {
     event: PluginHookBeforeAgentReplyEvent,
     ctx: PluginHookAgentContext,
   ) => Promise<PluginHookBeforeAgentReplyResult | void> | PluginHookBeforeAgentReplyResult | void;
-  llm_input: (event: PluginHookLlmInputEvent, ctx: PluginHookAgentContext) => Promise<void> | void;
+  llm_input: (
+    event: PluginHookLlmInputEvent,
+    ctx: PluginHookAgentContext,
+  ) => Promise<PluginHookLlmInputResult | void> | PluginHookLlmInputResult | void;
   llm_output: (
     event: PluginHookLlmOutputEvent,
     ctx: PluginHookAgentContext,
-  ) => Promise<void> | void;
+  ) => Promise<PluginHookLlmOutputResult | void> | PluginHookLlmOutputResult | void;
   agent_end: (event: PluginHookAgentEndEvent, ctx: PluginHookAgentContext) => Promise<void> | void;
   before_compaction: (
     event: PluginHookBeforeCompactionEvent,
