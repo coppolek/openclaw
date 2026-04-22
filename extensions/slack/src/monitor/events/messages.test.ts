@@ -8,8 +8,8 @@ const messageQueueMock = vi.fn();
 const messageAllowMock = vi.fn();
 
 async function createChannelRuntimeMock() {
-  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/infra-runtime")>(
-    "openclaw/plugin-sdk/infra-runtime",
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/system-events")>(
+    "openclaw/plugin-sdk/system-events",
   );
   return {
     ...actual,
@@ -17,12 +17,12 @@ async function createChannelRuntimeMock() {
   };
 }
 
-vi.mock("openclaw/plugin-sdk/infra-runtime", createChannelRuntimeMock);
-vi.mock("openclaw/plugin-sdk/infra-runtime.js", createChannelRuntimeMock);
+vi.mock("openclaw/plugin-sdk/system-events", createChannelRuntimeMock);
+vi.mock("openclaw/plugin-sdk/system-events.js", createChannelRuntimeMock);
 
-vi.mock("openclaw/plugin-sdk/conversation-runtime", async () => {
-  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/conversation-runtime")>(
-    "openclaw/plugin-sdk/conversation-runtime",
+vi.mock("openclaw/plugin-sdk/channel-pairing", async () => {
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/channel-pairing")>(
+    "openclaw/plugin-sdk/channel-pairing",
   );
   return {
     ...actual,
