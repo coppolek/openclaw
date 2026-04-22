@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { isTruthyEnvValue, logAcceptedEnvOption } from "../../infra/env.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { CONFIG_DIR, resolveUserPath } from "../../utils.js";
@@ -27,6 +28,8 @@ type SkillsWatchState = {
   watcher: FSWatcher;
   pathsKey: string;
   debounceMs: number;
+  usePolling: boolean;
+  interval?: number;
   timer?: ReturnType<typeof setTimeout>;
   pendingPath?: string;
 };
@@ -52,6 +55,36 @@ export const DEFAULT_SKILLS_WATCH_IGNORED: RegExp[] = [
   /(^|[\\/])build([\\/]|$)/,
   /(^|[\\/])\.cache([\\/]|$)/,
 ];
+
+const SKILLS_WATCH_POLLING_ENV = "OPENCLAW_SKILLS_WATCH_POLLING";
+const SKILLS_WATCH_POLL_INTERVAL_ENV = "OPENCLAW_SKILLS_WATCH_POLL_INTERVAL_MS";
+
+function resolveSkillsWatchPollingEnabled(): boolean {
+  const enabled = isTruthyEnvValue(process.env[SKILLS_WATCH_POLLING_ENV]);
+  if (enabled) {
+    logAcceptedEnvOption({
+      key: SKILLS_WATCH_POLLING_ENV,
+      description: "enable chokidar polling fallback for the skills watcher",
+    });
+  }
+  return enabled;
+}
+
+function resolveSkillsWatchPollIntervalMs(): number | undefined {
+  const raw = process.env[SKILLS_WATCH_POLL_INTERVAL_ENV];
+  if (!raw?.trim()) {
+    return undefined;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    return undefined;
+  }
+  logAcceptedEnvOption({
+    key: SKILLS_WATCH_POLL_INTERVAL_ENV,
+    description: "set the chokidar polling interval for the skills watcher in milliseconds",
+  });
+  return Math.floor(value);
+}
 
 function resolveWatchPaths(workspaceDir: string, config?: OpenClawConfig): string[] {
   const paths: string[] = [];
@@ -118,7 +151,15 @@ export function ensureSkillsWatcher(params: { workspaceDir: string; config?: Ope
 
   const watchTargets = resolveWatchTargets(workspaceDir, params.config);
   const pathsKey = watchTargets.join("|");
-  if (existing && existing.pathsKey === pathsKey && existing.debounceMs === debounceMs) {
+  const usePolling = resolveSkillsWatchPollingEnabled();
+  const interval = usePolling ? resolveSkillsWatchPollIntervalMs() : undefined;
+  if (
+    existing &&
+    existing.pathsKey === pathsKey &&
+    existing.debounceMs === debounceMs &&
+    existing.usePolling === usePolling &&
+    existing.interval === interval
+  ) {
     return;
   }
   if (existing) {
@@ -135,12 +176,14 @@ export function ensureSkillsWatcher(params: { workspaceDir: string; config?: Ope
       stabilityThreshold: debounceMs,
       pollInterval: 100,
     },
+    usePolling,
+    ...(typeof interval === "number" ? { interval } : {}),
     // Avoid FD exhaustion on macOS when a workspace contains huge trees.
     // This watcher only needs to react to SKILL.md changes.
     ignored: DEFAULT_SKILLS_WATCH_IGNORED,
   });
 
-  const state: SkillsWatchState = { watcher, pathsKey, debounceMs };
+  const state: SkillsWatchState = { watcher, pathsKey, debounceMs, usePolling, interval };
 
   const schedule = (changedPath?: string) => {
     state.pendingPath = changedPath ?? state.pendingPath;
