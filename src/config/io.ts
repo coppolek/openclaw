@@ -109,6 +109,7 @@ export { resolveShellEnvExpectedKeys } from "./shell-env-expected-keys.js";
 
 const CONFIG_HEALTH_STATE_FILENAME = "config-health.json";
 const loggedInvalidConfigs = new Set<string>();
+const loggedConfigWarningFingerprints = new Map<string, string>();
 
 type ConfigHealthFingerprint = {
   hash: string;
@@ -893,6 +894,30 @@ function warnIfConfigFromFuture(cfg: OpenClawConfig, logger: Pick<typeof console
   }
 }
 
+function logConfigWarningsOnce(params: {
+  configPath: string;
+  hash: string;
+  warnings: Array<{ path: string; message: string }>;
+  logger: Pick<typeof console, "warn">;
+}): void {
+  if (params.warnings.length === 0) {
+    loggedConfigWarningFingerprints.delete(params.configPath);
+    return;
+  }
+  const details = params.warnings
+    .map(
+      (warning) =>
+        `- ${sanitizeTerminalText(warning.path || "<root>")}: ${sanitizeTerminalText(warning.message)}`,
+    )
+    .join("\n");
+  const fingerprint = `${params.hash}\n${details}`;
+  if (loggedConfigWarningFingerprints.get(params.configPath) === fingerprint) {
+    return;
+  }
+  loggedConfigWarningFingerprints.set(params.configPath, fingerprint);
+  params.logger.warn(`Config warnings:\n${details}`);
+}
+
 function resolveConfigPathForDeps(deps: Required<ConfigIoDeps>): string {
   if (deps.configPath) {
     return deps.configPath;
@@ -1107,6 +1132,7 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
     try {
       maybeLoadDotEnvForConfig(deps.env);
       if (!deps.fs.existsSync(configPath)) {
+        loggedConfigWarningFingerprints.delete(configPath);
         if (shouldEnableShellEnvFallback(deps.env) && !shouldDeferShellEnvFallback(deps.env)) {
           loadShellEnvFallback({
             enabled: true,
@@ -1143,6 +1169,7 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
       }
       warnOnConfigMiskeys(effectiveConfigRaw, deps.logger);
       if (typeof effectiveConfigRaw !== "object" || effectiveConfigRaw === null) {
+        loggedConfigWarningFingerprints.delete(configPath);
         observeLoadConfigSnapshot({
           ...createConfigFileSnapshot({
             path: configPath,
@@ -1169,6 +1196,7 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
       }
       const validated = validateConfigObjectWithPlugins(effectiveConfigRaw, { env: deps.env });
       if (!validated.ok) {
+        loggedConfigWarningFingerprints.delete(configPath);
         observeLoadConfigSnapshot({
           ...createConfigFileSnapshot({
             path: configPath,
@@ -1191,15 +1219,12 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
           loggedConfigPaths: loggedInvalidConfigs,
         });
       }
-      if (validated.warnings.length > 0) {
-        const details = validated.warnings
-          .map(
-            (iss) =>
-              `- ${sanitizeTerminalText(iss.path || "<root>")}: ${sanitizeTerminalText(iss.message)}`,
-          )
-          .join("\n");
-        deps.logger.warn(`Config warnings:\\n${details}`);
-      }
+      logConfigWarningsOnce({
+        configPath,
+        hash,
+        warnings: validated.warnings,
+        logger: deps.logger,
+      });
       warnIfConfigFromFuture(validated.config, deps.logger);
       const cfg = materializeRuntimeConfig(validated.config, "load");
       observeLoadConfigSnapshot({
