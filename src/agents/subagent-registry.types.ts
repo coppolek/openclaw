@@ -37,6 +37,7 @@ export type SubagentRunRecord = {
   fallbackFrozenResultText?: string | null;
   fallbackFrozenResultCapturedAt?: number;
   endedHookEmittedAt?: number;
+  browserCleanupDispatchedAt?: number;
   completionAnnouncedAt?: number;
   attachmentsDir?: string;
   attachmentsRootDir?: string;
