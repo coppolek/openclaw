@@ -1,0 +1,11 @@
+{
+  "id": "gradium",
+  "contracts": {
+    "speechProviders": ["gradium"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
