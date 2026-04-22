@@ -1,39 +1,6 @@
 import fs from "node:fs";
-import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
-import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../agents/defaults.js";
-import { loadModelCatalog } from "../agents/model-catalog.js";
-import {
-  getModelRefStatus,
-  resolveConfiguredModelRef,
-  resolveHooksGmailModel,
-} from "../agents/model-selection.js";
-import { formatCliCommand } from "../cli/command-format.js";
-import { maybeRepairLegacyOAuthProfileIds } from "../commands/doctor-auth-legacy-oauth.js";
-import { noteAuthProfileHealth, noteLegacyCodexProviderOverride } from "../commands/doctor-auth.js";
-import { noteBootstrapFileSize } from "../commands/doctor-bootstrap-size.js";
-import { noteChromeMcpBrowserReadiness } from "../commands/doctor-browser.js";
-import { maybeRepairBundledPluginRuntimeDeps } from "../commands/doctor-bundled-plugin-runtime-deps.js";
-import { noteClaudeCliHealth } from "../commands/doctor-claude-cli.js";
-import { doctorShellCompletion } from "../commands/doctor-completion.js";
-import { maybeRepairLegacyCronStore } from "../commands/doctor-cron.js";
-import { noteDevicePairingHealth } from "../commands/doctor-device-pairing.js";
 import { resolveGatewayAuthTokenForService } from "../commands/doctor-gateway-auth-token.js";
-import { maybeRepairGatewayDaemon } from "../commands/doctor-gateway-daemon-flow.js";
-import { checkGatewayHealth, probeGatewayMemoryStatus } from "../commands/doctor-gateway-health.js";
-import {
-  maybeRepairGatewayServiceConfig,
-  maybeScanExtraGatewayServices,
-} from "../commands/doctor-gateway-services.js";
-import {
-  maybeRepairMemoryRecallHealth,
-  noteMemoryRecallHealth,
-  noteMemorySearchHealth,
-} from "../commands/doctor-memory-search.js";
-import {
-  noteMacLaunchAgentOverrides,
-  noteMacLaunchctlGatewayEnvOverrides,
-} from "../commands/doctor-platform-notes.js";
-import { maybeRepairLegacyPluginManifestContracts } from "../commands/doctor-plugin-manifests.js";
+import type { probeGatewayMemoryStatus } from "../commands/doctor-gateway-health.js";
 import type { DoctorOptions, DoctorPrompter } from "../commands/doctor-prompter.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { buildGatewayConnectionDetails } from "../gateway/call.js";
