@@ -23,7 +23,7 @@ import { slackSecurityAdapter } from "./security.js";
 
 export const SLACK_CHANNEL = "slack" as const;
 
-function buildSlackManifest(botName: string) {
+export function buildSlackManifest(botName: string) {
   const safeName = botName.trim() || "OpenClaw";
   const manifest = {
     display_information: {
@@ -98,7 +98,7 @@ function buildSlackManifest(botName: string) {
   return JSON.stringify(manifest, null, 2);
 }
 
-export function buildSlackSetupLines(botName = "OpenClaw"): string[] {
+export function buildSlackSetupLines(_botName = "OpenClaw"): string[] {
   return [
     "1) Slack API -> Create App -> From scratch or From manifest (with the JSON below)",
     "2) Add Socket Mode + enable it to get the app-level token (xapp-...)",
@@ -108,8 +108,7 @@ export function buildSlackSetupLines(botName = "OpenClaw"): string[] {
     "Tip: set SLACK_BOT_TOKEN + SLACK_APP_TOKEN in your env.",
     `Docs: ${formatDocsLink("/slack", "slack")}`,
     "",
-    "Manifest (JSON):",
-    buildSlackManifest(botName),
+    "(Raw manifest JSON is printed below.)",
   ];
 }
 
