@@ -107,7 +107,15 @@ export async function prepareCliRunContext(
     authCredential = authStore.profiles[effectiveAuthProfileId];
   }
   const extraSystemPrompt = params.extraSystemPrompt?.trim() ?? "";
-  const extraSystemPromptHash = hashCliSessionText(extraSystemPrompt);
+  // Heartbeat runs inject a different provider value into the inbound meta system prompt,
+  // producing a different extraSystemPromptHash than user-chat runs. To prevent session
+  // invalidation, heartbeat runs reuse the stored binding hash (if one exists) rather than
+  // computing a new one. If no stored hash exists, they produce undefined — resolveCliSessionReuse
+  // treats a missing stored hash as compatible with any incoming hash, so the session is never
+  // invalidated solely because a heartbeat ran first.
+  const extraSystemPromptHash = params.isHeartbeat
+    ? params.cliSessionBinding?.extraSystemPromptHash
+    : hashCliSessionText(extraSystemPrompt);
   const modelId = (params.model ?? "default").trim() || "default";
   const normalizedModel = normalizeCliModel(modelId, backendResolved.config);
   const modelDisplay = `${params.provider}/${modelId}`;

@@ -50,7 +50,7 @@ describe("cli-session helpers", () => {
     });
   });
 
-  it("invalidates legacy bindings when auth, prompt, or MCP state changes", () => {
+  it("invalidates legacy bindings when auth or MCP state changes", () => {
     const entry: SessionEntry = {
       sessionId: "openclaw-session",
       updatedAt: Date.now(),
@@ -68,15 +68,28 @@ describe("cli-session helpers", () => {
     expect(
       resolveCliSessionReuse({
         binding,
-        extraSystemPromptHash: "prompt-hash",
-      }),
-    ).toEqual({ invalidatedReason: "system-prompt" });
-    expect(
-      resolveCliSessionReuse({
-        binding,
         mcpConfigHash: "mcp-hash",
       }),
     ).toEqual({ invalidatedReason: "mcp" });
+  });
+
+  it("reuses legacy bindings (no stored hash) regardless of current hash", () => {
+    // Legacy bindings and heartbeat-first sessions have no extraSystemPromptHash stored.
+    // Introducing hash tracking should not invalidate these sessions.
+    const entry: SessionEntry = {
+      sessionId: "openclaw-session",
+      updatedAt: Date.now(),
+      cliSessionIds: { "claude-cli": "legacy-session" },
+      claudeCliSessionId: "legacy-session",
+    };
+    const binding = getCliSessionBinding(entry, "claude-cli");
+
+    expect(
+      resolveCliSessionReuse({
+        binding,
+        extraSystemPromptHash: "prompt-hash",
+      }),
+    ).toEqual({ sessionId: "legacy-session" });
   });
 
   it("invalidates reuse when stored auth profile or prompt shape changes", () => {

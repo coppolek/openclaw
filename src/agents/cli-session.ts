@@ -148,7 +148,13 @@ export function resolveCliSessionReuse(params: {
     return { invalidatedReason: "auth-epoch" };
   }
   const storedExtraSystemPromptHash = normalizeOptionalString(binding?.extraSystemPromptHash);
-  if (storedExtraSystemPromptHash !== currentExtraSystemPromptHash) {
+  // Only invalidate when a stored hash is present and mismatches. A missing stored hash
+  // (e.g. from a heartbeat-first session) is treated as compatible with any incoming hash
+  // so the session is not spuriously reset.
+  if (
+    storedExtraSystemPromptHash !== undefined &&
+    storedExtraSystemPromptHash !== currentExtraSystemPromptHash
+  ) {
     return { invalidatedReason: "system-prompt" };
   }
   const storedMcpResumeHash = normalizeOptionalString(binding?.mcpResumeHash);
