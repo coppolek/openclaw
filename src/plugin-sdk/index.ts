@@ -119,3 +119,4 @@ export {
   delegateCompactionToRuntime,
 } from "../context-engine/delegate.js";
 export { onDiagnosticEvent } from "../infra/diagnostic-events.js";
+export { stringEnum, optionalStringEnum } from "../agents/schema/typebox.js";
