@@ -27,6 +27,14 @@ const DEFAULT_TIMEOUT_MS = 180_000;
 const POLL_INTERVAL_MS = 10_000;
 const MAX_POLL_ATTEMPTS = 90;
 
+/**
+ * Preview Veo models are only available at the v1alpha API version.
+ * GA models (ending in -001 etc.) work with the default v1beta.
+ */
+function resolveApiVersion(model: string): string | undefined {
+  return model.endsWith("-preview") ? "v1alpha" : undefined;
+}
+
 function resolveConfiguredGoogleVideoBaseUrl(req: VideoGenerationRequest): string | undefined {
   const configured = normalizeOptionalString(req.cfg?.models?.providers?.google?.baseUrl);
   return configured ? normalizeGoogleApiBaseUrl(configured) : undefined;
@@ -177,12 +185,15 @@ export function buildGoogleVideoGenerationProvider(): VideoGenerationProvider {
 
       const configuredBaseUrl = resolveConfiguredGoogleVideoBaseUrl(req);
       const durationSeconds = resolveDurationSeconds(req.durationSeconds);
+      const resolvedModel = normalizeOptionalString(req.model) || DEFAULT_GOOGLE_VIDEO_MODEL;
+      const apiVersion = resolveApiVersion(resolvedModel);
       const deadline = createProviderOperationDeadline({
         timeoutMs: req.timeoutMs,
         label: "Google video generation",
       });
       const client = new GoogleGenAI({
         apiKey: auth.apiKey,
+        ...(apiVersion ? { apiVersion } : {}),
         httpOptions: {
           ...(configuredBaseUrl ? { baseUrl: configuredBaseUrl } : {}),
           timeout: resolveProviderOperationTimeoutMs({
@@ -192,7 +203,7 @@ export function buildGoogleVideoGenerationProvider(): VideoGenerationProvider {
         },
       });
       let operation = await client.models.generateVideos({
-        model: normalizeOptionalString(req.model) || DEFAULT_GOOGLE_VIDEO_MODEL,
+        model: resolvedModel,
         prompt: req.prompt,
         image: resolveInputImage(req),
         video: resolveInputVideo(req),
