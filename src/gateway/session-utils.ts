@@ -1371,6 +1371,7 @@ export function buildGatewaySessionRow(params: {
         cfg,
         provider: modelProvider,
         model,
+        contextTokensOverride: cfg.agents?.defaults?.contextTokens,
         // Gateway/session listing is read-only; don't start async model discovery.
         allowAsyncLoad: false,
       }),
