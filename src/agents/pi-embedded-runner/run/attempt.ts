@@ -74,10 +74,14 @@ import type { EmbeddedContextFile } from "../../pi-embedded-helpers.js";
 import {
   downgradeOpenAIFunctionCallReasoningPairs,
   downgradeOpenAIReasoningBlocks,
+  dropAllTrailingNonUserTurns,
+  dropTrailingEmptyAssistantTurns,
   isCloudCodeAssistFormatError,
+  messagesEndWithUserTurn,
   resolveBootstrapMaxChars,
   resolveBootstrapPromptTruncationWarningMode,
   resolveBootstrapTotalMaxChars,
+  shouldShortCircuitForMissingUserTail,
 } from "../../pi-embedded-helpers.js";
 import { subscribeEmbeddedPiSession } from "../../pi-embedded-subscribe.js";
 import { createPreparedEmbeddedPiSettingsManager } from "../../pi-project-settings.js";
@@ -1498,6 +1502,8 @@ export async function runEmbeddedAttempt(
         );
       }
 
+      let skipPromptSubmission = false;
+      let needsTrailingTurnPrune = false;
       try {
         const prior = await sanitizeSessionHistory({
           messages: activeSession.messages,
@@ -1542,15 +1548,56 @@ export async function runEmbeddedAttempt(
         // Re-run tool_use/tool_result pairing repair after truncation, since
         // limitHistoryTurns can orphan tool_result blocks by removing the
         // assistant message that contained the matching tool_use.
-        const limited = transcriptPolicy.repairToolUseResultPairing
+        const paired = transcriptPolicy.repairToolUseResultPairing
           ? sanitizeToolUseResultPairing(truncated, {
               erroredAssistantResultPolicy: "drop",
             })
           : truncated;
-        cacheTrace?.recordStage("session:limited", { messages: limited });
-        if (limited.length > 0) {
-          activeSession.agent.state.messages = limited;
+        // Final Anthropic-tail guard: post-processing (heartbeat pair removal,
+        // history truncation, tool_use/tool_result repair) can expose an empty
+        // or aborted trailing assistant turn, which Anthropic rejects because
+        // the conversation no longer ends on a user-role turn. Strip any such
+        // trailing assistants before handing the transcript off to the
+        // provider. See `validateAnthropicTurns` for the initial pass and
+        // `dropTrailingEmptyAssistantTurns` for the helper semantics.
+        let limited = transcriptPolicy.validateAnthropicTurns
+          ? dropTrailingEmptyAssistantTurns(paired)
+          : paired;
+        if (
+          transcriptPolicy.validateAnthropicTurns &&
+          limited.length > 0 &&
+          !messagesEndWithUserTurn(limited)
+        ) {
+          // The transcript ends on a non-user turn. This is expected in two
+          // very different situations:
+          //
+          // A) Normal follow-up — the user just typed a new message.
+          //    `session.prompt()` will append it as a user turn *after* this
+          //    sanitisation phase, so the trailing assistant is the previous
+          //    reply and should be kept.
+          //
+          // B) No fresh input — a heartbeat, cron, or retry where the caller
+          //    provides no new prompt and no images. `session.prompt()` will
+          //    NOT append a user turn, so the request would reach Anthropic
+          //    ending on an assistant turn and be rejected with HTTP 400.
+          //
+          // The raw `params.prompt` is not sufficient to tell these apart:
+          // bootstrap warnings, routing prefixes, and `before_prompt_build`
+          // hooks can still inject content that becomes a user turn even when
+          // `params.prompt` is empty. Defer the aggressive prune until after
+          // `effectivePrompt` is finalised so the decision sees the real
+          // outbound prompt, not just the caller input.
+          needsTrailingTurnPrune = true;
+          const trailingRole = String((limited[limited.length - 1] as { role?: unknown })?.role);
+          log.warn(
+            `anthropic transcript guard: messages do not end with a user turn (len=${limited.length}, trailingRole=${trailingRole}); deferring prune decision until effective prompt is finalized.`,
+          );
         }
+        cacheTrace?.recordStage("session:limited", { messages: limited });
+        // Always write back: an empty result from dropTrailingEmptyAssistantTurns
+        // must still replace the stale tail so the deferred prune and
+        // shouldShortCircuitForMissingUserTail see the cleaned state.
+        activeSession.agent.state.messages = limited;
 
         if (params.contextEngine) {
           try {
@@ -1848,7 +1895,6 @@ export async function runEmbeddedAttempt(
       let promptError: unknown = null;
       let preflightRecovery: EmbeddedRunAttemptResult["preflightRecovery"];
       let promptErrorSource: "prompt" | "compaction" | "precheck" | null = null;
-      let skipPromptSubmission = false;
       try {
         const promptStartedAt = Date.now();
 
@@ -1912,6 +1958,41 @@ export async function runEmbeddedAttempt(
             systemPromptText = prependedOrAppendedSystemPrompt;
             log.debug(
               `hooks: applied prependSystemContext/appendSystemContext (${prependSystemLen}+${appendSystemLen} chars)`,
+            );
+          }
+        }
+
+        // Deferred Anthropic-tail prune: the pre-flight guard flagged a
+        // trailing non-user turn but could not safely decide whether to strip
+        // it using `params.prompt` alone. Now that `effectivePrompt` has been
+        // finalised (bootstrap warning, routing prefix, and
+        // `before_prompt_build` hook context all applied), re-evaluate. Strip
+        // the tail only when no user turn will be appended downstream — i.e.
+        // the outbound prompt is empty/whitespace and no images are queued.
+        if (needsTrailingTurnPrune) {
+          const promptHasContent =
+            typeof effectivePrompt === "string" && effectivePrompt.trim().length > 0;
+          const hasImages = Array.isArray(params.images) && params.images.length > 0;
+          if (!promptHasContent && !hasImages) {
+            const stateMessages = activeSession.agent.state.messages;
+            const trailingRole =
+              stateMessages.length > 0
+                ? String((stateMessages[stateMessages.length - 1] as { role?: unknown })?.role)
+                : "none";
+            log.warn(
+              `anthropic transcript guard: effective prompt empty and no images after hooks (len=${stateMessages.length}, trailingRole=${trailingRole}); dropping trailing non-user turns to keep the request sendable.`,
+            );
+            const prunedMessages = dropAllTrailingNonUserTurns(stateMessages);
+            activeSession.agent.state.messages = prunedMessages;
+            if (prunedMessages.length === 0) {
+              log.warn(
+                `anthropic transcript guard: transcript emptied after dropping trailing non-user turns; skipping provider call. runId=${params.runId} sessionId=${params.sessionId}`,
+              );
+              skipPromptSubmission = true;
+            }
+          } else {
+            log.debug(
+              `anthropic transcript guard: trailing non-user turn detected but fresh user input is available after hooks; leaving history intact.`,
             );
           }
         }
@@ -2189,6 +2270,34 @@ export async function runEmbeddedAttempt(
                 `reserveTokens=${reserveTokens} ` +
                 `effectiveReserveTokens=${preemptiveCompaction.effectiveReserveTokens} ` +
                 `sessionFile=${params.sessionFile}`,
+            );
+            skipPromptSubmission = true;
+          }
+
+          if (
+            !skipPromptSubmission &&
+            shouldShortCircuitForMissingUserTail({
+              validateAnthropicTurns: transcriptPolicy.validateAnthropicTurns,
+              messages: activeSession.messages,
+              promptText: effectivePrompt,
+              hasImages: imageResult.images.length > 0,
+            })
+          ) {
+            // pi-coding-agent's session.prompt() only appends a new user turn
+            // when the caller passes a non-empty prompt or images. If the
+            // transcript still ends on a non-empty assistant turn AND there is
+            // no fresh user input, the outbound request would end on
+            // `role: assistant`, which Anthropic rejects as an "assistant
+            // message prefill". `shouldShortCircuitForMissingUserTail` only
+            // fires on non-empty assistant tails; stale empty/aborted tails
+            // from a previous attempt are left for `dropTrailingEmptyAssistantTurns`
+            // to strip downstream and do not trigger a false-positive skip.
+            log.warn(
+              `anthropic transcript guard: skipping provider call because ` +
+                `the transcript already ends on a non-empty assistant turn ` +
+                `and no fresh user prompt or image is available. ` +
+                `runId=${params.runId} sessionId=${params.sessionId} ` +
+                `messages=${activeSession.messages.length}`,
             );
             skipPromptSubmission = true;
           }

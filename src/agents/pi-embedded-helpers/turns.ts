@@ -28,6 +28,178 @@ function isAbortedAssistantTurn(message: AgentMessage): boolean {
   return stopReason === "aborted" || stopReason === "error";
 }
 
+function isEffectivelyEmptyAssistantContent(message: AgentMessage): boolean {
+  const content = (message as { content?: unknown }).content;
+  if (content == null) {
+    return true;
+  }
+  if (!Array.isArray(content)) {
+    return typeof content === "string" && content.trim().length === 0;
+  }
+  if (content.length === 0) {
+    return true;
+  }
+  return content.every((block) => {
+    if (!block || typeof block !== "object") {
+      return true;
+    }
+    const rec = block as { type?: unknown; text?: unknown };
+    if (isThinkingLikeBlock(block)) {
+      return true;
+    }
+    if (rec.type === "text") {
+      return typeof rec.text !== "string" || rec.text.trim().length === 0;
+    }
+    return false;
+  });
+}
+
+function isUnsendableTrailingAssistant(message: AgentMessage): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  if ((message as { role?: unknown }).role !== "assistant") {
+    return false;
+  }
+  if (isEffectivelyEmptyAssistantContent(message)) {
+    return true;
+  }
+  // Aborted/errored assistant turns without useful content cannot be the final
+  // message in an Anthropic request — isEffectivelyEmptyAssistantContent above
+  // already handles the thinking-only / empty-content cases.
+  return false;
+}
+
+/**
+ * Drops trailing assistant turns that would make an Anthropic request invalid.
+ *
+ * The Anthropic Messages API requires the conversation to end with a user
+ * turn and rejects assistant turns with empty content. Several pipeline
+ * steps can produce such trailing turns:
+ *   - `stripDanglingAnthropicToolUses` empties aborted tool-only assistant
+ *     messages when their tool_use blocks cannot be matched.
+ *   - `filterHeartbeatPairs` removes `(user heartbeat, assistant HEARTBEAT_OK)`
+ *     pairs, which can expose a prior assistant turn at the tail if no real
+ *     user turn followed.
+ *   - `limitHistoryTurns` can leave the tail unchanged (it slices from the
+ *     oldest retained user turn) but subsequent tool pairing repair can
+ *     reshape trailing blocks.
+ *
+ * This helper removes only unambiguously unsendable trailing assistant turns
+ * (empty or aborted-with-no-content); it never drops an assistant turn that
+ * still carries real model output.
+ *
+ * Maintainer note: this is a good upstream PR candidate for anyone else
+ * using the pi-agent-core replay pipeline with Anthropic — the trailing
+ * empty/aborted assistant case is not handled by `validateAnthropicTurns`
+ * alone, and surfaces as opaque 400 errors from Opus 4.6/4.7.
+ */
+export function dropTrailingEmptyAssistantTurns(messages: AgentMessage[]): AgentMessage[] {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return messages;
+  }
+  let end = messages.length;
+  while (end > 0 && isUnsendableTrailingAssistant(messages[end - 1])) {
+    end -= 1;
+  }
+  return end === messages.length ? messages : messages.slice(0, end);
+}
+
+/**
+ * Returns true when the last message in the list is a user-like turn
+ * (`user`, `toolResult`, or `tool` role), which Anthropic accepts as the
+ * terminal message of a request.
+ */
+export function messagesEndWithUserTurn(messages: AgentMessage[]): boolean {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return false;
+  }
+  const last = messages[messages.length - 1];
+  if (!last || typeof last !== "object") {
+    return false;
+  }
+  const role = (last as { role?: unknown }).role;
+  return role === "user" || role === "toolResult" || role === "tool";
+}
+
+function isUserLikeTurn(message: AgentMessage | undefined): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  const role = (message as { role?: unknown }).role;
+  return role === "user" || role === "toolResult" || role === "tool";
+}
+
+/**
+ * Drops every trailing non-user turn until the transcript ends with a
+ * user-like turn (`user`, `toolResult`, or `tool`). This is the safety net
+ * for cases where a trailing assistant turn carries real but unsendable
+ * content — for example, gateway-surfaced error text like
+ * "API provider returned a billing error" or "LLM request rejected: this
+ * model does not support assistant message prefill". These turns are not
+ * empty or thinking-only, so `dropTrailingEmptyAssistantTurns` correctly
+ * leaves them alone; the runner-level guard uses this helper as a final
+ * pass immediately before sending the transcript to Anthropic so the
+ * provider call cannot land on a `role: assistant` tail.
+ *
+ * Non-trailing assistant turns are never touched; real assistant replies
+ * in the middle of the transcript remain intact.
+ */
+export function dropAllTrailingNonUserTurns(messages: AgentMessage[]): AgentMessage[] {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return messages;
+  }
+  let end = messages.length;
+  while (end > 0 && !isUserLikeTurn(messages[end - 1])) {
+    end -= 1;
+  }
+  return end === messages.length ? messages : messages.slice(0, end);
+}
+
+/**
+ * Decides whether to short-circuit an Anthropic request because the request
+ * would otherwise end on an `assistant` turn (which Anthropic rejects with
+ * "This model does not support assistant message prefill"). The session
+ * wrapper only appends a new user turn when the caller passes a non-empty
+ * prompt or images, so when neither is available and the transcript still
+ * ends with a non-empty assistant turn, we skip the provider call instead
+ * of letting the API reject it.
+ */
+export function shouldShortCircuitForMissingUserTail(params: {
+  validateAnthropicTurns: boolean;
+  messages: AgentMessage[];
+  promptText: string;
+  hasImages: boolean;
+}): boolean {
+  if (!params.validateAnthropicTurns) {
+    return false;
+  }
+  if (!Array.isArray(params.messages) || params.messages.length === 0) {
+    return false;
+  }
+  const promptHasContent =
+    typeof params.promptText === "string" && params.promptText.trim().length > 0;
+  if (promptHasContent || params.hasImages) {
+    return false;
+  }
+  if (messagesEndWithUserTurn(params.messages)) {
+    return false;
+  }
+  // Only short-circuit when the trailing assistant turn carries real content.
+  // Empty or aborted trailing assistants are removed by
+  // `dropTrailingEmptyAssistantTurns` before the request is sent, so treating
+  // them as a short-circuit trigger would be a false positive when a previous
+  // attempt left a stale empty/aborted assistant in the session buffer.
+  const last = params.messages[params.messages.length - 1];
+  if (!last || typeof last !== "object") {
+    return false;
+  }
+  if ((last as { role?: unknown }).role !== "assistant") {
+    return false;
+  }
+  return !isEffectivelyEmptyAssistantContent(last);
+}
+
 function extractToolResultMatchIds(record: Record<string, unknown>): Set<string> {
   const ids = new Set<string>();
   for (const value of [
@@ -363,17 +535,26 @@ export function mergeConsecutiveUserTurns(
 
 /**
  * Validates and fixes conversation turn sequences for Anthropic API.
- * Anthropic requires strict alternating user→assistant pattern.
- * Merges consecutive user messages together.
- * Also strips dangling tool_use blocks that lack corresponding tool_result blocks.
+ * Anthropic requires strict alternating user→assistant pattern and the
+ * conversation must end with a user-role turn. This helper:
+ *   1. Strips dangling tool_use blocks that lack matching tool_result blocks
+ *      (which can leave aborted assistant turns with empty content).
+ *   2. Merges consecutive user messages together.
+ *   3. Drops trailing empty/aborted assistant turns exposed by step 1 so the
+ *      transcript still ends on a valid user-like turn.
  */
 export function validateAnthropicTurns(messages: AgentMessage[]): AgentMessage[] {
   // First, strip dangling tool-call blocks from assistant messages.
   const stripped = stripDanglingAnthropicToolUses(messages);
 
-  return validateTurnsWithConsecutiveMerge({
+  const merged = validateTurnsWithConsecutiveMerge({
     messages: stripped,
     role: "user",
     merge: mergeConsecutiveUserTurns,
   });
+
+  // After stripping tool_use blocks, a trailing assistant turn can end up
+  // with empty content (e.g. aborted/errored retries). Those are not a
+  // valid terminal message for Anthropic, so drop them here too.
+  return dropTrailingEmptyAssistantTurns(merged);
 }

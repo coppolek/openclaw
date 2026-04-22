@@ -65,7 +65,11 @@ export {
 export { pickFallbackThinkingLevel } from "./pi-embedded-helpers/thinking.js";
 
 export {
+  dropAllTrailingNonUserTurns,
+  dropTrailingEmptyAssistantTurns,
   mergeConsecutiveUserTurns,
+  messagesEndWithUserTurn,
+  shouldShortCircuitForMissingUserTail,
   validateAnthropicTurns,
   validateGeminiTurns,
 } from "./pi-embedded-helpers/turns.js";

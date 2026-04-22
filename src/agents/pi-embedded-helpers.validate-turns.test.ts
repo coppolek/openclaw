@@ -1,7 +1,11 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { describe, expect, it } from "vitest";
 import {
+  dropAllTrailingNonUserTurns,
+  dropTrailingEmptyAssistantTurns,
   mergeConsecutiveUserTurns,
+  messagesEndWithUserTurn,
+  shouldShortCircuitForMissingUserTail,
   validateAnthropicTurns,
   validateGeminiTurns,
 } from "./pi-embedded-helpers.js";
@@ -671,6 +675,60 @@ describe("validateAnthropicTurns strips dangling tool_use blocks", () => {
     expect(assistantContent).toEqual([{ type: "text", text: "[tool calls omitted]" }]);
   });
 
+  it("drops trailing empty assistant turn left behind by tool_use stripping", () => {
+    // Regression: aborted assistant whose only content was a dangling tool_use
+    // gets emptied by stripDanglingAnthropicToolUses. If that empty turn is
+    // the tail, Anthropic rejects the request because the conversation does
+    // not end with a user turn.
+    const msgs = asMessages([
+      { role: "user", content: [{ type: "text", text: "Use tool" }] },
+      {
+        role: "assistant",
+        stopReason: "aborted",
+        content: [{ type: "toolCall", id: "tool-1", name: "test", arguments: {} }],
+      },
+    ]);
+
+    const result = validateAnthropicTurns(msgs);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      role: "user",
+      content: [{ type: "text", text: "Use tool" }],
+    });
+  });
+
+  it("drops trailing assistant turn with only thinking blocks (no outbound text)", () => {
+    const msgs = asMessages([
+      { role: "user", content: [{ type: "text", text: "Hi" }] },
+      {
+        role: "assistant",
+        content: [{ type: "thinking", thinking: "planning...", thinkingSignature: "sig" }],
+        stopReason: "aborted",
+      },
+    ]);
+
+    const result = validateAnthropicTurns(msgs);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].role).toBe("user");
+  });
+
+  it("preserves trailing assistant turns that still carry real text content", () => {
+    // Guard must not discard legitimate prior assistant output. If a caller
+    // ever ships this transcript to Anthropic, the stream wrapper / runner
+    // guard is responsible for logging — validateAnthropicTurns should not
+    // silently erase the assistant reply.
+    const msgs = asMessages([
+      { role: "user", content: [{ type: "text", text: "Hi" }] },
+      { role: "assistant", content: [{ type: "text", text: "Hello!" }] },
+    ]);
+
+    const result = validateAnthropicTurns(msgs);
+
+    expect(result).toEqual(msgs);
+  });
+
   it("is replay-safe across repeated validation passes", () => {
     const msgs = makeDualToolAnthropicTurns([
       {
@@ -699,5 +757,370 @@ describe("validateAnthropicTurns strips dangling tool_use blocks", () => {
     expect(() => validateAnthropicTurns(msgs)).not.toThrow();
     const result = validateAnthropicTurns(msgs);
     expect(result).toHaveLength(3);
+  });
+});
+
+describe("dropTrailingEmptyAssistantTurns", () => {
+  it("returns the input unchanged when the tail is already user-like", () => {
+    const msgs = asMessages([
+      { role: "user", content: [{ type: "text", text: "Hi" }] },
+      { role: "assistant", content: [{ type: "text", text: "Hello" }] },
+      { role: "user", content: [{ type: "text", text: "More" }] },
+    ]);
+    expect(dropTrailingEmptyAssistantTurns(msgs)).toBe(msgs);
+  });
+
+  it("drops a single trailing assistant turn with empty content array", () => {
+    const msgs = asMessages([
+      { role: "user", content: [{ type: "text", text: "Hi" }] },
+      { role: "assistant", content: [], stopReason: "aborted" },
+    ]);
+    const result = dropTrailingEmptyAssistantTurns(msgs);
+    expect(result).toHaveLength(1);
+    expect(result[0].role).toBe("user");
+  });
+
+  it("drops multiple consecutive empty trailing assistant turns", () => {
+    const msgs = asMessages([
+      { role: "user", content: [{ type: "text", text: "Hi" }] },
+      { role: "assistant", content: [], stopReason: "error" },
+      { role: "assistant", content: [{ type: "text", text: "   " }], stopReason: "aborted" },
+    ]);
+    const result = dropTrailingEmptyAssistantTurns(msgs);
+    expect(result).toHaveLength(1);
+    expect(result[0].role).toBe("user");
+  });
+
+  it("keeps a non-empty trailing assistant (guard is for empty tails only)", () => {
+    const msgs = asMessages([
+      { role: "user", content: [{ type: "text", text: "Hi" }] },
+      { role: "assistant", content: [{ type: "text", text: "Real reply" }] },
+    ]);
+    expect(dropTrailingEmptyAssistantTurns(msgs)).toBe(msgs);
+  });
+
+  it("does not disturb empty assistant turns in the middle of the transcript", () => {
+    const msgs = asMessages([
+      { role: "user", content: [{ type: "text", text: "Hi" }] },
+      { role: "assistant", content: [], stopReason: "aborted" },
+      { role: "user", content: [{ type: "text", text: "Retry" }] },
+    ]);
+    expect(dropTrailingEmptyAssistantTurns(msgs)).toBe(msgs);
+  });
+
+  it("leaves gateway error-surface assistant messages intact (first-pass gap)", () => {
+    // Regression guard: gateway-surfaced errors (billing errors, prefill
+    // rejections, etc.) are injected as real-content assistant turns. They
+    // are NOT empty or thinking-only, so dropTrailingEmptyAssistantTurns
+    // must not remove them. The runner-level safety net is responsible for
+    // stripping them before the Anthropic request goes out.
+    const billingMsgs = asMessages([
+      { role: "user", content: [{ type: "text", text: "hi" }] },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "API provider returned a billing error: please update payment info.",
+          },
+        ],
+      },
+    ]);
+    expect(dropTrailingEmptyAssistantTurns(billingMsgs)).toBe(billingMsgs);
+
+    const prefillRejectionMsgs = asMessages([
+      { role: "user", content: [{ type: "text", text: "hi" }] },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "LLM request rejected: This model does not support assistant message prefill.",
+          },
+        ],
+      },
+    ]);
+    expect(dropTrailingEmptyAssistantTurns(prefillRejectionMsgs)).toBe(prefillRejectionMsgs);
+  });
+});
+
+describe("dropAllTrailingNonUserTurns", () => {
+  it("returns the input unchanged when the tail is already user-like", () => {
+    const msgs = asMessages([
+      { role: "user", content: [{ type: "text", text: "Hi" }] },
+      { role: "assistant", content: [{ type: "text", text: "Hello" }] },
+      { role: "user", content: [{ type: "text", text: "More" }] },
+    ]);
+    expect(dropAllTrailingNonUserTurns(msgs)).toBe(msgs);
+  });
+
+  it("drops a trailing assistant turn that carries real gateway error text", () => {
+    // The exact case that slipped past dropTrailingEmptyAssistantTurns and
+    // kept firing the old warn-only guard: a surfaced error shows up as a
+    // non-empty assistant tail, so the runner must strip it before sending
+    // to Anthropic.
+    const msgs = asMessages([
+      { role: "user", content: [{ type: "text", text: "Hi" }] },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "API provider returned a billing error: please update payment info.",
+          },
+        ],
+      },
+    ]);
+    const result = dropAllTrailingNonUserTurns(msgs);
+    expect(result).toHaveLength(1);
+    expect(result[0].role).toBe("user");
+    expect(messagesEndWithUserTurn(result)).toBe(true);
+  });
+
+  it("drops multiple consecutive non-user trailing turns including real text", () => {
+    const msgs = asMessages([
+      { role: "user", content: [{ type: "text", text: "Hi" }] },
+      { role: "assistant", content: [{ type: "text", text: "Reply 1" }] },
+      { role: "assistant", content: [{ type: "text", text: "Reply 2 (prefill error)" }] },
+    ]);
+    const result = dropAllTrailingNonUserTurns(msgs);
+    expect(result).toHaveLength(1);
+    expect(result[0].role).toBe("user");
+  });
+
+  it("returns an empty array when every message is non-user", () => {
+    const msgs = asMessages([
+      { role: "assistant", content: [{ type: "text", text: "stray reply" }] },
+      { role: "assistant", content: [{ type: "text", text: "another stray" }] },
+    ]);
+    const result = dropAllTrailingNonUserTurns(msgs);
+    expect(result).toHaveLength(0);
+  });
+
+  it("preserves user-like tails of tool-result and tool roles", () => {
+    const toolResultTail = asMessages([
+      { role: "user", content: [{ type: "text", text: "use tool" }] },
+      {
+        role: "assistant",
+        content: [{ type: "toolUse", id: "tool-1", name: "t", arguments: {} }],
+      },
+      { role: "toolResult", toolUseId: "tool-1", content: [{ type: "text", text: "ok" }] },
+    ]);
+    expect(dropAllTrailingNonUserTurns(toolResultTail)).toBe(toolResultTail);
+
+    const toolTail = asMessages([
+      { role: "user", content: [{ type: "text", text: "use tool" }] },
+      {
+        role: "assistant",
+        content: [{ type: "toolUse", id: "tool-2", name: "t", arguments: {} }],
+      },
+      { role: "tool", toolCallId: "tool-2", content: [{ type: "text", text: "ok" }] },
+    ]);
+    expect(dropAllTrailingNonUserTurns(toolTail)).toBe(toolTail);
+  });
+
+  it("only touches trailing turns; non-user turns in the middle stay intact", () => {
+    const msgs = asMessages([
+      { role: "user", content: [{ type: "text", text: "Hi" }] },
+      { role: "assistant", content: [{ type: "text", text: "mid reply" }] },
+      { role: "user", content: [{ type: "text", text: "ok" }] },
+      { role: "assistant", content: [{ type: "text", text: "billing error text" }] },
+    ]);
+    const result = dropAllTrailingNonUserTurns(msgs);
+    expect(result).toHaveLength(3);
+    expect(result[0].role).toBe("user");
+    expect(result[1].role).toBe("assistant");
+    expect((result[1] as { content?: unknown[] }).content).toEqual([
+      { type: "text", text: "mid reply" },
+    ]);
+    expect(result[2].role).toBe("user");
+    expect(messagesEndWithUserTurn(result)).toBe(true);
+  });
+
+  it("returns the input unchanged for an empty array", () => {
+    const msgs = asMessages([]);
+    expect(dropAllTrailingNonUserTurns(msgs)).toBe(msgs);
+  });
+
+  it("is idempotent across repeated passes", () => {
+    const msgs = asMessages([
+      { role: "user", content: [{ type: "text", text: "Hi" }] },
+      { role: "assistant", content: [{ type: "text", text: "Hello" }] },
+      { role: "assistant", content: [{ type: "text", text: "error" }] },
+    ]);
+    const once = dropAllTrailingNonUserTurns(msgs);
+    const twice = dropAllTrailingNonUserTurns(once);
+    expect(twice).toBe(once);
+    expect(once).toHaveLength(1);
+  });
+});
+
+describe("messagesEndWithUserTurn", () => {
+  it("returns true for user, toolResult, and tool tails", () => {
+    expect(messagesEndWithUserTurn(asMessages([{ role: "user", content: "x" }]))).toBe(true);
+    expect(
+      messagesEndWithUserTurn(asMessages([{ role: "toolResult", toolUseId: "t", content: [] }])),
+    ).toBe(true);
+    expect(
+      messagesEndWithUserTurn(asMessages([{ role: "tool", toolCallId: "t", content: [] }])),
+    ).toBe(true);
+  });
+
+  it("returns false when trailing role is assistant", () => {
+    expect(
+      messagesEndWithUserTurn(
+        asMessages([
+          { role: "user", content: "x" },
+          { role: "assistant", content: [{ type: "text", text: "y" }] },
+        ]),
+      ),
+    ).toBe(false);
+  });
+
+  it("returns false for an empty list", () => {
+    expect(messagesEndWithUserTurn([])).toBe(false);
+  });
+});
+
+describe("shouldShortCircuitForMissingUserTail", () => {
+  const assistantTail = asMessages([
+    { role: "user", content: "x" },
+    { role: "assistant", content: [{ type: "text", text: "complete reply" }] },
+  ]);
+  const userTail = asMessages([
+    { role: "user", content: "x" },
+    { role: "assistant", content: [{ type: "text", text: "y" }] },
+    { role: "user", content: "follow-up" },
+  ]);
+
+  it("short-circuits when transcript tail is assistant and prompt is empty without images", () => {
+    expect(
+      shouldShortCircuitForMissingUserTail({
+        validateAnthropicTurns: true,
+        messages: assistantTail,
+        promptText: "",
+        hasImages: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShortCircuitForMissingUserTail({
+        validateAnthropicTurns: true,
+        messages: assistantTail,
+        promptText: "   \n\t",
+        hasImages: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not short-circuit when a fresh user prompt will be appended", () => {
+    expect(
+      shouldShortCircuitForMissingUserTail({
+        validateAnthropicTurns: true,
+        messages: assistantTail,
+        promptText: "hello",
+        hasImages: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not short-circuit when an image will be appended", () => {
+    expect(
+      shouldShortCircuitForMissingUserTail({
+        validateAnthropicTurns: true,
+        messages: assistantTail,
+        promptText: "",
+        hasImages: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not short-circuit when transcript already ends with a user-like turn", () => {
+    expect(
+      shouldShortCircuitForMissingUserTail({
+        validateAnthropicTurns: true,
+        messages: userTail,
+        promptText: "",
+        hasImages: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not short-circuit when Anthropic turn validation is disabled", () => {
+    expect(
+      shouldShortCircuitForMissingUserTail({
+        validateAnthropicTurns: false,
+        messages: assistantTail,
+        promptText: "",
+        hasImages: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not short-circuit on an empty transcript", () => {
+    expect(
+      shouldShortCircuitForMissingUserTail({
+        validateAnthropicTurns: true,
+        messages: [],
+        promptText: "",
+        hasImages: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not short-circuit when the assistant tail is an empty/aborted stub", () => {
+    // Regression: a previous attempt can leave an empty or aborted assistant
+    // turn in `activeSession.messages` before `dropTrailingEmptyAssistantTurns`
+    // has a chance to strip it. The guard must not treat that stale tail as a
+    // reason to skip the provider call — the downstream pipeline removes it.
+    const emptyAbortedTail = asMessages([
+      { role: "user", content: [{ type: "text", text: "Hi" }] },
+      { role: "assistant", content: [], stopReason: "aborted" },
+    ]);
+    expect(
+      shouldShortCircuitForMissingUserTail({
+        validateAnthropicTurns: true,
+        messages: emptyAbortedTail,
+        promptText: "",
+        hasImages: false,
+      }),
+    ).toBe(false);
+
+    const thinkingOnlyTail = asMessages([
+      { role: "user", content: [{ type: "text", text: "Hi" }] },
+      {
+        role: "assistant",
+        content: [{ type: "thinking", thinking: "internal" }],
+      },
+    ]);
+    expect(
+      shouldShortCircuitForMissingUserTail({
+        validateAnthropicTurns: true,
+        messages: thinkingOnlyTail,
+        promptText: "",
+        hasImages: false,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("heartbeat contamination regression (validateAnthropicTurns)", () => {
+  // Reproduces the case where filterHeartbeatPairs removed the trailing
+  // (user heartbeat, assistant HEARTBEAT_OK) pair but the subsequent tool_use
+  // stripping emptied the prior aborted assistant, leaving nothing sendable
+  // after the initial user turn.
+  it("emits a transcript ending on a user turn after aborted empty assistant at tail", () => {
+    const msgs = asMessages([
+      { role: "user", content: [{ type: "text", text: "Original question" }] },
+      {
+        role: "assistant",
+        stopReason: "aborted",
+        content: [{ type: "toolUse", id: "tool-dangling", name: "exec", arguments: {} }],
+      },
+    ]);
+
+    const result = validateAnthropicTurns(msgs);
+
+    expect(result).toHaveLength(1);
+    expect(messagesEndWithUserTurn(result)).toBe(true);
   });
 });
