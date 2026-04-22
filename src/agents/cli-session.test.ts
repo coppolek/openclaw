@@ -166,4 +166,62 @@ describe("cli-session helpers", () => {
     expect(hashCliSessionText("  keep this  ")).toBe(hashCliSessionText("keep this"));
     expect(hashCliSessionText("")).toBeUndefined();
   });
+
+  it("keeps CLI session reuse stable when callers split volatile inbound-meta from the hash input (#68471)", () => {
+    // Stable portion: structural parts (group config, exec override hint) that
+    // should invalidate the CLI session when they change.
+    const stable = [
+      "## Group Context\n(stable group info)",
+      "## Exec Override\n(stable exec elevation state)",
+    ].join("\n\n");
+    // Volatile portion: the inbound-meta envelope changes between a channel
+    // message (e.g. channel=feishu, provider=feishu) and a heartbeat trigger
+    // (channel/provider undefined). Before this fix those were hashed together,
+    // so a heartbeat following a Feishu inbound invalidated the CLI session
+    // with reason=system-prompt and wiped conversation context every 30 min.
+    const volatileChannelMessage = '## Inbound Context\n```json\n{"channel":"feishu"}\n```';
+    const volatileHeartbeat = '## Inbound Context\n```json\n{"provider":"internal"}\n```';
+
+    // When only the stable portion is hashed, a heartbeat run and a channel-inbound
+    // run on the same session produce matching hashes and resolveCliSessionReuse
+    // returns the bound session id instead of "system-prompt" invalidation.
+    const channelInboundHashInput = stable;
+    const heartbeatHashInput = stable;
+    expect(
+      resolveCliSessionReuse({
+        binding: {
+          sessionId: "cli-session-1",
+          extraSystemPromptHash: hashCliSessionText(channelInboundHashInput),
+        },
+        extraSystemPromptHash: hashCliSessionText(heartbeatHashInput),
+      }),
+    ).toEqual({ sessionId: "cli-session-1" });
+
+    // Sanity: without the split (legacy behavior) the full prompt hashes
+    // diverged between the two triggers.
+    expect(hashCliSessionText(`${volatileChannelMessage}\n\n${stable}`)).not.toBe(
+      hashCliSessionText(`${volatileHeartbeat}\n\n${stable}`),
+    );
+  });
+
+  it("keeps CLI session reuse stable for DM sessions where the stable subset is empty (#68471)", () => {
+    // DM session: no group context, no group intro, no group system prompt,
+    // no exec elevation. The caller passes an empty-string stable subset. That
+    // must hash to a consistent "no hash" value so heartbeat vs. channel flips
+    // do not flip the hash slot. This is the most common session shape and
+    // was the original reporter's scenario.
+    const stableEmpty = "";
+    expect(hashCliSessionText(stableEmpty)).toBeUndefined();
+
+    expect(
+      resolveCliSessionReuse({
+        binding: {
+          sessionId: "cli-session-dm",
+          // setCliSessionBinding strips undefined hash from the persisted
+          // binding, so a DM session's binding stores no hash at all.
+        },
+        extraSystemPromptHash: hashCliSessionText(stableEmpty),
+      }),
+    ).toEqual({ sessionId: "cli-session-dm" });
+  });
 });

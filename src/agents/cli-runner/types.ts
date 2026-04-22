@@ -23,6 +23,13 @@ export type RunCliAgentParams = {
   timeoutMs: number;
   runId: string;
   extraSystemPrompt?: string;
+  // Stable subset of extraSystemPrompt used for CLI session-reuse hashing. Callers
+  // that split volatile per-trigger metadata (e.g. inbound channel envelope) from
+  // structural parts (group config, exec elevation) can pass the stable portion
+  // here so a user-message → heartbeat transition does not invalidate the bound
+  // CLI session just because the inbound envelope flipped. Falls back to
+  // extraSystemPrompt when omitted.
+  extraSystemPromptHashInput?: string;
   streamParams?: import("../command/types.js").AgentStreamParams;
   ownerNumbers?: string[];
   cliSessionId?: string;

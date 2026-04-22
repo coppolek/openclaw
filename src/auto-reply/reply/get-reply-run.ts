@@ -293,8 +293,14 @@ export async function runPreparedReply(
     isNewSession ? sessionCtx : { ...sessionCtx, ThreadStarterBody: undefined },
     { includeFormattingHints: !useFastReplyRuntime },
   );
-  const extraSystemPromptParts = [
-    inboundMetaPrompt,
+  // Split the injected extraSystemPrompt into structural parts (stable) and the
+  // inbound channel envelope (volatile across triggers: a heartbeat on the same
+  // main session produces a different inbound-meta payload than a Feishu inbound,
+  // because channel/provider/surface/account_id flip). We inject the full
+  // combined prompt on each run but hash only the stable portion for CLI session
+  // reuse, so a heartbeat → channel-message transition no longer invalidates the
+  // bound CLI session. See issue #68471.
+  const extraSystemPromptStableParts = [
     groupChatContext,
     groupIntro,
     groupSystemPrompt,
@@ -305,6 +311,9 @@ export async function runPreparedReply(
       fullAccessBlockedReason: fullAccessState.blockedReason,
     }),
   ].filter(Boolean);
+  const extraSystemPromptParts = [inboundMetaPrompt, ...extraSystemPromptStableParts].filter(
+    Boolean,
+  );
   const baseBody = sessionCtx.BodyStripped ?? sessionCtx.Body ?? "";
   // Use CommandBody/RawBody for bare reset detection (clean message without structural context).
   const rawBodyTrimmed = (ctx.CommandBody ?? ctx.RawBody ?? ctx.Body ?? "").trim();
@@ -734,6 +743,15 @@ export async function runPreparedReply(
       ownerNumbers: command.ownerList.length > 0 ? command.ownerList : undefined,
       inputProvenance: ctx.InputProvenance ?? sessionCtx.InputProvenance,
       extraSystemPrompt: extraSystemPromptParts.join("\n\n") || undefined,
+      // Always pass the stable-only text as the hash input — even when empty
+      // (e.g. a DM with no group context and no exec elevation). Without this,
+      // an empty stable subset would fall through to the legacy full-prompt
+      // hash path and the volatile inbound-meta envelope would still bust the
+      // CLI session on every heartbeat transition, defeating the fix for the
+      // most common session shape (DMs). hashCliSessionText("") returns
+      // undefined, so setCliSessionBinding persists no hash on both sides and
+      // reuse matches as undefined === undefined.
+      extraSystemPromptHashInput: extraSystemPromptStableParts.join("\n\n"),
       skipProviderRuntimeHints: useFastReplyRuntime,
       ...(!useFastReplyRuntime &&
       isReasoningTagProvider(provider, {
