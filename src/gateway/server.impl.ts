@@ -430,6 +430,7 @@ export async function startGatewayServer(
   };
   const initialHooksConfig = runtimeConfig.hooksConfig;
   const initialHookClientIpConfig = resolveHookClientIpConfig(cfgAtStart);
+  const initialControlUiConfig = cfgAtStart.gateway?.controlUi;
   const canvasHostEnabled = runtimeConfig.canvasHostEnabled;
 
   // Create auth rate limiters used by connect/auth flows.
@@ -548,6 +549,7 @@ export async function startGatewayServer(
   runtimeState = createGatewayServerLiveState({
     hooksConfig: initialHooksConfig,
     hookClientIpConfig: initialHookClientIpConfig,
+    controlUiConfig: initialControlUiConfig,
     cronState: buildGatewayCronService({
       cfg: cfgAtStart,
       deps,
@@ -791,6 +793,8 @@ export async function startGatewayServer(
         getRequiredSharedGatewaySessionGeneration(sharedGatewaySessionGenerationState),
       rateLimiter: authRateLimiter,
       browserRateLimiter: browserAuthRateLimiter,
+      getClientIpConfig: () => runtimeState?.hookClientIpConfig ?? initialHookClientIpConfig,
+      getControlUiConfig: () => (runtimeState ? runtimeState.controlUiConfig : initialControlUiConfig),
       gatewayMethods: runtimeState.gatewayMethods,
       events: GATEWAY_EVENTS,
       logGateway: log,
@@ -866,6 +870,7 @@ export async function startGatewayServer(
       getState: () => ({
         hooksConfig: runtimeState.hooksConfig,
         hookClientIpConfig: runtimeState.hookClientIpConfig,
+        controlUiConfig: runtimeState.controlUiConfig,
         heartbeatRunner: runtimeState.heartbeatRunner,
         cronState: runtimeState.cronState,
         channelHealthMonitor: runtimeState.channelHealthMonitor,
@@ -873,6 +878,7 @@ export async function startGatewayServer(
       setState: (nextState) => {
         runtimeState.hooksConfig = nextState.hooksConfig;
         runtimeState.hookClientIpConfig = nextState.hookClientIpConfig;
+        runtimeState.controlUiConfig = nextState.controlUiConfig;
         runtimeState.heartbeatRunner = nextState.heartbeatRunner;
         runtimeState.cronState = nextState.cronState;
         deps.cron = runtimeState.cronState.cron;
