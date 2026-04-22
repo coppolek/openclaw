@@ -32,6 +32,7 @@ const state: RegistryState = (() => {
       key: null,
       workspaceDir: null,
       runtimeSubagentMode: "default",
+      coreGatewayMethodNames: [],
       importedPluginIds: new Set<string>(),
     };
     globalState[PLUGIN_REGISTRY_STATE] = registryState;
@@ -78,6 +79,7 @@ export function setActivePluginRegistry(
   cacheKey?: string,
   runtimeSubagentMode: "default" | "explicit" | "gateway-bindable" = "default",
   workspaceDir?: string,
+  coreGatewayMethodNames?: readonly string[],
 ) {
   state.activeRegistry = registry;
   state.activeVersion += 1;
@@ -86,6 +88,7 @@ export function setActivePluginRegistry(
   state.key = cacheKey ?? null;
   state.workspaceDir = workspaceDir ?? null;
   state.runtimeSubagentMode = runtimeSubagentMode;
+  state.coreGatewayMethodNames = [...(coreGatewayMethodNames ?? [])];
 }
 
 export function getActivePluginRegistry(): PluginRegistry | null {
@@ -192,6 +195,10 @@ export function getActivePluginRuntimeSubagentMode(): "default" | "explicit" | "
   return state.runtimeSubagentMode;
 }
 
+export function getActivePluginCoreGatewayMethodNames(): string[] {
+  return [...state.coreGatewayMethodNames];
+}
+
 export function getActivePluginRegistryVersion(): number {
   return state.activeVersion;
 }
@@ -237,5 +244,6 @@ export function resetPluginRuntimeStateForTest(): void {
   state.key = null;
   state.workspaceDir = null;
   state.runtimeSubagentMode = "default";
+  state.coreGatewayMethodNames = [];
   state.importedPluginIds.clear();
 }
