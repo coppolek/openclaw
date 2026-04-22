@@ -10,7 +10,11 @@ import {
   resolveMemoryRemDreamingConfig,
 } from "openclaw/plugin-sdk/memory-core-host-status";
 import { describe, expect, it, vi } from "vitest";
-import { __testing, runDreamingSweepPhases } from "./dreaming-phases.js";
+import {
+  __testing,
+  runDreamingSweepPhases,
+  seedHistoricalDailyMemorySignals,
+} from "./dreaming-phases.js";
 import {
   rankShortTermPromotionCandidates,
   recordShortTermRecalls,
@@ -20,6 +24,7 @@ import { createMemoryCoreTestHarness } from "./test-helpers.js";
 
 const { createTempWorkspace } = createMemoryCoreTestHarness();
 const DREAMING_TEST_BASE_TIME = new Date("2026-04-05T10:00:00.000Z");
+const SESSION_SUMMARY_DAILY_MEMORY_SENTINEL = "<!-- openclaw:session-memory-summary -->";
 const DREAMING_TEST_DAY = "2026-04-05";
 const LIGHT_DREAMING_TEST_CONFIG: OpenClawConfig = {
   plugins: {
@@ -491,7 +496,7 @@ describe("memory-core dreaming phases", () => {
   it("ingests recent daily memory files even before recall traffic exists", async () => {
     const workspaceDir = await createDreamingWorkspace();
     await fs.writeFile(
-      path.join(workspaceDir, "memory", "2026-04-05.md"),
+      path.join(workspaceDir, "memory", "2026-04-05-session-reset.md"),
       ["# 2026-04-05", "", "- Move backups to S3 Glacier.", "- Keep retention at 365 days."].join(
         "\n",
       ),
@@ -548,6 +553,592 @@ describe("memory-core dreaming phases", () => {
     expect(after[0]?.endLine).toBe(4);
     expect(after[0]?.snippet).toContain("Move backups to S3 Glacier.");
     expect(after[0]?.snippet).toContain("Keep retention at 365 days.");
+  });
+
+  it("keeps same-day historical imports on distinct dated memory paths", async () => {
+    const workspaceDir = await createDreamingWorkspace();
+    const canonicalPath = path.join(workspaceDir, "memory", "2026-04-05.md");
+    const sluggedPath = path.join(workspaceDir, "memory", "2026-04-05-session-reset.md");
+    await fs.writeFile(canonicalPath, "# 2026-04-05\n\n- Canonical note.\n", "utf-8");
+    await fs.writeFile(sluggedPath, "# 2026-04-05\n\n- Session reset note.\n", "utf-8");
+
+    await seedHistoricalDailyMemorySignals({
+      workspaceDir,
+      filePaths: [canonicalPath, sluggedPath],
+      limit: 20,
+      nowMs: Date.parse("2026-04-05T10:00:00.000Z"),
+    });
+
+    const after = await rankShortTermPromotionCandidates({
+      workspaceDir,
+      minScore: 0,
+      minRecallCount: 0,
+      minUniqueQueries: 0,
+      nowMs: Date.parse("2026-04-05T10:05:00.000Z"),
+    });
+
+    expect(after.map((entry) => entry.path).toSorted()).toEqual([
+      "memory/2026-04-05-session-reset.md",
+      "memory/2026-04-05.md",
+    ]);
+  });
+
+  it("keeps uppercase-extension daily notes reachable after historical imports", async () => {
+    const workspaceDir = await createDreamingWorkspace();
+    const uppercasePath = path.join(workspaceDir, "memory", "2026-04-05.MD");
+    await fs.writeFile(uppercasePath, "# 2026-04-05\n\n- Durable note.\n", "utf-8");
+
+    await seedHistoricalDailyMemorySignals({
+      workspaceDir,
+      filePaths: [uppercasePath],
+      limit: 20,
+      nowMs: Date.parse("2026-04-05T10:00:00.000Z"),
+    });
+
+    const after = await rankShortTermPromotionCandidates({
+      workspaceDir,
+      minScore: 0,
+      minRecallCount: 0,
+      minUniqueQueries: 0,
+      nowMs: Date.parse("2026-04-05T10:05:00.000Z"),
+    });
+
+    expect(after).toEqual([expect.objectContaining({ path: "memory/2026-04-05.MD" })]);
+  });
+
+  it("skips session-summary bookkeeping files during historical daily imports", async () => {
+    const workspaceDir = await createDreamingWorkspace();
+    const canonicalPath = path.join(workspaceDir, "memory", "2026-04-05.md");
+    const sessionSummaryPath = path.join(workspaceDir, "memory", "2026-04-05-session-reset.md");
+    await fs.writeFile(canonicalPath, "# 2026-04-05\n\n- Durable note.\n", "utf-8");
+    await fs.writeFile(
+      sessionSummaryPath,
+      [
+        "# Session: 2026-04-05 19:30:00 America/Chicago",
+        "",
+        SESSION_SUMMARY_DAILY_MEMORY_SENTINEL,
+        "",
+        "- **Session Key**: agent:main:main",
+        "- **Session ID**: reset-123",
+        "- **Source**: cli",
+        "",
+        "## Conversation Summary",
+        "",
+        "assistant: bookkeeping only",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    await seedHistoricalDailyMemorySignals({
+      workspaceDir,
+      filePaths: [canonicalPath, sessionSummaryPath],
+      limit: 20,
+      nowMs: Date.parse("2026-04-05T10:00:00.000Z"),
+    });
+
+    const after = await rankShortTermPromotionCandidates({
+      workspaceDir,
+      minScore: 0,
+      minRecallCount: 0,
+      minUniqueQueries: 0,
+      nowMs: Date.parse("2026-04-05T10:05:00.000Z"),
+    });
+
+    expect(after.map((entry) => entry.path)).toEqual(["memory/2026-04-05.md"]);
+  });
+
+  it("does not let session-summary bookkeeping files shrink historical import budgets", async () => {
+    const workspaceDir = await createDreamingWorkspace();
+    const canonicalPath = path.join(workspaceDir, "memory", "2026-04-05.md");
+    await fs.writeFile(
+      canonicalPath,
+      [
+        "# 2026-04-05",
+        "",
+        ...Array.from({ length: 28 }, (_unused, index) => `- Durable ${index + 1}.`),
+      ].join("\n"),
+      "utf-8",
+    );
+    for (let index = 0; index < 10; index += 1) {
+      await fs.writeFile(
+        path.join(workspaceDir, "memory", `2026-04-05-session-${index}.md`),
+        [
+          "# Session: 2026-04-05 19:30:00 America/Chicago",
+          "",
+          SESSION_SUMMARY_DAILY_MEMORY_SENTINEL,
+          "",
+          "- **Session Key**: agent:main:main",
+          "- **Session ID**: reset-123",
+          "- **Source**: cli",
+          "",
+          "## Conversation Summary",
+          "",
+          `assistant: bookkeeping only ${index}`,
+        ].join("\n"),
+        "utf-8",
+      );
+    }
+
+    const imported = await seedHistoricalDailyMemorySignals({
+      workspaceDir,
+      filePaths: await fs
+        .readdir(path.join(workspaceDir, "memory"))
+        .then((entries) => entries.map((entry) => path.join(workspaceDir, "memory", entry))),
+      limit: 5,
+      nowMs: Date.parse("2026-04-05T10:00:00.000Z"),
+    });
+
+    expect(imported.importedFileCount).toBe(1);
+    expect(imported.importedSignalCount).toBe(7);
+  });
+
+  it("orders same-day daily ingestion deterministically with canonical files first", async () => {
+    const workspaceDir = await createDreamingWorkspace();
+    await fs.writeFile(
+      path.join(workspaceDir, "memory", "2026-04-06.md"),
+      [
+        "# 2026-04-06",
+        "",
+        ...Array.from({ length: 28 }, (_unused, index) => `- Latest ${index + 1}.`),
+      ].join("\n"),
+      "utf-8",
+    );
+    await fs.writeFile(
+      path.join(workspaceDir, "memory", "2026-04-05.md"),
+      [
+        "# 2026-04-05",
+        "",
+        ...Array.from({ length: 28 }, (_unused, index) => `- Canonical ${index + 1}.`),
+      ].join("\n"),
+      "utf-8",
+    );
+    await fs.writeFile(
+      path.join(workspaceDir, "memory", "2026-04-05-session-reset.md"),
+      [
+        "# 2026-04-05",
+        "",
+        ...Array.from({ length: 28 }, (_unused, index) => `- Session reset ${index + 1}.`),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const collected = await __testing.collectDailyIngestionBatches({
+      workspaceDir,
+      lookbackDays: 3,
+      limit: 5,
+      nowMs: Date.parse("2026-04-06T10:00:00.000Z"),
+      state: { version: 1, files: {} },
+    });
+
+    expect(collected.batches.map((batch) => batch.results[0]?.path)).toEqual([
+      "memory/2026-04-06.md",
+      "memory/2026-04-05.md",
+      "memory/2026-04-05-session-reset.md",
+    ]);
+    expect(collected.batches[1]?.results).toHaveLength(7);
+    expect(collected.batches[2]?.results).toHaveLength(6);
+  });
+
+  it("skips session-summary bookkeeping files during automatic daily ingestion", async () => {
+    const workspaceDir = await createDreamingWorkspace();
+    await fs.writeFile(
+      path.join(workspaceDir, "memory", "2026-04-06.md"),
+      "# 2026-04-06\n\n- Durable note.\n",
+      "utf-8",
+    );
+    await fs.writeFile(
+      path.join(workspaceDir, "memory", "2026-04-06-session-reset.md"),
+      [
+        "# Session: 2026-04-06 19:30:00 America/Chicago",
+        "",
+        SESSION_SUMMARY_DAILY_MEMORY_SENTINEL,
+        "",
+        "- **Session Key**: agent:main:main",
+        "- **Session ID**: reset-456",
+        "- **Source**: cli",
+        "",
+        "## Conversation Summary",
+        "",
+        "assistant: bookkeeping only",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const collected = await __testing.collectDailyIngestionBatches({
+      workspaceDir,
+      lookbackDays: 3,
+      limit: 5,
+      nowMs: Date.parse("2026-04-06T10:00:00.000Z"),
+      state: { version: 1, files: {} },
+    });
+
+    const resultPaths = collected.batches.flatMap((batch) =>
+      batch.results.map((result) => result.path),
+    );
+    expect(resultPaths).toContain("memory/2026-04-06.md");
+    expect(resultPaths).not.toContain("memory/2026-04-06-session-reset.md");
+  });
+
+  it("does not let session-summary bookkeeping files shrink automatic ingestion budgets", async () => {
+    const workspaceDir = await createDreamingWorkspace();
+    await fs.writeFile(
+      path.join(workspaceDir, "memory", "2026-04-06.md"),
+      [
+        "# 2026-04-06",
+        "",
+        ...Array.from({ length: 28 }, (_unused, index) => `- Durable ${index + 1}.`),
+      ].join("\n"),
+      "utf-8",
+    );
+    for (let index = 0; index < 10; index += 1) {
+      await fs.writeFile(
+        path.join(workspaceDir, "memory", `2026-04-06-session-${index}.md`),
+        [
+          "# Session: 2026-04-06 19:30:00 America/Chicago",
+          "",
+          SESSION_SUMMARY_DAILY_MEMORY_SENTINEL,
+          "",
+          "- **Session Key**: agent:main:main",
+          "- **Session ID**: reset-456",
+          "- **Source**: cli",
+          "",
+          "## Conversation Summary",
+          "",
+          `assistant: bookkeeping only ${index}`,
+        ].join("\n"),
+        "utf-8",
+      );
+    }
+
+    const collected = await __testing.collectDailyIngestionBatches({
+      workspaceDir,
+      lookbackDays: 3,
+      limit: 5,
+      nowMs: Date.parse("2026-04-06T10:00:00.000Z"),
+      state: { version: 1, files: {} },
+    });
+
+    expect(collected.batches).toHaveLength(1);
+    expect(collected.batches[0]?.results).toHaveLength(7);
+    expect(collected.nextState.files).toEqual({
+      "memory/2026-04-06.md": expect.objectContaining({
+        mtimeMs: expect.any(Number),
+        size: expect.any(Number),
+        contentKind: "durable",
+      }),
+    });
+  });
+
+  it("drops unchanged legacy session-summary files from the daily-ingestion checkpoint", async () => {
+    const workspaceDir = await createDreamingWorkspace();
+    await fs.writeFile(
+      path.join(workspaceDir, "memory", "2026-04-06.md"),
+      [
+        "# 2026-04-06",
+        "",
+        ...Array.from({ length: 28 }, (_unused, index) => `- Durable ${index + 1}.`),
+      ].join("\n"),
+      "utf-8",
+    );
+    const legacyState: Record<string, { mtimeMs: number; size: number }> = {};
+    for (let index = 0; index < 10; index += 1) {
+      const fileName = `2026-04-06-session-${index}.md`;
+      const filePath = path.join(workspaceDir, "memory", fileName);
+      await fs.writeFile(
+        filePath,
+        [
+          "# Session: 2026-04-06 19:30:00 America/Chicago",
+          "",
+          SESSION_SUMMARY_DAILY_MEMORY_SENTINEL,
+          "",
+          "- **Session Key**: agent:main:main",
+          "- **Session ID**: reset-456",
+          "- **Source**: cli",
+          "",
+          "## Conversation Summary",
+          "",
+          `assistant: bookkeeping only ${index}`,
+        ].join("\n"),
+        "utf-8",
+      );
+      const stat = await fs.stat(filePath);
+      legacyState[`memory/${fileName}`] = {
+        mtimeMs: Math.floor(Math.max(0, stat.mtimeMs)),
+        size: Math.floor(Math.max(0, stat.size)),
+      };
+    }
+
+    const collected = await __testing.collectDailyIngestionBatches({
+      workspaceDir,
+      lookbackDays: 3,
+      limit: 5,
+      nowMs: Date.parse("2026-04-06T10:00:00.000Z"),
+      state: {
+        version: 1,
+        files: legacyState,
+      },
+    });
+
+    expect(collected.batches).toHaveLength(1);
+    expect(collected.batches[0]?.results).toHaveLength(7);
+    expect(Object.keys(collected.nextState.files)).toEqual(["memory/2026-04-06.md"]);
+    expect(collected.nextState.files["memory/2026-04-06.md"]).toMatchObject({
+      contentKind: "durable",
+    });
+  });
+
+  it("drops unchanged canonical session-summary files from legacy daily-ingestion checkpoints", async () => {
+    const workspaceDir = await createDreamingWorkspace();
+    const canonicalPath = path.join(workspaceDir, "memory", "2026-04-06.md");
+    await fs.writeFile(
+      canonicalPath,
+      [
+        "# Session: 2026-04-06 19:30:00 America/Chicago",
+        "",
+        SESSION_SUMMARY_DAILY_MEMORY_SENTINEL,
+        "",
+        "- **Session Key**: agent:main:main",
+        "- **Session ID**: reset-456",
+        "- **Source**: cli",
+        "",
+        "## Conversation Summary",
+        "",
+        "assistant: bookkeeping only",
+      ].join("\n"),
+      "utf-8",
+    );
+    const stat = await fs.stat(canonicalPath);
+
+    const collected = await __testing.collectDailyIngestionBatches({
+      workspaceDir,
+      lookbackDays: 3,
+      limit: 5,
+      nowMs: Date.parse("2026-04-06T10:00:00.000Z"),
+      state: {
+        version: 1,
+        files: {
+          "memory/2026-04-06.md": {
+            mtimeMs: Math.floor(Math.max(0, stat.mtimeMs)),
+            size: Math.floor(Math.max(0, stat.size)),
+          },
+        },
+      },
+    });
+
+    expect(collected.batches).toEqual([]);
+    expect(collected.nextState.files).toEqual({});
+  });
+
+  it("keeps capped daily files pending until a later ingestion pass", async () => {
+    const workspaceDir = await createDreamingWorkspace();
+    for (const day of ["2026-04-06", "2026-04-05", "2026-04-04", "2026-04-03", "2026-04-02"]) {
+      await fs.writeFile(
+        path.join(workspaceDir, "memory", `${day}.md`),
+        [
+          `# ${day}`,
+          "",
+          ...Array.from({ length: 28 }, (_unused, index) => `- Durable ${day} ${index + 1}.`),
+        ].join("\n"),
+        "utf-8",
+      );
+    }
+
+    const first = await __testing.collectDailyIngestionBatches({
+      workspaceDir,
+      lookbackDays: 10,
+      limit: 5,
+      nowMs: Date.parse("2026-04-06T10:00:00.000Z"),
+      state: { version: 1, files: {} },
+    });
+
+    expect(first.batches.map((batch) => batch.results[0]?.path)).toEqual([
+      "memory/2026-04-06.md",
+      "memory/2026-04-05.md",
+      "memory/2026-04-04.md",
+      "memory/2026-04-03.md",
+    ]);
+    expect(first.batches[3]?.results).toHaveLength(2);
+    expect(Object.keys(first.nextState.files)).not.toContain("memory/2026-04-03.md");
+    expect(Object.keys(first.nextState.files)).not.toContain("memory/2026-04-02.md");
+    expect(first.nextState.pendingPaths).toEqual(["memory/2026-04-02.md", "memory/2026-04-03.md"]);
+
+    const second = await __testing.collectDailyIngestionBatches({
+      workspaceDir,
+      lookbackDays: 10,
+      limit: 5,
+      nowMs: Date.parse("2026-04-06T10:00:00.000Z"),
+      state: first.nextState,
+    });
+
+    expect(second.batches.map((batch) => batch.results[0]?.path)).toEqual([
+      "memory/2026-04-02.md",
+      "memory/2026-04-03.md",
+    ]);
+    expect(Object.keys(second.nextState.files)).toContain("memory/2026-04-02.md");
+    expect(Object.keys(second.nextState.files)).toContain("memory/2026-04-03.md");
+    expect(second.nextState.pendingPaths).toBeUndefined();
+  });
+
+  it("retries pending daily files even after they age out of the normal lookback window", async () => {
+    const workspaceDir = await createDreamingWorkspace();
+    for (const day of ["2026-04-06", "2026-04-05", "2026-04-04", "2026-04-03", "2026-04-02"]) {
+      await fs.writeFile(
+        path.join(workspaceDir, "memory", `${day}.md`),
+        [
+          `# ${day}`,
+          "",
+          ...Array.from({ length: 28 }, (_unused, index) => `- Durable ${day} ${index + 1}.`),
+        ].join("\n"),
+        "utf-8",
+      );
+    }
+
+    const first = await __testing.collectDailyIngestionBatches({
+      workspaceDir,
+      lookbackDays: 10,
+      limit: 5,
+      nowMs: Date.parse("2026-04-06T10:00:00.000Z"),
+      state: { version: 1, files: {} },
+    });
+
+    expect(first.nextState.pendingPaths).toEqual(["memory/2026-04-02.md", "memory/2026-04-03.md"]);
+
+    const second = await __testing.collectDailyIngestionBatches({
+      workspaceDir,
+      lookbackDays: 3,
+      limit: 5,
+      nowMs: Date.parse("2026-04-20T10:00:00.000Z"),
+      state: first.nextState,
+    });
+
+    expect(second.batches.map((batch) => batch.results[0]?.path)).toEqual([
+      "memory/2026-04-02.md",
+      "memory/2026-04-03.md",
+    ]);
+    expect(Object.keys(second.nextState.files)).toContain("memory/2026-04-02.md");
+    expect(Object.keys(second.nextState.files)).toContain("memory/2026-04-03.md");
+    expect(second.nextState.pendingPaths).toBeUndefined();
+  });
+
+  it("keeps changed tracked daily files pending when ingestion hits the cap", async () => {
+    const workspaceDir = await createDreamingWorkspace();
+    for (const day of ["2026-04-06", "2026-04-05", "2026-04-04", "2026-04-03", "2026-04-02"]) {
+      await fs.writeFile(
+        path.join(workspaceDir, "memory", `${day}.md`),
+        [
+          `# ${day}`,
+          "",
+          ...Array.from({ length: 28 }, (_unused, index) => `- Durable ${day} ${index + 1}.`),
+        ].join("\n"),
+        "utf-8",
+      );
+    }
+
+    const seeded = await __testing.collectDailyIngestionBatches({
+      workspaceDir,
+      lookbackDays: 10,
+      limit: 5,
+      nowMs: Date.parse("2026-04-06T10:00:00.000Z"),
+      state: { version: 1, files: {} },
+    });
+    const baseline = await __testing.collectDailyIngestionBatches({
+      workspaceDir,
+      lookbackDays: 10,
+      limit: 5,
+      nowMs: Date.parse("2026-04-06T10:00:00.000Z"),
+      state: seeded.nextState,
+    });
+    const updatedMtime = new Date("2026-04-06T10:11:00.000Z");
+
+    const updated20260402Path = path.join(workspaceDir, "memory", "2026-04-02.md");
+    await fs.writeFile(
+      updated20260402Path,
+      [
+        "# 2026-04-02",
+        "",
+        ...Array.from({ length: 28 }, (_unused, index) => `- Updated 2026-04-02 ${index + 1}.`),
+      ].join("\n"),
+      "utf-8",
+    );
+    await fs.utimes(updated20260402Path, updatedMtime, updatedMtime);
+    for (const day of ["2026-04-06", "2026-04-05", "2026-04-04", "2026-04-03"]) {
+      const notePath = path.join(workspaceDir, "memory", `${day}.md`);
+      await fs.writeFile(
+        notePath,
+        [
+          `# ${day}`,
+          "",
+          ...Array.from({ length: 28 }, (_unused, index) => `- Updated ${day} ${index + 1}.`),
+        ].join("\n"),
+        "utf-8",
+      );
+      await fs.utimes(notePath, updatedMtime, updatedMtime);
+    }
+
+    const capped = await __testing.collectDailyIngestionBatches({
+      workspaceDir,
+      lookbackDays: 10,
+      limit: 5,
+      nowMs: Date.parse("2026-04-06T10:10:00.000Z"),
+      state: baseline.nextState,
+    });
+
+    expect(capped.nextState.pendingPaths).toEqual(["memory/2026-04-02.md", "memory/2026-04-03.md"]);
+
+    const retried = await __testing.collectDailyIngestionBatches({
+      workspaceDir,
+      lookbackDays: 10,
+      limit: 5,
+      nowMs: Date.parse("2026-04-06T10:15:00.000Z"),
+      state: capped.nextState,
+    });
+
+    expect(retried.batches.map((batch) => batch.results[0]?.path)).toEqual([
+      "memory/2026-04-02.md",
+      "memory/2026-04-03.md",
+    ]);
+    expect(
+      retried.batches[0]?.results.some((result) => result.snippet.includes("Updated 2026-04-02")),
+    ).toBe(true);
+    expect(retried.nextState.pendingPaths).toBeUndefined();
+  });
+
+  it("skips rereading unchanged daily notes that already match the checkpoint", async () => {
+    const workspaceDir = await createDreamingWorkspace();
+    const relativePath = "memory/2026-04-06.md";
+    const notePath = path.join(workspaceDir, relativePath);
+    await fs.writeFile(notePath, "# 2026-04-06\n\n- Durable note.\n", "utf-8");
+    const stat = await fs.stat(notePath);
+    const fingerprint = {
+      mtimeMs: Math.floor(Math.max(0, stat.mtimeMs)),
+      size: Math.floor(Math.max(0, stat.size)),
+      contentKind: "durable" as const,
+    };
+    const readFileSpy = vi.spyOn(fs, "readFile");
+
+    try {
+      const collected = await __testing.collectDailyIngestionBatches({
+        workspaceDir,
+        lookbackDays: 3,
+        limit: 5,
+        nowMs: Date.parse("2026-04-06T10:00:00.000Z"),
+        state: {
+          version: 1,
+          files: {
+            [relativePath]: fingerprint,
+          },
+        },
+      });
+
+      expect(collected.batches).toEqual([]);
+      expect(collected.changed).toBe(false);
+      expect(collected.nextState.files).toEqual({
+        [relativePath]: fingerprint,
+      });
+      expect(readFileSpy).not.toHaveBeenCalledWith(notePath, "utf-8");
+    } finally {
+      readFileSpy.mockRestore();
+    }
   });
 
   it("renders non-zero light-sleep confidence for dreaming-ingested candidates", async () => {

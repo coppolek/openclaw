@@ -266,11 +266,14 @@ export async function resolveBootstrapContextForRun(params: {
   contextFiles: EmbeddedContextFile[];
 }> {
   const bootstrapFiles = await resolveBootstrapFilesForRun(params);
-  const contextFiles = buildBootstrapContextFiles(bootstrapFiles, {
-    maxChars: resolveBootstrapMaxChars(params.config),
-    totalMaxChars: resolveBootstrapTotalMaxChars(params.config),
-    warn: params.warn,
-  });
+  const contextFiles = buildBootstrapContextFiles(
+    bootstrapFiles.filter((file) => !file.missing),
+    {
+      maxChars: resolveBootstrapMaxChars(params.config),
+      totalMaxChars: resolveBootstrapTotalMaxChars(params.config),
+      warn: params.warn,
+    },
+  );
   return { bootstrapFiles, contextFiles };
 }
 

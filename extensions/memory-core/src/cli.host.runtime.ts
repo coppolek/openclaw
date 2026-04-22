@@ -20,7 +20,14 @@ export {
   type OpenClawConfig,
 } from "openclaw/plugin-sdk/memory-core-host-runtime-core";
 export {
+  collectDreamDiaryBackfillEntries,
+  extractDailyMemoryDayFromPath,
+  filterOutSessionSummaryDailyMemoryFiles,
+  filterSessionSummaryDailyMemoryFiles,
+  isSessionSummaryDailyMemory,
+  listDailyMemoryFiles,
   listMemoryFiles,
   normalizeExtraMemoryPaths,
+  parseDailyMemoryFileName,
 } from "openclaw/plugin-sdk/memory-core-host-runtime-files";
 export { getMemorySearchManager } from "./memory/index.js";
