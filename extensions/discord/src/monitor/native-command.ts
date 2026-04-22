@@ -1095,7 +1095,7 @@ async function dispatchDiscordCommandInteraction(params: {
       threadParentId,
     });
     if (!hasRenderableReplyPayload(pluginReply)) {
-      await respond("Done.");
+      await respond("⚠️ Command produced no visible reply.");
       return;
     }
     await deliverDiscordInteractionReply({
@@ -1279,7 +1279,7 @@ async function dispatchDiscordCommandInteraction(params: {
   ) {
     await safeDiscordInteractionCall("interaction empty fallback", async () => {
       const payload = {
-        content: "✅ Done.",
+        content: "⚠️ Command produced no visible reply.",
         ephemeral: true,
       };
       if (preferFollowUp) {
