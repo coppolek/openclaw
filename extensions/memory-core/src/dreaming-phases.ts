@@ -566,6 +566,52 @@ function normalizeSessionCorpusSnippet(value: string): string {
   return value.replace(/\s+/g, " ").trim().slice(0, SESSION_INGESTION_MAX_SNIPPET_CHARS);
 }
 
+/**
+ * Returns true if a normalized session corpus snippet is automation
+ * scaffolding rather than a meaningful user/assistant exchange and should
+ * be skipped by dreaming ingestion.
+ *
+ * Concretely this drops:
+ * - Cron-triggered user prompts emitted by the cron runtime, which have the
+ *   shape `User: [cron:<jobId> <jobName>] <message>` (see
+ *   `src/cron/isolated-agent/run.ts:405`). Job IDs are at least four
+ *   alphanumeric/underscore/dash characters in practice — tight enough to
+ *   leave a user question like “User: [cron:0 3 * * *] explain this”
+ *   untouched while still catching every runtime-injected prompt.
+ * - Assistant `NO_REPLY` sentinels, which are the documented "silent reply"
+ *   marker from the system prompt rather than actual content.
+ * - System-injected `HEARTBEAT_OK` acknowledgements from heartbeat polls.
+ *
+ * Everything else (including real user mentions of the word "cron" in
+ * prose) is passed through untouched, because the matches are anchored
+ * on the `User:`/`Assistant:` role prefix produced by `buildSessionEntry`.
+ *
+ * See openclaw/openclaw#68449 issue 2.
+ */
+function isCronNoiseSessionSnippet(snippet: string): boolean {
+  // `snippet` has already been trimmed + max-length-clamped by
+  // `normalizeSessionCorpusSnippet`, and the call site rejects anything
+  // shorter than `SESSION_INGESTION_MIN_SNIPPET_CHARS`, so no empty-string
+  // guard is needed here.
+
+  // Cron-triggered user prompts: `[cron:<jobId> <jobName>] <message>`.
+  // Require the jobId to be ≥ 4 chars of `[A-Za-z0-9_-]` so that user prose
+  // starting with a raw cron expression like `[cron:0 3 * * *] ...` does not
+  // match (the leading field of a cron expression is only 1–3 chars).
+  if (/^User:\s*\[cron:[A-Za-z0-9_-]{4,}[\s\]]/i.test(snippet)) {
+    return true;
+  }
+  // Silent-reply sentinel and heartbeat acks are fixed strings the assistant
+  // is instructed to emit instead of real content.
+  if (/^Assistant:\s*NO_REPLY\s*$/i.test(snippet)) {
+    return true;
+  }
+  if (/^Assistant:\s*HEARTBEAT_OK\s*$/i.test(snippet)) {
+    return true;
+  }
+  return false;
+}
+
 function hashSessionMessageId(value: string): string {
   return createHash("sha1").update(value).digest("hex");
 }
@@ -847,6 +893,12 @@ async function collectSessionIngestionBatches(params: {
       const rawSnippet = lines[index] ?? "";
       const snippet = normalizeSessionCorpusSnippet(rawSnippet);
       if (snippet.length < SESSION_INGESTION_MIN_SNIPPET_CHARS) {
+        continue;
+      }
+      // Drop cron-triggered prompts and NO_REPLY/HEARTBEAT_OK sentinels so
+      // they don't flood the dreaming corpus with automation scaffolding.
+      // See openclaw/openclaw#68449 issue 2.
+      if (isCronNoiseSessionSnippet(snippet)) {
         continue;
       }
       const lineNumber = entry.lineMap[index] ?? index + 1;
