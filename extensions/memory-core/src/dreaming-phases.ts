@@ -1236,9 +1236,18 @@ async function collectDailyIngestionBatches(params: {
       nextFiles[candidate.relativePath] = candidate.fingerprint;
       continue;
     }
+    const fullyIngested = results.length >= chunks.length;
     batches.push({ day: candidate.day, results });
-    nextFiles[candidate.relativePath] = candidate.fingerprint;
     total += results.length;
+    if (!fullyIngested) {
+      if (candidate.previous) {
+        nextFiles[candidate.relativePath] = candidate.previous;
+      }
+      pendingPaths.add(candidate.relativePath);
+      exhausted = true;
+      continue;
+    }
+    nextFiles[candidate.relativePath] = candidate.fingerprint;
     if (total >= totalCap) {
       exhausted = true;
     }

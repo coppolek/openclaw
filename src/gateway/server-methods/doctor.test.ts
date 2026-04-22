@@ -1855,8 +1855,8 @@ describe("doctor.memory.dreamDiary", () => {
     await fs.writeFile(unreadablePath, "blocked\n", "utf-8");
     resolveAgentWorkspaceDir.mockReturnValue(workspaceDir);
     const respond = vi.fn();
-    const originalReadFile = fs.readFile.bind(fs);
-    const readFile = vi.spyOn(fs, "readFile").mockImplementation(async (target, options) => {
+    const originalOpen = fs.open.bind(fs);
+    const openFile = vi.spyOn(fs, "open").mockImplementation(async (target, flags, mode) => {
       const resolvedTarget =
         typeof target === "string"
           ? target
@@ -1870,7 +1870,7 @@ describe("doctor.memory.dreamDiary", () => {
         error.code = "EACCES";
         throw error;
       }
-      return await originalReadFile(target, options);
+      return await originalOpen(target, flags, mode);
     });
 
     try {
@@ -1881,7 +1881,7 @@ describe("doctor.memory.dreamDiary", () => {
       expect(writeBackfillDiaryEntries).not.toHaveBeenCalled();
       expect(respond).not.toHaveBeenCalled();
     } finally {
-      readFile.mockRestore();
+      openFile.mockRestore();
       await fs.rm(workspaceDir, { recursive: true, force: true });
     }
   });
