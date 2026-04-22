@@ -110,6 +110,21 @@ export async function generateBearerTokenFromIam(params: {
   }
 }
 
+/**
+ * Read a cached IAM bearer token for the given region (sync, no generation).
+ *
+ * Returns the token if it exists and has not expired, undefined otherwise.
+ * This is used by `resolveConfigApiKey` to serve a fresh token at auth
+ * resolution time without requiring an async call.
+ */
+export function getCachedIamToken(region: string): string | undefined {
+  const cached = iamTokenCache.get(region);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.token;
+  }
+  return undefined;
+}
+
 /** Reset the IAM token cache (for testing). */
 export function resetIamTokenCacheForTest(): void {
   iamTokenCache.clear();

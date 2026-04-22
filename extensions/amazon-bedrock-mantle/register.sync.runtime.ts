@@ -3,6 +3,7 @@ import {
   mergeImplicitMantleProvider,
   resolveImplicitMantleProvider,
   resolveMantleBearerToken,
+  getCachedIamToken,
 } from "./discovery.js";
 
 export function registerBedrockMantlePlugin(api: OpenClawPluginApi): void {
@@ -30,8 +31,13 @@ export function registerBedrockMantlePlugin(api: OpenClawPluginApi): void {
         };
       },
     },
-    resolveConfigApiKey: ({ env }) =>
-      resolveMantleBearerToken(env) ? "AWS_BEARER_TOKEN_BEDROCK" : undefined,
+    resolveConfigApiKey: ({ env }) => {
+      // 1. Explicit bearer token env var
+      if (resolveMantleBearerToken(env)) return "env:AWS_BEARER_TOKEN_BEDROCK";
+      // 2. IAM — return cached token (refreshed by catalog.run, 1hr TTL)
+      const region = env.AWS_REGION ?? env.AWS_DEFAULT_REGION ?? "us-east-1";
+      return getCachedIamToken(region) ?? undefined;
+    },
     matchesContextOverflowError: ({ errorMessage }) =>
       /context_length_exceeded|max.*tokens.*exceeded/i.test(errorMessage),
     classifyFailoverReason: ({ errorMessage }) => {
