@@ -50,11 +50,13 @@ describe("sameFileIdentity", () => {
       expected: true,
     },
     {
-      name: "keeps dev strictness on win32 when both dev values are non-zero",
+      // Windows 上 lstatSync（路径）与 fstatSync（fd）可返回两个不同的非零 dev，
+      // inode 匹配时应接受，否则插件在 Windows 上全部加载失败。
+      name: "accepts win32 dev mismatch even when both dev values are non-zero",
       left: stat(7, 11),
       right: stat(8, 11),
       platform: "win32" as const,
-      expected: false,
+      expected: true,
     },
     {
       name: "handles bigint stats",
