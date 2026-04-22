@@ -12,6 +12,11 @@ import {
   getCachedPluginJitiLoader,
   type PluginJitiLoaderCache,
 } from "../plugins/jiti-loader-cache.js";
+import {
+  createProfiler,
+  formatPluginLoadProfileLine,
+  shouldProfilePluginLoader,
+} from "../plugins/plugin-load-profile.js";
 import type { PluginRuntime } from "../plugins/runtime/types.js";
 import { resolveLoaderPackageRoot } from "../plugins/sdk-alias.js";
 import type { AnyAgentTool, OpenClawPluginApi, PluginCommandContext } from "../plugins/types.js";
@@ -318,7 +323,9 @@ function loadBundledEntryModuleSync(importMetaUrl: string, specifier: string): u
     return cached;
   }
   let loaded: unknown;
-  let loadError: unknown;
+  const profile = shouldProfilePluginLoader();
+  const loadStartMs = profile ? performance.now() : 0;
+  let getJitiEndMs = 0;
   if (
     process.platform === "win32" &&
     modulePath.includes(`${path.sep}dist${path.sep}`) &&
@@ -326,19 +333,15 @@ function loadBundledEntryModuleSync(importMetaUrl: string, specifier: string): u
   ) {
     try {
       loaded = nodeRequire(modulePath);
-    } catch (err) {
-      loadError = err;
-      // Fall through to jiti loader
+    } catch {
+      const jiti = getJiti(modulePath);
+      getJitiEndMs = profile ? performance.now() : 0;
+      loaded = jiti(modulePath);
     }
-  }
-  if (loaded === undefined) {
-    try {
-      loaded = getJiti(modulePath)(modulePath);
-    } catch (err) {
-      loadError = err;
-      // jiti failed; propagate the error without caching
-      throw loadError;
-    }
+  } else {
+    const jiti = getJiti(modulePath);
+    getJitiEndMs = profile ? performance.now() : 0;
+    loaded = jiti(modulePath);
   }
   // Defensive: if loaded is undefined or null, refuse to cache and throw
   if (loaded === undefined || loaded === null) {
@@ -353,6 +356,31 @@ function loadBundledEntryModuleSync(importMetaUrl: string, specifier: string): u
   } catch {
     loadedModuleExports.delete(modulePath);
     throw new Error(`Bundled module returned inaccessible proxy (null/undefined target): ${modulePath}`);
+  }
+  if (profile) {
+    const endMs = performance.now();
+    // Use shared formatter — but split timing fields ourselves so we can
+    // attribute time spent in `getJiti(...)` factory creation vs the actual
+    // graph-walking `__j(modulePath)` call. Both are emitted as extras
+    // alongside the canonical `elapsedMs=<total>` field.
+    console.error(
+      formatPluginLoadProfileLine({
+        phase: "bundled-entry-module-load",
+        pluginId: "(bundled-entry)",
+        source: modulePath,
+        elapsedMs: endMs - loadStartMs,
+        // When the Win32 fast-path resolves the module via `nodeRequire`,
+        // `getJitiEndMs` stays `0` because the `catch` block (the only place
+        // it gets stamped) never runs. Reporting `getJitiMs` /
+        // `jitiCallMs` as `0` for that path keeps the breakdown honest:
+        // `elapsedMs=` already captures the nodeRequire time, and we don't
+        // want to mis-attribute it to jiti sub-steps.
+        extras: [
+          ["getJitiMs", getJitiEndMs ? getJitiEndMs - loadStartMs : 0],
+          ["jitiCallMs", getJitiEndMs ? endMs - getJitiEndMs : 0],
+        ],
+      }),
+    );
   }
   loadedModuleExports.set(modulePath, loaded);
   return loaded;
@@ -433,13 +461,17 @@ export function defineBundledChannelEntry<TPlugin = ChannelPlugin>({
         registerCliMetadata?.(api);
         return;
       }
-      setChannelRuntime?.(api.runtime);
-      api.registerChannel({ plugin: loadChannelPlugin() as ChannelPlugin });
+      const profile = createProfiler({ pluginId: id, source: importMetaUrl });
+      profile("bundled-register:setChannelRuntime", () => setChannelRuntime?.(api.runtime));
+      const channelPlugin = profile("bundled-register:loadChannelPlugin", loadChannelPlugin);
+      profile("bundled-register:registerChannel", () =>
+        api.registerChannel({ plugin: channelPlugin as ChannelPlugin }),
+      );
       if (api.registrationMode !== "full") {
         return;
       }
-      registerCliMetadata?.(api);
-      registerFull?.(api);
+      profile("bundled-register:registerCliMetadata", () => registerCliMetadata?.(api));
+      profile("bundled-register:registerFull", () => registerFull?.(api));
     },
     loadChannelPlugin,
     ...(loadChannelSecrets ? { loadChannelSecrets } : {}),
