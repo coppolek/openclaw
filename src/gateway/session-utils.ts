@@ -7,6 +7,7 @@ import {
   resolveAgentWorkspaceDir,
   resolveDefaultAgentId,
 } from "../agents/agent-scope.js";
+import { normalizeProviderId } from "../agents/provider-id.js";
 import { lookupContextTokens, resolveContextTokensForModel } from "../agents/context.js";
 import { DEFAULT_CONTEXT_TOKENS, DEFAULT_MODEL, DEFAULT_PROVIDER } from "../agents/defaults.js";
 import type { ModelCatalogEntry } from "../agents/model-catalog.js";
@@ -1112,6 +1113,43 @@ export function resolveSessionModelRef(
   return resolved;
 }
 
+/**
+ * Check if a model has explicit image input capability declared in the user's
+ * provider configuration (openclaw.json → models.providers).  Returns true only
+ * when a matching provider+model definition explicitly lists "image" in its
+ * `input` array. Returns false for any miss or when config is unavailable.
+ */
+function resolveExplicitProviderModelSupportsImages(
+  provider: string | undefined,
+  model: string | undefined,
+): boolean {
+  if (!provider || !model) {
+    return false;
+  }
+  try {
+    const cfg = loadConfig();
+    const providers = cfg.models?.providers;
+    if (!providers) {
+      return false;
+    }
+    const normalizedProvider = normalizeProviderId(provider);
+    const normalizedModel = normalizeLowercaseStringOrEmpty(model);
+    for (const [providerId, providerConfig] of Object.entries(providers)) {
+      if (normalizeProviderId(providerId) !== normalizedProvider) {
+        continue;
+      }
+      for (const modelDef of providerConfig.models ?? []) {
+        if (normalizeLowercaseStringOrEmpty(modelDef.id) === normalizedModel) {
+          return Array.isArray(modelDef.input) && modelDef.input.includes("image");
+        }
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export async function resolveGatewayModelSupportsImages(params: {
   loadGatewayModelCatalog: () => Promise<ModelCatalogEntry[]>;
   provider?: string;
@@ -1175,6 +1213,13 @@ export async function resolveGatewayModelSupportsImages(params: {
           candidate.startsWith("claude-"),
       )
     ) {
+      return true;
+    }
+    // Fallback: check user-defined provider model configs for explicit image
+    // input capability. This covers models that the built-in catalog filters
+    // out (e.g. qwen3.6-plus on coding.dashscope) but the user has explicitly
+    // configured with input: ["text", "image"] in openclaw.json.
+    if (resolveExplicitProviderModelSupportsImages(params.provider, params.model)) {
       return true;
     }
     return false;
