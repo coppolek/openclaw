@@ -765,6 +765,7 @@ describe("gateway server sessions", () => {
       context: {
         broadcastToConnIds,
         getSessionEventSubscriberConnIds: () => new Set(["conn-1"]),
+        getSessionMessageSubscriberConnIds: () => new Set(["conn-1"]),
         loadGatewayModelCatalog: async () => ({ providers: [] }),
       } as never,
       client: null,
@@ -824,6 +825,7 @@ describe("gateway server sessions", () => {
       context: {
         broadcastToConnIds,
         getSessionEventSubscriberConnIds: () => new Set(["conn-1"]),
+        getSessionMessageSubscriberConnIds: () => new Set(["conn-1"]),
         loadGatewayModelCatalog: async () => ({ providers: [] }),
       } as never,
       client: null,
@@ -878,6 +880,7 @@ describe("gateway server sessions", () => {
       context: {
         broadcastToConnIds,
         getSessionEventSubscriberConnIds: () => new Set(["conn-1"]),
+        getSessionMessageSubscriberConnIds: () => new Set(["conn-1"]),
         loadGatewayModelCatalog: async () => ({ providers: [] }),
       } as never,
       client: null,
@@ -931,6 +934,7 @@ describe("gateway server sessions", () => {
       context: {
         broadcastToConnIds,
         getSessionEventSubscriberConnIds: () => new Set(["conn-1"]),
+        getSessionMessageSubscriberConnIds: () => new Set(["conn-1"]),
         loadGatewayModelCatalog: async () => ({ providers: [] }),
       } as never,
       client: null,
