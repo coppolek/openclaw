@@ -49,6 +49,8 @@ function mergeManualRunSnapshotAfterReload(params: {
     enabled: boolean;
     updatedAtMs: number;
     state: CronJob["state"];
+    /** Delivery config snapshot for immutability across runs (#68760). */
+    delivery?: CronJob["delivery"];
   } | null;
   removed: boolean;
 }) {
@@ -69,6 +71,10 @@ function mergeManualRunSnapshotAfterReload(params: {
   reloaded.enabled = params.snapshot.enabled;
   reloaded.updatedAtMs = params.snapshot.updatedAtMs;
   reloaded.state = params.snapshot.state;
+  // Restore delivery config to guard against in-flight mutations (#68760).
+  if (params.snapshot.delivery !== undefined) {
+    reloaded.delivery = params.snapshot.delivery;
+  }
 }
 
 async function ensureLoadedForRead(state: CronServiceState) {
@@ -361,6 +367,8 @@ type PreparedManualRun =
       taskRunId?: string;
       startedAt: number;
       executionJob: CronJob;
+      /** Snapshot of delivery config for immutability across runs (#68760). */
+      deliverySnapshot?: CronJob["delivery"];
     }
   | { ok: false };
 
@@ -587,6 +595,7 @@ async function prepareManualRun(
       taskRunId,
       startedAt: preflight.now,
       executionJob,
+      deliverySnapshot: job.delivery ? structuredClone(job.delivery) : undefined,
     } as const;
   });
 }
@@ -619,6 +628,12 @@ async function finishPreparedManualRun(
     const job = state.store?.jobs.find((entry) => entry.id === jobId);
     if (!job) {
       return;
+    }
+
+    // Restore delivery config snapshot to guard against in-flight
+    // mutations during execution (#68760).
+    if (prepared.deliverySnapshot !== undefined) {
+      job.delivery = prepared.deliverySnapshot;
     }
 
     const shouldDelete = applyJobResult(
@@ -668,6 +683,7 @@ async function finishPreparedManualRun(
           enabled: job.enabled,
           updatedAtMs: job.updatedAtMs,
           state: structuredClone(job.state),
+          delivery: prepared.deliverySnapshot,
         };
     const postRunRemoved = shouldDelete;
     // Isolated Telegram send can persist target writeback directly to disk.
