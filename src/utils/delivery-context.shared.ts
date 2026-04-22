@@ -100,6 +100,12 @@ export function deliveryContextFromSession(
   return normalizeSessionDeliveryFields(source).deliveryContext;
 }
 
+// NOTE: The channelsConflict guard below is channel-level only; it does not
+// detect cross-conversation leak within the same channel (e.g. primary.to
+// differs from fallback.to but channels match). Spawn paths that compare a
+// ctx-supplied target against a parent session's stored target layer an
+// additional to-level guard on top of this helper — see
+// src/agents/subagent-spawn.ts and src/agents/acp-spawn.ts.
 export function mergeDeliveryContext(
   primary?: DeliveryContext,
   fallback?: DeliveryContext,

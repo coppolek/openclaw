@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { SessionsPatchParams } from "../gateway/protocol/schema/types.js";
 import type { SubagentLifecycleHookRunner } from "../plugins/hooks.js";
 import { isValidAgentId, normalizeAgentId, parseAgentSessionKey } from "../routing/session-key.js";
 import {
@@ -40,9 +41,11 @@ import {
   DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH,
   buildSubagentSystemPrompt,
   callGateway,
+  deliveryContextFromSession,
   emitSessionLifecycleEvent,
   getGlobalHookRunner,
   loadConfig,
+  loadSessionEntry,
   mergeSessionEntry,
   mergeDeliveryContext,
   normalizeDeliveryContext,
@@ -462,14 +465,71 @@ export async function spawnSubagentDirect(
     };
   }
   const targetAgentId = requestedAgentId ? normalizeAgentId(requestedAgentId) : requesterAgentId;
+  // Backfill missing delivery routing fields from the parent session's stored
+  // deliveryContext. The tool-wiring layer (pi-tools / tool-resolution) sources
+  // ctx.agent{Channel,To,ThreadId,AccountId} from the current invocation's
+  // request, which can be empty for top-level-agent runs not driven by a direct
+  // inbound (e.g. a router awakened by an internal trigger). Without backfill
+  // the spawned child loses thread context and replies leak to the channel
+  // root. mergeDeliveryContext owns the channel-mismatch guard so we never
+  // cross to/threadId between unrelated channels.
+  const ctxDeliveryHint = normalizeDeliveryContext({
+    channel: ctx.agentChannel,
+    to: ctx.agentTo,
+    accountId: ctx.agentAccountId,
+    threadId: ctx.agentThreadId,
+  });
+  // Best-effort parent lookup; defensive against test harnesses or future
+  // callers that don't provide a writable session store.
+  let parentDelivery: DeliveryContext | undefined;
+  if (requesterInternalKey) {
+    try {
+      parentDelivery = deliveryContextFromSession(loadSessionEntry(requesterInternalKey).entry);
+    } catch {
+      parentDelivery = undefined;
+    }
+  }
+  // Don't inherit parent's threadId when the current request targets a
+  // different `to` in the same channel. mergeDeliveryContext's channels-match
+  // path would otherwise fold parent's threadId into an unrelated conversation
+  // (e.g. root-level spawn explicitly targeting a different channel member).
+  const toMismatch =
+    Boolean(ctxDeliveryHint?.to) &&
+    Boolean(parentDelivery?.to) &&
+    ctxDeliveryHint?.to !== parentDelivery?.to;
+  // Parent entries with a `threadId` but no `to` cannot be attributed to any
+  // specific conversation. If the current request has its own `to`, folding
+  // that orphan threadId in would route the child into an unrelated stale
+  // thread for the new target. Strip just the threadId and keep the rest
+  // (channel, accountId) so other fields still backfill normally.
+  const threadOnlyParentMismatch =
+    Boolean(ctxDeliveryHint?.to) && !parentDelivery?.to && parentDelivery?.threadId != null;
+  // Caller explicitly targeted a `to` but did not supply a threadId → treat as
+  // an intentional root-level send. Parent's threadId (even for a matching
+  // `to`) would otherwise fold in via mergeDeliveryContext and turn the
+  // root-level request into a threaded reply in a stale prior thread. The
+  // channel-mismatch guard in mergeDeliveryContext cannot catch this because
+  // channels match; the above `toMismatch` gate cannot catch it because `to`s
+  // match too.
+  const ctxRootLevelOverridesParentThread =
+    Boolean(ctxDeliveryHint?.to) &&
+    ctxDeliveryHint?.threadId == null &&
+    parentDelivery?.threadId != null;
+  const effectiveParentDelivery = toMismatch
+    ? undefined
+    : threadOnlyParentMismatch || ctxRootLevelOverridesParentThread
+      ? { ...parentDelivery, threadId: undefined }
+      : parentDelivery;
+  const effectiveRequesterDelivery =
+    mergeDeliveryContext(ctxDeliveryHint, effectiveParentDelivery) ?? ctxDeliveryHint;
   const requesterOrigin = resolveRequesterOriginForChild({
     cfg,
     targetAgentId,
     requesterAgentId,
-    requesterChannel: ctx.agentChannel,
-    requesterAccountId: ctx.agentAccountId,
-    requesterTo: ctx.agentTo,
-    requesterThreadId: ctx.agentThreadId,
+    requesterChannel: effectiveRequesterDelivery?.channel ?? ctx.agentChannel,
+    requesterAccountId: effectiveRequesterDelivery?.accountId ?? ctx.agentAccountId,
+    requesterTo: effectiveRequesterDelivery?.to ?? ctx.agentTo,
+    requesterThreadId: effectiveRequesterDelivery?.threadId ?? ctx.agentThreadId,
     requesterGroupSpace: ctx.agentGroupSpace,
     requesterMemberRoleIds: ctx.agentMemberRoleIds,
   });
@@ -538,7 +598,9 @@ export async function spawnSubagentDirect(
     };
   }
   const { resolvedModel, thinkingOverride } = plan;
-  const patchChildSession = async (patch: Record<string, unknown>): Promise<string | undefined> => {
+  const patchChildSession = async (
+    patch: Omit<SessionsPatchParams, "key">,
+  ): Promise<string | undefined> => {
     try {
       await callSubagentGateway({
         method: "sessions.patch",
@@ -551,7 +613,7 @@ export async function spawnSubagentDirect(
     }
   };
 
-  const initialChildSessionPatch: Record<string, unknown> = {
+  const initialChildSessionPatch: Omit<SessionsPatchParams, "key"> = {
     spawnDepth: childDepth,
     subagentRole: childCapabilities.role === "main" ? null : childCapabilities.role,
     subagentControlScope: childCapabilities.controlScope,

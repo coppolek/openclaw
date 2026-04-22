@@ -44,6 +44,7 @@ import { resolveSessionTranscriptFile } from "../config/sessions/transcript.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { callGateway } from "../gateway/call.js";
+import { loadSessionEntry } from "../gateway/session-utils.js";
 import { areHeartbeatsEnabled } from "../infra/heartbeat-wake.js";
 import { resolveConversationIdFromTargets } from "../infra/outbound/conversation-id.js";
 import { normalizeConversationTargetRef } from "../infra/outbound/session-binding-normalization.js";
@@ -68,6 +69,7 @@ import { listTasksForOwnerKey } from "../tasks/runtime-internal.js";
 import {
   deliveryContextFromSession,
   formatConversationTarget,
+  mergeDeliveryContext,
   normalizeDeliveryContext,
   resolveConversationDeliveryTarget,
 } from "../utils/delivery-context.js";
@@ -730,11 +732,72 @@ function resolveAcpSpawnRequesterState(params: {
           .listBySession(params.parentSessionKey)
           .some((record) => record.targetKind === "subagent" && record.status !== "ended")
       : false;
-  const hasThreadContext =
-    typeof params.ctx.agentThreadId === "string"
-      ? Boolean(normalizeOptionalString(params.ctx.agentThreadId))
-      : params.ctx.agentThreadId != null;
   const requesterAgentId = requesterParsedSession?.agentId;
+
+  // Backfill missing delivery routing fields from the parent session's stored
+  // deliveryContext. The tool-wiring layer (pi-tools / tool-resolution) sources
+  // ctx.agent{Channel,To,ThreadId,AccountId} from the current invocation's
+  // request, which can be empty for top-level-agent runs not driven by a direct
+  // inbound (e.g. a router awakened by an internal trigger). Without backfill
+  // the spawned child loses thread context and replies leak to the channel
+  // root. mergeDeliveryContext owns the channel-mismatch guard so we never
+  // cross to/threadId between unrelated channels. Mirrors spawnSubagentDirect.
+  const ctxDeliveryHint = normalizeDeliveryContext({
+    channel: params.ctx.agentChannel,
+    to: params.ctx.agentTo,
+    accountId: params.ctx.agentAccountId,
+    threadId: params.ctx.agentThreadId,
+  });
+  // Best-effort parent lookup. Use the gateway session-target helper so
+  // display aliases (e.g. `main`) resolve to the canonical internal key in
+  // the correct agent's store — gating on `parseAgentSessionKey` directly
+  // would skip backfill for any caller that passes a display key.
+  let parentDelivery: ReturnType<typeof deliveryContextFromSession> = undefined;
+  if (params.parentSessionKey) {
+    try {
+      parentDelivery = deliveryContextFromSession(loadSessionEntry(params.parentSessionKey).entry);
+    } catch {
+      parentDelivery = undefined;
+    }
+  }
+  // Don't inherit parent's threadId when the current request targets a
+  // different `to` in the same channel. mergeDeliveryContext's channels-match
+  // path would otherwise fold parent's threadId into an unrelated conversation
+  // (e.g. root-level spawn explicitly targeting a different channel member).
+  const toMismatch =
+    Boolean(ctxDeliveryHint?.to) &&
+    Boolean(parentDelivery?.to) &&
+    ctxDeliveryHint?.to !== parentDelivery?.to;
+  // Parent entries with a `threadId` but no `to` cannot be attributed to any
+  // specific conversation. If the current request has its own `to`, folding
+  // that orphan threadId in would route the child into an unrelated stale
+  // thread for the new target. Strip just the threadId and keep the rest
+  // (channel, accountId) so other fields still backfill normally.
+  const threadOnlyParentMismatch =
+    Boolean(ctxDeliveryHint?.to) && !parentDelivery?.to && parentDelivery?.threadId != null;
+  // Caller explicitly targeted a `to` but did not supply a threadId → treat as
+  // an intentional root-level send. Parent's threadId (even for a matching
+  // `to`) would otherwise fold in via mergeDeliveryContext and turn the
+  // root-level request into a threaded reply in a stale prior thread. The
+  // channel-mismatch guard in mergeDeliveryContext cannot catch this because
+  // channels match; the above `toMismatch` gate cannot catch it because `to`s
+  // match too.
+  const ctxRootLevelOverridesParentThread =
+    Boolean(ctxDeliveryHint?.to) &&
+    ctxDeliveryHint?.threadId == null &&
+    parentDelivery?.threadId != null;
+  const effectiveParentDelivery = toMismatch
+    ? undefined
+    : threadOnlyParentMismatch || ctxRootLevelOverridesParentThread
+      ? { ...parentDelivery, threadId: undefined }
+      : parentDelivery;
+  const effectiveRequesterDelivery =
+    mergeDeliveryContext(ctxDeliveryHint, effectiveParentDelivery) ?? ctxDeliveryHint;
+  // Derive thread-context from merged delivery so callers that backfill
+  // threadId from the parent session (e.g. top-level-agent spawns where the
+  // tool-wiring layer left ctx.agentThreadId empty) don't get misclassified
+  // as non-threaded by downstream consumers like resolveAcpSpawnStreamPlan.
+  const hasThreadContext = effectiveRequesterDelivery?.threadId != null;
 
   return {
     parentSessionKey: params.parentSessionKey,
@@ -757,10 +820,10 @@ function resolveAcpSpawnRequesterState(params: {
       cfg: params.cfg,
       targetAgentId: params.targetAgentId,
       requesterAgentId: normalizeAgentId(requesterAgentId),
-      requesterChannel: params.ctx.agentChannel,
-      requesterAccountId: params.ctx.agentAccountId,
-      requesterTo: params.ctx.agentTo,
-      requesterThreadId: params.ctx.agentThreadId,
+      requesterChannel: effectiveRequesterDelivery?.channel ?? params.ctx.agentChannel,
+      requesterAccountId: effectiveRequesterDelivery?.accountId ?? params.ctx.agentAccountId,
+      requesterTo: effectiveRequesterDelivery?.to ?? params.ctx.agentTo,
+      requesterThreadId: effectiveRequesterDelivery?.threadId ?? params.ctx.agentThreadId,
       requesterGroupSpace: params.ctx.agentGroupSpace,
       requesterMemberRoleIds: params.ctx.agentMemberRoleIds,
     }),
