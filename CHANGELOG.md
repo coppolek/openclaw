@@ -12,6 +12,7 @@ Docs: https://docs.openclaw.ai
 - Plugins/startup: prefer native Jiti loading for built bundled plugin dist modules on supported runtimes, cutting measured bundled plugin load time by 82-90% while keeping source TypeScript on the transform path. (#69925) Thanks @aauren.
 - Providers/Tencent: add the bundled Tencent Cloud provider plugin with TokenHub and Token Plan onboarding, docs, `hy3-preview` model catalog entries, and tiered Hy3 pricing metadata. (#68460) Thanks @JuniperSling.
 - TUI: add local embedded mode for running terminal chats without a Gateway while keeping plugin approval gates enforced. (#66767) Thanks @fuller-stack-dev.
+- WhatsApp/accounts: suppress root `channels.whatsapp.groups` inheritance across accounts when more than one account is configured, matching the existing Telegram behavior so per-chat `systemPrompt` overrides no longer fan out to every account implicitly. Single-account setups and explicit account-level `groups` maps are unchanged. **Breaking:** multi-account users relying on implicit root-level inheritance must move `groups` into each account config explicitly (or into `accounts.default` to share across named accounts). (#69874)
 
 ### Fixes
 

@@ -38,6 +38,7 @@ function _resolveWhatsAppAccountConfig(
 function resolveMergedNamedWhatsAppAccountConfig(params: {
   cfg: OpenClawConfig;
   accountId: string;
+  omitKeys: string[];
 }): WhatsAppAccountConfig {
   const rootCfg = params.cfg.channels?.whatsapp;
   const accountConfig = _resolveWhatsAppAccountConfig(params.cfg, params.accountId);
@@ -45,7 +46,7 @@ function resolveMergedNamedWhatsAppAccountConfig(params: {
     ...mergeAccountConfig<WhatsAppAccountConfig>({
       channelConfig: rootCfg as WhatsAppAccountConfig | undefined,
       accountConfig: undefined,
-      omitKeys: ["defaultAccount"],
+      omitKeys: params.omitKeys,
     }),
     ...resolveWhatsAppDefaultAccountSharedConfig(params.cfg),
     ...accountConfig,
@@ -58,16 +59,24 @@ export function resolveMergedWhatsAppAccountConfig(params: {
 }): WhatsAppAccountConfig & { accountId: string } {
   const rootCfg = params.cfg.channels?.whatsapp;
   const accountId = params.accountId?.trim() || rootCfg?.defaultAccount || DEFAULT_ACCOUNT_ID;
+  // Multi-account bots must not inherit channel-level `groups` unless explicitly set,
+  // so root `channels.whatsapp.groups` does not fan out across accounts. Mirrors the
+  // Telegram guard in extensions/telegram/src/account-config.ts:mergeTelegramAccountConfig.
+  // Shared defaults under `channels.whatsapp.accounts.default.groups` still flow to named
+  // accounts because that is an explicit opt-in, not implicit root inheritance.
+  const configuredAccountIds = Object.keys(rootCfg?.accounts ?? {});
+  const isMultiAccount = configuredAccountIds.length > 1;
+  const omitKeys = isMultiAccount ? ["defaultAccount", "groups"] : ["defaultAccount"];
   const base = resolveMergedAccountConfig<WhatsAppAccountConfig>({
     channelConfig: rootCfg as WhatsAppAccountConfig | undefined,
     accounts: rootCfg?.accounts as Record<string, Partial<WhatsAppAccountConfig>> | undefined,
     accountId,
-    omitKeys: ["defaultAccount"],
+    omitKeys,
   });
   const merged =
     accountId === DEFAULT_ACCOUNT_ID
       ? base
-      : resolveMergedNamedWhatsAppAccountConfig({ cfg: params.cfg, accountId });
+      : resolveMergedNamedWhatsAppAccountConfig({ cfg: params.cfg, accountId, omitKeys });
   return {
     accountId,
     ...merged,
