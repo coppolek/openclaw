@@ -41,6 +41,7 @@ import {
   type SessionScope,
 } from "../config/sessions.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { normalizeUsageDisplay } from "../auto-reply/thinking.js";
 import { openBoundaryFileSync } from "../infra/boundary-file-read.js";
 import {
   DEFAULT_AGENT_ID,
@@ -65,6 +66,7 @@ import {
 import { normalizeSessionDeliveryFields } from "../utils/delivery-context.shared.js";
 import { estimateUsageCost, resolveModelCostConfig } from "../utils/usage-format.js";
 import {
+  canonicalizeSessionKeyForAgent,
   canonicalizeSpawnedByForAgent,
   resolveSessionStoreAgentId,
   resolveSessionStoreKey,
@@ -414,43 +416,71 @@ export function resolveDeletedAgentIdFromSessionKey(
   return agentId;
 }
 
+function resolveLoadSessionStoreLookupInput(args: {
+  cfg: OpenClawConfig;
+  sessionKey: string;
+  canonicalKey: string;
+  agentId: string;
+}): { key: string; canonicalKey: string; agentId: string } {
+  const rawKey = normalizeOptionalString(args.sessionKey) ?? "";
+  const deletedAgentId = resolveDeletedAgentIdFromSessionKey(args.cfg, rawKey);
+  if (deletedAgentId === DEFAULT_AGENT_ID) {
+    return {
+      key: rawKey,
+      canonicalKey: rawKey,
+      agentId: deletedAgentId,
+    };
+  }
+  return {
+    key: rawKey,
+    canonicalKey: args.canonicalKey,
+    agentId: args.agentId,
+  };
+}
+
 export function loadSessionEntry(sessionKey: string) {
   const cfg = loadConfig();
-  const key = normalizeOptionalString(sessionKey) ?? "";
+  const canonicalKey = resolveSessionStoreKey({ cfg, sessionKey });
+  const agentId = resolveSessionStoreAgentId(cfg, canonicalKey);
+  const lookup = resolveLoadSessionStoreLookupInput({
+    cfg,
+    sessionKey,
+    canonicalKey,
+    agentId,
+  });
+  const { storePath, store } = resolveGatewaySessionStoreLookup({
+    cfg,
+    key: lookup.key,
+    canonicalKey: lookup.canonicalKey,
+    agentId: lookup.agentId,
+  });
   const target = resolveGatewaySessionStoreTarget({
     cfg,
-    key,
-  });
-  const storePath = target.storePath;
-  const store = loadSessionStore(storePath);
-  const freshestMatch = resolveFreshestSessionStoreMatchFromStoreKeys(store, target.storeKeys);
-  const legacyKey = freshestMatch?.key !== target.canonicalKey ? freshestMatch?.key : undefined;
-  return {
-    cfg,
-    storePath,
+    key: normalizeOptionalString(sessionKey) ?? "",
     store,
-    entry: freshestMatch?.entry,
-    canonicalKey: target.canonicalKey,
-    legacyKey,
-  };
+  });
+  const freshestMatch = resolveFreshestSessionStoreMatchFromStoreKeys(store, target.storeKeys);
+  const legacyKey = freshestMatch?.key !== canonicalKey ? freshestMatch?.key : undefined;
+  return { cfg, storePath, store, entry: freshestMatch?.entry, canonicalKey, legacyKey };
 }
 
 export function resolveFreshestSessionStoreMatchFromStoreKeys(
   store: Record<string, SessionEntry>,
   storeKeys: string[],
 ): { key: string; entry: SessionEntry } | undefined {
-  let freshest: { key: string; entry: SessionEntry } | undefined;
-  for (const key of storeKeys) {
-    const entry = store[key];
-    if (!entry) {
-      continue;
-    }
-    const match = { key, entry };
-    if (!freshest || (match.entry.updatedAt ?? 0) > (freshest.entry.updatedAt ?? 0)) {
-      freshest = match;
-    }
+  const matches = storeKeys
+    .map((key) => {
+      const entry = store[key];
+      return entry ? { key, entry } : undefined;
+    })
+    .filter((match): match is { key: string; entry: SessionEntry } => match !== undefined);
+  if (matches.length === 0) {
+    return undefined;
   }
-  return freshest;
+  if (matches.length === 1) {
+    return matches[0];
+  }
+  return [...matches].toSorted((a, b) => (b.entry.updatedAt ?? 0) - (a.entry.updatedAt ?? 0))[0];
 }
 
 export function resolveFreshestSessionEntryFromStoreKeys(
@@ -484,13 +514,9 @@ function findFreshestStoreMatch(
   if (matches.size === 0) {
     return undefined;
   }
-  let freshest: { entry: SessionEntry; key: string } | undefined;
-  for (const match of matches.values()) {
-    if (!freshest || (match.entry.updatedAt ?? 0) > (freshest.entry.updatedAt ?? 0)) {
-      freshest = match;
-    }
-  }
-  return freshest;
+  return [...matches.values()].toSorted(
+    (a, b) => (b.entry.updatedAt ?? 0) - (a.entry.updatedAt ?? 0),
+  )[0];
 }
 
 /**
@@ -931,7 +957,6 @@ export function resolveGatewaySessionStoreTarget(params: {
   if (explicitDeletedMainTarget) {
     return explicitDeletedMainTarget;
   }
-
   const canonicalKey = resolveSessionStoreKey({
     cfg: params.cfg,
     sessionKey: key,
@@ -1019,11 +1044,7 @@ export function loadCombinedSessionStoreForGateway(cfg: OpenClawConfig): {
     const store = loadSessionStore(storePath);
     const combined: Record<string, SessionEntry> = {};
     for (const [key, entry] of Object.entries(store)) {
-      const canonicalKey = resolveStoredSessionKeyForAgentStore({
-        cfg,
-        agentId: defaultAgentId,
-        sessionKey: key,
-      });
+      const canonicalKey = canonicalizeSessionKeyForAgent(defaultAgentId, key);
       mergeSessionEntryIntoCombined({
         cfg,
         combined,
@@ -1042,11 +1063,7 @@ export function loadCombinedSessionStoreForGateway(cfg: OpenClawConfig): {
     const storePath = target.storePath;
     const store = loadSessionStore(storePath);
     for (const [key, entry] of Object.entries(store)) {
-      const canonicalKey = resolveStoredSessionKeyForAgentStore({
-        cfg,
-        agentId,
-        sessionKey: key,
-      });
+      const canonicalKey = canonicalizeSessionKeyForAgent(agentId, key);
       mergeSessionEntryIntoCombined({
         cfg,
         combined,
@@ -1424,7 +1441,7 @@ export function buildGatewaySessionRow(params: {
     runtimeMs: subagentRun ? subagentRuntimeMs : entry?.runtimeMs,
     parentSessionKey: subagentOwner || entry?.parentSessionKey,
     childSessions,
-    responseUsage: entry?.responseUsage,
+    responseUsage: normalizeUsageDisplay(entry?.responseUsage ?? cfg.agents?.defaults?.responseUsage),
     modelProvider: rowModelProvider,
     model: rowModel,
     contextTokens,
