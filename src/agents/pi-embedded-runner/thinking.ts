@@ -55,6 +55,95 @@ function hasMeaningfulText(block: AssistantContentBlock): boolean {
     : false;
 }
 
+function hasNonEmptyStringSignature(block: AssistantContentBlock): boolean {
+  if (!block || typeof block !== "object") {
+    return false;
+  }
+  const rec = block as {
+    signature?: unknown;
+    thinkingSignature?: unknown;
+    thought_signature?: unknown;
+  };
+  const candidates = [rec.signature, rec.thinkingSignature, rec.thought_signature];
+  for (const sig of candidates) {
+    if (typeof sig === "string" && sig.length > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Strip thinking blocks that have obviously invalid signatures from assistant
+ * messages. This prevents Anthropic API rejection errors like "Invalid
+ * signature in thinking block" caused by empty signatures that were persisted
+ * from Bedrock streaming responses.
+ *
+ * Covers both block shapes (`type: "thinking"` and `type: "redacted_thinking"`)
+ * and matches the same set of signature field names that `isSignedThinkingBlock`
+ * recognises so that any block the rest of the runner treats as signed is also
+ * treated as signed here:
+ *   - `signature` (canonical for `redacted_thinking`)
+ *   - `thinkingSignature` (older camelCase form)
+ *   - `thought_signature` (snake_case form preserved by
+ *     `sanitizeSessionMessagesImages` when `preserveSignatures: true`)
+ *
+ * A block is considered signed if ANY of those fields holds a non-empty string,
+ * mirroring the union semantics of `isSignedThinkingBlock`. A block is stripped
+ * only when ALL of its recognised signature fields are missing, empty, or
+ * non-string — the clearly broken case.
+ *
+ * Does NOT attempt length-based heuristics to guess whether a signature is
+ * valid; the API itself is the authoritative validator.
+ *
+ * Unlike `dropThinkingBlocks` which removes ALL thinking blocks, this function
+ * preserves blocks that have at least one non-empty string signature.
+ *
+ * Returns the original array reference when nothing was changed.
+ */
+export function stripInvalidThinkingSignatures(messages: AgentMessage[]): AgentMessage[] {
+  let touched = false;
+  const out: AgentMessage[] = [];
+  for (const msg of messages) {
+    if (!isAssistantMessageWithContent(msg)) {
+      out.push(msg);
+      continue;
+    }
+    const nextContent: AssistantContentBlock[] = [];
+    let changed = false;
+    for (const block of msg.content) {
+      if (!isThinkingBlock(block)) {
+        nextContent.push(block);
+        continue;
+      }
+      if (hasNonEmptyStringSignature(block)) {
+        nextContent.push(block);
+        continue;
+      }
+      touched = true;
+      changed = true;
+    }
+    if (!changed) {
+      out.push(msg);
+      continue;
+    }
+    const content =
+      nextContent.length > 0 ? nextContent : [{ type: "text", text: "" } as AssistantContentBlock];
+    out.push({ ...msg, content });
+  }
+  return touched ? out : messages;
+}
+
+/**
+ * Returns true if the given error message indicates an Anthropic
+ * "Invalid signature in thinking block" rejection. Useful for callers that
+ * want to apply `dropThinkingBlocks` and retry once when this specific error
+ * surfaces despite `stripInvalidThinkingSignatures` running on replay.
+ */
+export function isInvalidThinkingSignatureError(errorText: string): boolean {
+  return /invalid signature in thinking block/i.test(errorText);
+}
+
 /**
  * Strip `type: "thinking"` and `type: "redacted_thinking"` content blocks from
  * all assistant messages except the latest one.
