@@ -10,10 +10,25 @@ const ENVELOPE_CHANNELS = [
   "iMessage",
   "Teams",
   "Matrix",
-  "Zalo",
   "Zalo Personal",
+  "Zalo",
   "BlueBubbles",
 ];
+
+// Regex patterns for timestamp parts to strip from sender
+const TIMESTAMP_YEAR_RE = /^\d{4}$/;
+const TIMESTAMP_TIME_RE = /^\d{2}:\d{2}$/;
+const TIMESTAMP_TZ_RE = /^(?:UTC|GMT|EST|PST)$/i;
+const TIMESTAMP_DAY_RE = /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)$/i;
+
+function isTimestampPart(part: string): boolean {
+  return (
+    TIMESTAMP_YEAR_RE.test(part) ||
+    TIMESTAMP_TIME_RE.test(part) ||
+    TIMESTAMP_TZ_RE.test(part) ||
+    TIMESTAMP_DAY_RE.test(part)
+  );
+}
 
 const MESSAGE_ID_LINE = /^\s*\[message_id:\s*[^\]]+\]\s*$/i;
 function looksLikeEnvelopeHeader(header: string): boolean {
@@ -23,7 +38,9 @@ function looksLikeEnvelopeHeader(header: string): boolean {
   if (/\d{4}-\d{2}-\d{2} \d{2}:\d{2}\b/.test(header)) {
     return true;
   }
-  return ENVELOPE_CHANNELS.some((label) => header.startsWith(`${label} `));
+  // Sort by length descending for longest match (Zalo Personal before Zalo)
+  const sortedChannels = [...ENVELOPE_CHANNELS].sort((a, b) => b.length - a.length);
+  return sortedChannels.some((label) => header.startsWith(`${label} `));
 }
 
 // Check if sender part looks like a group/room label rather than a person
@@ -50,7 +67,7 @@ function looksLikeGroupHeader(header: string): boolean {
 
 export function extractEnvelopeSender(
   text: string,
-  chatType?: "direct" | "group",
+  chatType?: "direct" | "group" | "channel",
 ): string | null {
   const match = text.match(ENVELOPE_PREFIX);
   if (!match) {
@@ -60,8 +77,9 @@ export function extractEnvelopeSender(
   if (!looksLikeEnvelopeHeader(header)) {
     return null;
   }
-  // Find which channel this is (handles multi-word channels like "Google Chat")
-  const channelMatch = ENVELOPE_CHANNELS.find((c) => header.startsWith(`${c} `));
+  // Find which channel this is - sort by length desc for longest match (Zalo Personal before Zalo)
+  const sortedChannels = [...ENVELOPE_CHANNELS].sort((a, b) => b.length - a.length);
+  const channelMatch = sortedChannels.find((c) => header.startsWith(`${c} `));
   if (!channelMatch) {
     return null;
   }
@@ -76,7 +94,8 @@ export function extractEnvelopeSender(
   }
   // If caller explicitly specified chat type, respect it
   // Only use envelope sender for direct chats (matching steipete's design intent)
-  if (chatType === "group") {
+  // "group" and "channel" both indicate non-direct chats
+  if (chatType === "group" || chatType === "channel") {
     return null;
   }
   // If chatType is explicit "direct", proceed
@@ -84,13 +103,11 @@ export function extractEnvelopeSender(
   if (chatType === undefined && looksLikeGroupHeader(header)) {
     return null;
   }
-  // Remove trailing timestamp if present (last part with 4-digit year)
+  // Remove ALL trailing timestamp parts (not just one)
+  // Timestamps can have multiple components: weekday, date, time, timezone
   const parts = senderPart.split(" ");
-  if (parts.length > 1) {
-    const lastPart = parts[parts.length - 1];
-    if (lastPart && /\d{4}/.test(lastPart)) {
-      parts.pop();
-    }
+  while (parts.length > 1 && isTimestampPart(parts[parts.length - 1])) {
+    parts.pop();
   }
   return parts.join(" ") || null;
 }
