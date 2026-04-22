@@ -1,12 +1,16 @@
-import type {
-  CliBackendPreparedExecution,
-  CliBackendPrepareExecutionContext,
-} from "openclaw/plugin-sdk/cli-backend";
+import type { CliBackendPrepareExecutionContext } from "openclaw/plugin-sdk/cli-backend";
 import { prepareCodexAuthBridge } from "openclaw/plugin-sdk/provider-auth-runtime";
+
+type OpenAICodexPreparedExecution = {
+  env: {
+    CODEX_HOME: string;
+  };
+  clearEnv: string[];
+};
 
 export async function prepareOpenAICodexCliExecution(
   ctx: CliBackendPrepareExecutionContext,
-): Promise<CliBackendPreparedExecution | null> {
+): Promise<OpenAICodexPreparedExecution | null> {
   if (!ctx.agentDir || !ctx.authProfileId) {
     return null;
   }

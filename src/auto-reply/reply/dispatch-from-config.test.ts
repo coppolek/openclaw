@@ -140,6 +140,10 @@ const ttsMocks = vi.hoisted(() => {
       typeof value === "string" ? value : undefined,
     ),
     resolveTtsConfig: vi.fn((_cfg: OpenClawConfig) => ({ mode: "final" })),
+    resolveTtsConfigForAccount: vi.fn((cfg: OpenClawConfig) => ({
+      mode: "final",
+      sourceConfig: cfg,
+    })),
   };
 });
 const replyMediaPathMocks = vi.hoisted(() => ({
@@ -327,6 +331,11 @@ vi.mock("../../tts/tts.js", () => ({
   maybeApplyTtsToPayload: (params: unknown) => ttsMocks.maybeApplyTtsToPayload(params),
   normalizeTtsAutoMode: (value: unknown) => ttsMocks.normalizeTtsAutoMode(value),
   resolveTtsConfig: (cfg: OpenClawConfig) => ttsMocks.resolveTtsConfig(cfg),
+  resolveTtsConfigForAccount: (
+    cfg: OpenClawConfig,
+    _channel: string | undefined,
+    _accountId?: string,
+  ) => ttsMocks.resolveTtsConfigForAccount(cfg),
 }));
 vi.mock("../../tts/tts.runtime.js", () => ({
   maybeApplyTtsToPayload: (params: unknown) => ttsMocks.maybeApplyTtsToPayload(params),
@@ -651,6 +660,11 @@ describe("dispatchReplyFromConfig", () => {
     ttsMocks.resolveTtsConfig.mockReturnValue({
       mode: "final",
     });
+    ttsMocks.resolveTtsConfigForAccount.mockClear();
+    ttsMocks.resolveTtsConfigForAccount.mockImplementation((cfg: OpenClawConfig) => ({
+      mode: "final",
+      sourceConfig: cfg,
+    }));
     replyMediaPathMocks.createReplyMediaPathNormalizer.mockReset();
     replyMediaPathMocks.createReplyMediaPathNormalizer.mockReturnValue(
       async (payload: ReplyPayload) => payload,
@@ -709,6 +723,32 @@ describe("dispatchReplyFromConfig", () => {
         threadId: 123,
         isGroup: true,
         groupId: "telegram:999",
+      }),
+    );
+  });
+
+  it("passes accountId into TTS runtime when dispatching on feishu", async () => {
+    setNoAbort();
+    ttsMocks.maybeApplyTtsToPayload.mockClear();
+    const dispatcher = createDispatcher();
+    const ctx = buildTestCtx({
+      Provider: "feishu",
+      Surface: "feishu",
+      AccountId: "english-bot",
+    });
+
+    const replyResolver = async (
+      _ctx: MsgContext,
+      _opts?: GetReplyOptions,
+      _cfg?: OpenClawConfig,
+    ) => ({ text: "hello from feishu" }) satisfies ReplyPayload;
+    await dispatchReplyFromConfig({ ctx, cfg: emptyConfig, dispatcher, replyResolver });
+
+    expect(ttsMocks.maybeApplyTtsToPayload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "feishu",
+        accountId: "english-bot",
+        kind: "final",
       }),
     );
   });

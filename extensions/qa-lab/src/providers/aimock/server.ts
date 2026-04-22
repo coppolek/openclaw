@@ -1,10 +1,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import {
-  LLMock,
-  type ChatCompletionRequest,
-  type JournalEntry,
-  type Mountable,
-} from "@copilotkit/aimock";
+import { LLMock, type JournalEntry, type Mountable } from "@copilotkit/aimock";
+
+type ChatCompletionRequest = {
+  messages?: Array<{
+    role?: string;
+    content?: unknown;
+  }>;
+};
 
 type AimockRequestSnapshot = {
   raw: string;

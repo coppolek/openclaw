@@ -11,8 +11,6 @@ import {
   resolveCompletedBatchResult,
   runEmbeddingBatchGroups,
   throwIfBatchTerminalFailure,
-  type EmbeddingBatchExecutionParams,
-  type EmbeddingBatchStatus,
   type BatchCompletionResult,
   type ProviderBatchOutputLine,
   uploadBatchJsonlFile,
@@ -30,7 +28,21 @@ export type OpenAiBatchRequest = {
   };
 };
 
-export type OpenAiBatchStatus = EmbeddingBatchStatus;
+type EmbeddingBatchExecutionParams = {
+  wait: boolean;
+  pollIntervalMs: number;
+  timeoutMs: number;
+  concurrency: number;
+  debug?: (message: string, data?: Record<string, unknown>) => void;
+};
+
+export type OpenAiBatchStatus = {
+  id?: string;
+  status?: string;
+  output_file_id?: string;
+  error_file_id?: string;
+  error_file?: string;
+};
 export type OpenAiBatchOutputLine = ProviderBatchOutputLine;
 
 export const OPENAI_BATCH_ENDPOINT = EMBEDDING_BATCH_ENDPOINT;

@@ -2,7 +2,6 @@ import crypto from "node:crypto";
 import {
   buildEmbeddingBatchGroupOptions,
   runEmbeddingBatchGroups,
-  type EmbeddingBatchExecutionParams,
   buildBatchHeaders,
   debugEmbeddingsLog,
   normalizeBatchBaseUrl,
@@ -38,6 +37,14 @@ export type GeminiBatchOutputLine = {
     error?: { message?: string };
   };
   error?: { message?: string };
+};
+
+type EmbeddingBatchExecutionParams = {
+  wait: boolean;
+  pollIntervalMs: number;
+  timeoutMs: number;
+  concurrency: number;
+  debug?: (message: string, data?: Record<string, unknown>) => void;
 };
 
 const GEMINI_BATCH_MAX_REQUESTS = 50000;

@@ -20,7 +20,7 @@ import {
   normalizeOptionalString,
 } from "../../shared/string-coerce.js";
 import { resolveStatusTtsSnapshot } from "../../tts/status-config.js";
-import { resolveConfiguredTtsMode } from "../../tts/tts-config.js";
+import { resolveTtsConfigForAccount } from "../../tts/tts.js";
 import type { FinalizedMsgContext } from "../templating.js";
 import { createAcpReplyProjector } from "./acp-projector.js";
 import { loadDispatchAcpMediaRuntime, resolveAcpAttachments } from "./dispatch-acp-attachments.js";
@@ -176,6 +176,7 @@ async function finalizeAcpTurnOutput(params: {
   sessionKey: string;
   delivery: AcpDispatchDeliveryCoordinator;
   inboundAudio: boolean;
+  accountId?: string;
   sessionTtsAuto?: TtsAutoMode;
   ttsChannel?: string;
   shouldEmitResolvedIdentityNotice: boolean;
@@ -183,11 +184,12 @@ async function finalizeAcpTurnOutput(params: {
   await params.delivery.settleVisibleText();
   let queuedFinal =
     params.delivery.hasDeliveredVisibleText() && !params.delivery.hasFailedVisibleTextDelivery();
-  const ttsMode = resolveConfiguredTtsMode(params.cfg);
+  const ttsConfig = resolveTtsConfigForAccount(params.cfg, params.ttsChannel, params.accountId);
+  const ttsMode = ttsConfig.mode;
   const accumulatedBlockText = params.delivery.getAccumulatedBlockText();
   const hasAccumulatedBlockText = accumulatedBlockText.trim().length > 0;
   const ttsStatus = resolveStatusTtsSnapshot({
-    cfg: params.cfg,
+    cfg: ttsConfig.sourceConfig,
     sessionAuto: params.sessionTtsAuto,
   });
   const canAttemptFinalTts =
@@ -201,6 +203,7 @@ async function finalizeAcpTurnOutput(params: {
         payload: { text: accumulatedBlockText },
         cfg: params.cfg,
         channel: params.ttsChannel,
+        accountId: params.accountId,
         kind: "final",
         inboundAudio: params.inboundAudio,
         ttsAuto: params.sessionTtsAuto,
@@ -435,6 +438,7 @@ export async function tryDispatchAcpReply(params: {
         sessionKey: canonicalSessionKey,
         delivery,
         inboundAudio: params.inboundAudio,
+        accountId: params.ctx.AccountId,
         sessionTtsAuto: params.sessionTtsAuto,
         ttsChannel: params.ttsChannel,
         shouldEmitResolvedIdentityNotice,
