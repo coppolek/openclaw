@@ -66,17 +66,17 @@
           "approvalPolicy": {
             "type": "string",
             "enum": ["never", "on-request", "on-failure", "untrusted"],
-            "default": "never"
+            "default": "on-request"
           },
           "sandbox": {
             "type": "string",
             "enum": ["read-only", "workspace-write", "danger-full-access"],
-            "default": "danger-full-access"
+            "default": "workspace-write"
           },
           "approvalsReviewer": {
             "type": "string",
             "enum": ["user", "guardian_subagent"],
-            "default": "user"
+            "default": "guardian_subagent"
           },
           "serviceTier": { "type": "string" }
         }
