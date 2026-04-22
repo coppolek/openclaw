@@ -7,6 +7,7 @@ export {
 export {
   readChannelAllowFromStore,
   readChannelAllowFromStoreSync,
+  upsertChannelPairingRequest,
 } from "../pairing/pairing-store.js";
 export { resolveChannelAllowFromPath } from "../pairing/pairing-store.js";
 import { issuePairingChallenge } from "../pairing/pairing-challenge.js";

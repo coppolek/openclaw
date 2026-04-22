@@ -38,6 +38,15 @@ export const pluginSdkDocMetadata = {
   "approval-reply-runtime": {
     category: "runtime",
   },
+  "system-events": {
+    category: "runtime",
+  },
+  "channel-conversation": {
+    category: "channel",
+  },
+  "plugin-conversation-binding": {
+    category: "runtime",
+  },
   "plugin-entry": {
     category: "core",
   },
