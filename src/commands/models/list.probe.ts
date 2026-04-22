@@ -11,11 +11,13 @@ import {
   resolveAuthProfileEligibility,
   resolveAuthProfileOrder,
 } from "../../agents/auth-profiles.js";
+import { runCliAgent } from "../../agents/cli-runner.js";
 import { describeFailoverError } from "../../agents/failover-error.js";
 import { hasUsableCustomProviderApiKey, resolveEnvApiKey } from "../../agents/model-auth.js";
 import { loadModelCatalog } from "../../agents/model-catalog.js";
 import {
   findNormalizedProviderValue,
+  isCliProvider,
   normalizeProviderId,
   parseModelRef,
 } from "../../agents/model-selection.js";
@@ -30,7 +32,12 @@ import { type SecretRefResolveCache, resolveSecretRefString } from "../../secret
 import { redactSecrets } from "../status-all/format.js";
 import { DEFAULT_PROVIDER, formatMs } from "./shared.js";
 
-const PROBE_PROMPT = "Reply with OK. Do not use tools.";
+const PROBE_PROMPT = "Reply with exactly OK and nothing else. Do not use tools.";
+
+function buildProbePrompt(maxTokens: number): string {
+  const suffix = maxTokens === 1 ? "" : "s";
+  return `${PROBE_PROMPT} Keep the reply to at most ${maxTokens} token${suffix}.`;
+}
 
 let embeddedRunnerModulePromise: Promise<typeof import("../../agents/pi-embedded.js")> | undefined;
 
@@ -459,27 +466,47 @@ async function probeTarget(params: {
     latencyMs: Date.now() - start,
   });
   try {
-    const { runEmbeddedPiAgent } = await loadEmbeddedRunnerModule();
-    await runEmbeddedPiAgent({
-      sessionId,
-      sessionFile,
-      agentId,
-      workspaceDir,
-      agentDir,
-      config: cfg,
-      prompt: PROBE_PROMPT,
-      provider: target.model.provider,
-      model: target.model.model,
-      authProfileId: target.profileId,
-      authProfileIdSource: target.profileId ? "user" : undefined,
-      timeoutMs,
-      runId: `probe-${crypto.randomUUID()}`,
-      lane: `auth-probe:${target.provider}:${target.profileId ?? target.source}`,
-      thinkLevel: "off",
-      reasoningLevel: "off",
-      verboseLevel: "off",
-      streamParams: { maxTokens },
-    });
+    if (isCliProvider(target.model.provider, cfg)) {
+      await runCliAgent({
+        sessionId,
+        sessionFile,
+        agentId,
+        workspaceDir,
+        config: cfg,
+        // CLI backends do not yet translate streamParams.maxTokens into
+        // backend-native argv, so keep auth probes explicitly tiny here too.
+        prompt: buildProbePrompt(maxTokens),
+        provider: target.model.provider,
+        model: target.model.model,
+        authProfileId: target.profileId,
+        thinkLevel: "off",
+        timeoutMs,
+        runId: `probe-${crypto.randomUUID()}`,
+        streamParams: { maxTokens },
+      });
+    } else {
+      const { runEmbeddedPiAgent } = await loadEmbeddedRunnerModule();
+      await runEmbeddedPiAgent({
+        sessionId,
+        sessionFile,
+        agentId,
+        workspaceDir,
+        agentDir,
+        config: cfg,
+        prompt: PROBE_PROMPT,
+        provider: target.model.provider,
+        model: target.model.model,
+        authProfileId: target.profileId,
+        authProfileIdSource: target.profileId ? "user" : undefined,
+        timeoutMs,
+        runId: `probe-${crypto.randomUUID()}`,
+        lane: `auth-probe:${target.provider}:${target.profileId ?? target.source}`,
+        thinkLevel: "off",
+        reasoningLevel: "off",
+        verboseLevel: "off",
+        streamParams: { maxTokens },
+      });
+    }
     return buildResult("ok");
   } catch (err) {
     const described = describeFailoverError(err);
