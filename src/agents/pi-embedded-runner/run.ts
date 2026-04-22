@@ -110,6 +110,15 @@ import {
   resolveReplayInvalidFlag,
   resolveRunLivenessState,
 } from "./run/incomplete-turn.js";
+import {
+  createEmbeddedRunLifecycleBaseEvent,
+  createEmbeddedRunLifecycleCorrelationId,
+  resolveEmbeddedRunPassTransitionDecision,
+  type EmbeddedRunLifecycleDecisionMode,
+  type EmbeddedRunPassEndEvent,
+  type EmbeddedRunPassKind,
+  type EmbeddedRunTransitionSource,
+} from "./run/lifecycle-seam.js";
 import type { RunEmbeddedPiAgentParams } from "./run/params.js";
 import { buildEmbeddedRunPayloads } from "./run/payloads.js";
 import { handleRetryLimitExhaustion } from "./run/retry-limit.js";
@@ -119,6 +128,7 @@ import {
   resolveHookModelSelection,
 } from "./run/setup.js";
 import { mergeAttemptToolMediaPayloads } from "./run/tool-media-payloads.js";
+import type { EmbeddedRunAttemptResult } from "./run/types.js";
 import {
   resolveLiveToolResultMaxChars,
   sessionLikelyHasOversizedToolResults,
@@ -136,6 +146,28 @@ import { createUsageAccumulator, mergeUsageIntoAccumulator } from "./usage-accum
 type ApiKeyInfo = ResolvedProviderAuth;
 
 const MAX_SAME_MODEL_IDLE_TIMEOUT_RETRIES = 1;
+
+function derivePassEndOutcome(
+  attempt: Pick<
+    EmbeddedRunAttemptResult,
+    "promptError" | "timedOut" | "aborted" | "currentAttemptAssistant" | "lastAssistant"
+  >,
+): EmbeddedRunPassEndEvent["outcome"] {
+  if (attempt.timedOut) {
+    return "timed_out";
+  }
+  if (attempt.aborted) {
+    return "aborted";
+  }
+  if (attempt.promptError) {
+    return "prompt_error";
+  }
+  const assistant = attempt.currentAttemptAssistant ?? attempt.lastAssistant;
+  if (assistant?.stopReason === "error") {
+    return "assistant_retry";
+  }
+  return "success";
+}
 
 function buildTraceToolSummary(params: {
   toolMetas: Array<{ toolName: string; meta?: string }>;
@@ -625,8 +657,137 @@ export async function runEmbeddedPiAgent(
         };
         let authRetryPending = false;
         let accumulatedReplayState = createEmbeddedRunReplayState();
+        const lifecycleSeam = params.lifecycleSeam;
+        const lifecycleDecisionMode: EmbeddedRunLifecycleDecisionMode =
+          params.lifecycleDecisionMode ?? "observe_only";
+        const emitPassStart = async (params2: {
+          passIndex: number;
+          passKind: EmbeddedRunPassKind;
+          correlationId: string;
+          provider: string;
+          modelId: string;
+        }) => {
+          if (!lifecycleSeam?.onPassStart) {
+            return;
+          }
+          try {
+            await lifecycleSeam.onPassStart({
+              ...createEmbeddedRunLifecycleBaseEvent({
+                runId: params.runId,
+                sessionId: params.sessionId,
+                sessionKey: params.sessionKey,
+                agentId: workspaceResolution.agentId,
+                provider: params2.provider,
+                modelId: params2.modelId,
+                passIndex: params2.passIndex,
+                passKind: params2.passKind,
+                correlationId: params2.correlationId,
+              }),
+              event: "pass_start",
+            });
+          } catch (hookErr) {
+            log.warn(`pass_start lifecycle seam failed: ${formatErrorMessage(hookErr)}`);
+          }
+        };
+        const emitPassEnd = async (params2: {
+          passIndex: number;
+          passKind: EmbeddedRunPassKind;
+          correlationId: string;
+          provider: string;
+          modelId: string;
+          outcome: EmbeddedRunPassEndEvent["outcome"];
+          stopReason?: string;
+        }) => {
+          if (!lifecycleSeam?.onPassEnd) {
+            return;
+          }
+          try {
+            await lifecycleSeam.onPassEnd({
+              ...createEmbeddedRunLifecycleBaseEvent({
+                runId: params.runId,
+                sessionId: params.sessionId,
+                sessionKey: params.sessionKey,
+                agentId: workspaceResolution.agentId,
+                provider: params2.provider,
+                modelId: params2.modelId,
+                passIndex: params2.passIndex,
+                passKind: params2.passKind,
+                correlationId: params2.correlationId,
+              }),
+              event: "pass_end",
+              outcome: params2.outcome,
+              ...(params2.stopReason ? { stopReason: params2.stopReason } : {}),
+            });
+          } catch (hookErr) {
+            log.warn(`pass_end lifecycle seam failed: ${formatErrorMessage(hookErr)}`);
+          }
+        };
+        const resolvePassTransitionDecision = async (params2: {
+          passIndex: number;
+          passKind: EmbeddedRunPassKind;
+          correlationId: string;
+          provider: string;
+          modelId: string;
+          source: EmbeddedRunTransitionSource;
+          proposedAction: string;
+          proposedReason?: string | null;
+        }) => {
+          const decision = await resolveEmbeddedRunPassTransitionDecision({
+            seam: lifecycleSeam,
+            decisionMode: lifecycleDecisionMode,
+            event: {
+              ...createEmbeddedRunLifecycleBaseEvent({
+                runId: params.runId,
+                sessionId: params.sessionId,
+                sessionKey: params.sessionKey,
+                agentId: workspaceResolution.agentId,
+                provider: params2.provider,
+                modelId: params2.modelId,
+                passIndex: params2.passIndex,
+                passKind: params2.passKind,
+                correlationId: params2.correlationId,
+              }),
+              event: "pass_transition_decision",
+              source: params2.source,
+              proposedAction: params2.proposedAction,
+              proposedReason: params2.proposedReason,
+              envelopeOnly: true,
+              decisionEffective: false,
+            },
+          });
+          return decision;
+        };
+        const formatTransitionDecisionDetails = (
+          decision: Awaited<ReturnType<typeof resolvePassTransitionDecision>>,
+        ): string => {
+          const details: string[] = [];
+          const reason = normalizeOptionalString(decision.reason);
+          if (reason) {
+            details.push(`reason: ${reason}`);
+          }
+          if (decision.annotations && Object.keys(decision.annotations).length > 0) {
+            const sortedAnnotations = Object.fromEntries(
+              Object.entries(decision.annotations).toSorted(([a], [b]) => a.localeCompare(b)),
+            );
+            details.push(`annotations: ${JSON.stringify(sortedAnnotations)}`);
+          }
+          return details.length > 0 ? ` (${details.join(", ")})` : "";
+        };
+        const throwIfTransitionHalted = (params2: {
+          decision: Awaited<ReturnType<typeof resolvePassTransitionDecision>>;
+          source: EmbeddedRunTransitionSource;
+          proposedAction: string;
+        }) => {
+          if (params2.decision.next !== "halt") {
+            return;
+          }
+          throw new Error(
+            `Embedded run lifecycle seam halted ${params2.source} transition before ${params2.proposedAction}.${formatTransitionDecisionDetails(params2.decision)}`,
+          );
+        };
         // Hoisted so the retry-limit error path can use the most recent API total.
         let lastTurnTotal: number | undefined;
+        let lastPassCorrelationId = createEmbeddedRunLifecycleCorrelationId();
         while (true) {
           if (runLoopIterations >= MAX_RUN_LOOP_ITERATIONS) {
             const message =
@@ -642,6 +803,26 @@ export async function runEmbeddedPiAgent(
               fallbackConfigured,
               failoverReason: lastRetryFailoverReason,
             });
+            const retryLimitTransitionDecision = await resolvePassTransitionDecision({
+              passIndex: runLoopIterations,
+              passKind: "model_call",
+              correlationId: lastPassCorrelationId,
+              provider,
+              modelId,
+              source: "retry_limit",
+              proposedAction: retryLimitDecision.action,
+              proposedReason:
+                "reason" in retryLimitDecision ? retryLimitDecision.reason : undefined,
+            });
+            throwIfTransitionHalted({
+              decision: retryLimitTransitionDecision,
+              source: "retry_limit",
+              proposedAction: retryLimitDecision.action,
+            });
+            if (retryLimitTransitionDecision.next === "continue") {
+              runLoopIterations = Math.max(0, runLoopIterations - 1);
+              continue;
+            }
             return handleRetryLimitExhaustion({
               message,
               decision: retryLimitDecision,
@@ -662,6 +843,10 @@ export async function runEmbeddedPiAgent(
             });
           }
           runLoopIterations += 1;
+          const passIndex = runLoopIterations;
+          const passKind: EmbeddedRunPassKind = "model_call";
+          const passCorrelationId = createEmbeddedRunLifecycleCorrelationId();
+          lastPassCorrelationId = passCorrelationId;
           const runtimeAuthRetry = authRetryPending;
           authRetryPending = false;
           attemptedThinking.add(thinkLevel);
@@ -685,6 +870,14 @@ export async function runEmbeddedPiAgent(
           if (!runtimeAuthState && apiKeyInfo) {
             resolvedStreamApiKey = (apiKeyInfo as ApiKeyInfo).apiKey;
           }
+
+          await emitPassStart({
+            passIndex,
+            passKind,
+            correlationId: passCorrelationId,
+            provider,
+            modelId,
+          });
 
           const attempt = await runEmbeddedAttemptWithBackend({
             sessionId: params.sessionId,
@@ -783,6 +976,16 @@ export async function runEmbeddedPiAgent(
             bootstrapPromptWarningSignaturesSeen,
             bootstrapPromptWarningSignature:
               bootstrapPromptWarningSignaturesSeen[bootstrapPromptWarningSignaturesSeen.length - 1],
+          });
+
+          await emitPassEnd({
+            passIndex,
+            passKind,
+            correlationId: passCorrelationId,
+            provider,
+            modelId,
+            outcome: derivePassEndOutcome(attempt),
+            stopReason: attempt.lastAssistant?.stopReason,
           });
 
           const {
@@ -1386,6 +1589,21 @@ export async function runEmbeddedPiAgent(
                 failoverReason: promptFailoverReason,
               });
               logPromptFailoverDecision("rotate_profile");
+              const promptRotateTransitionDecision = await resolvePassTransitionDecision({
+                passIndex,
+                passKind,
+                correlationId: passCorrelationId,
+                provider,
+                modelId,
+                source: "prompt",
+                proposedAction: "rotate_profile",
+                proposedReason: promptFailoverReason,
+              });
+              throwIfTransitionHalted({
+                decision: promptRotateTransitionDecision,
+                source: "prompt",
+                proposedAction: "rotate_profile",
+              });
               await maybeBackoffBeforeOverloadFailover(promptFailoverReason);
               continue;
             }
@@ -1409,6 +1627,26 @@ export async function runEmbeddedPiAgent(
                 `unsupported thinking level for ${provider}/${modelId}; retrying with ${fallbackThinking}`,
               );
               thinkLevel = fallbackThinking;
+              continue;
+            }
+            const promptTransitionDecision = await resolvePassTransitionDecision({
+              passIndex,
+              passKind,
+              correlationId: passCorrelationId,
+              provider,
+              modelId,
+              source: "prompt",
+              proposedAction: promptFailoverDecision.action,
+              proposedReason:
+                "reason" in promptFailoverDecision ? promptFailoverDecision.reason : undefined,
+            });
+            throwIfTransitionHalted({
+              decision: promptTransitionDecision,
+              source: "prompt",
+              proposedAction: promptFailoverDecision.action,
+            });
+            if (promptTransitionDecision.next === "continue") {
+              await maybeBackoffBeforeOverloadFailover(promptFailoverReason);
               continue;
             }
             // Throw FailoverError for prompt-side failover reasons when fallbacks
@@ -1579,6 +1817,39 @@ export async function runEmbeddedPiAgent(
             advanceAuthProfile,
           });
           overloadProfileRotations = assistantFailoverOutcome.overloadProfileRotations;
+          const assistantTransitionProposedAction =
+            assistantFailoverOutcome.action === "retry"
+              ? "continue"
+              : assistantFailoverOutcome.action === "throw"
+                ? assistantFailoverDecision.action === "fallback_model"
+                  ? "fallback_model"
+                  : "surface_error"
+                : assistantForFailover?.stopReason === "error"
+                  ? "surface_error"
+                  : "noop";
+          const assistantTransitionDecision = await resolvePassTransitionDecision({
+            passIndex,
+            passKind,
+            correlationId: passCorrelationId,
+            provider,
+            modelId,
+            source: "assistant",
+            proposedAction: assistantTransitionProposedAction,
+            proposedReason:
+              assistantTransitionProposedAction !== "noop" ? assistantFailoverReason : undefined,
+          });
+          throwIfTransitionHalted({
+            decision: assistantTransitionDecision,
+            source: "assistant",
+            proposedAction: assistantTransitionProposedAction,
+          });
+          if (
+            assistantTransitionDecision.next === "continue" &&
+            assistantTransitionProposedAction !== "noop"
+          ) {
+            await maybeBackoffBeforeOverloadFailover(assistantFailoverReason);
+            continue;
+          }
           if (assistantFailoverOutcome.action === "retry") {
             traceAttempts.push({
               provider: activeErrorContext.provider,
