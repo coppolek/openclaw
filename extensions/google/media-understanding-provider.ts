@@ -32,6 +32,7 @@ async function generateGeminiInlineDataText(params: {
   baseUrl?: string;
   headers?: Record<string, string>;
   request?: ProviderRequestTransportOverrides;
+  allowPrivateNetwork?: boolean;
   model?: string;
   prompt?: string;
   timeoutMs: number;
@@ -57,6 +58,7 @@ async function generateGeminiInlineDataText(params: {
       baseUrl: params.baseUrl,
       headers: params.headers,
       request: params.request,
+      allowPrivateNetwork: params.allowPrivateNetwork,
       capability: params.defaultMime.startsWith("audio/") ? "audio" : "video",
       transport: "media-understanding",
     });

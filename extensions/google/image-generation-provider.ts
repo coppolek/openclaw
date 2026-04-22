@@ -132,6 +132,7 @@ export function buildGoogleImageGenerationProvider(): ImageGenerationProvider {
         resolveGoogleGenerativeAiHttpRequestConfig({
           apiKey: auth.apiKey,
           baseUrl: req.cfg?.models?.providers?.google?.baseUrl,
+          allowPrivateNetwork: req.cfg?.models?.providers?.google?.request?.allowPrivateNetwork,
           capability: "image",
           transport: "http",
         });
