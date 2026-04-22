@@ -3,7 +3,8 @@ import { spawn } from "node:child_process";
 import { enableCompileCache } from "node:module";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { isRootHelpInvocation } from "./cli/argv.js";
+import { isRootHelpInvocation, isRootVersionInvocation } from "./cli/argv.js";
+import { assertNotRoot } from "./cli/root-guard.js";
 import { parseCliContainerArgs, resolveCliContainerTarget } from "./cli/container-target.js";
 import { applyCliProfileEnv, parseCliProfileArgs } from "./cli/profile.js";
 import { normalizeWindowsArgv } from "./cli/windows-argv.js";
@@ -47,6 +48,13 @@ if (
   ensureOpenClawExecMarkerOnProcess();
   installProcessWarningFilter();
   normalizeEnv();
+
+  // Block root execution early, before any state/config operations.
+  // Allow --help and --version so users can still discover the override env var.
+  if (!isRootHelpInvocation(process.argv) && !isRootVersionInvocation(process.argv)) {
+    assertNotRoot();
+  }
+
   if (!isTruthyEnvValue(process.env.NODE_DISABLE_COMPILE_CACHE)) {
     try {
       enableCompileCache();
