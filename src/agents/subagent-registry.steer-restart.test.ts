@@ -74,6 +74,7 @@ const noopContextEngine = {
   compact: async () => ({ ok: true, compacted: false }),
 } satisfies ContextEngine;
 vi.mock("./subagent-announce.js", () => ({
+  buildSubagentSystemPrompt: vi.fn(() => ""),
   captureSubagentCompletionReply: vi.fn(async () => undefined),
   runSubagentAnnounceFlow: announceSpy,
 }));
@@ -217,11 +218,13 @@ describe("subagent registry steer restarts", () => {
     previousRunId: string;
     nextRunId: string;
     fallback?: ReturnType<typeof listMainRuns>[number];
+    task?: string;
   }) => {
     const replaced = mod.replaceSubagentRunAfterSteer({
       previousRunId: params.previousRunId,
       nextRunId: params.nextRunId,
       fallback: params.fallback,
+      task: params.task,
     });
     expect(replaced).toBe(true);
 
@@ -453,6 +456,75 @@ describe("subagent registry steer restarts", () => {
     expect(run.frozenResultCapturedAt).toBeUndefined();
     expect(run.cleanupCompletedAt).toBeUndefined();
     expect(run.cleanupHandled).toBe(false);
+  });
+
+  it("clears stale extraSystemPrompt when replacing after steer restart", () => {
+    registerRun({
+      runId: "run-prompt-old",
+      childSessionKey: "agent:main:subagent:prompt",
+      task: "prompt reset",
+    });
+
+    const previous = listMainRuns()[0];
+    expect(previous?.runId).toBe("run-prompt-old");
+    if (previous) {
+      previous.extraSystemPrompt = "stale prompt with attachment suffixes from prior run";
+    }
+
+    const run = replaceRunAfterSteer({
+      previousRunId: "run-prompt-old",
+      nextRunId: "run-prompt-new",
+      fallback: previous,
+    });
+
+    expect(run.extraSystemPrompt).toBeUndefined();
+  });
+
+  it("updates task to the dispatched steer message when provided", () => {
+    // Regression test: redispatchSubagentRunAfterRestart rewraps `entry.task`
+    // into the [Subagent Task] block. If steer replacement did not update
+    // `task` to the new message, a gateway restart classified as
+    // resumable-fresh would re-run the stale pre-steer instruction and lose
+    // the user's steer update.
+    registerRun({
+      runId: "run-steer-task-old",
+      childSessionKey: "agent:main:subagent:steer-task",
+      task: "original pre-steer task",
+    });
+
+    const previous = listMainRuns()[0];
+    expect(previous?.runId).toBe("run-steer-task-old");
+
+    const run = replaceRunAfterSteer({
+      previousRunId: "run-steer-task-old",
+      nextRunId: "run-steer-task-new",
+      fallback: previous,
+      task: "new steer instruction from user",
+    });
+
+    expect(run.task).toBe("new steer instruction from user");
+  });
+
+  it("preserves the previous task when no replacement is provided", () => {
+    // Backwards-compatibility guard: callers that do not pass a new task
+    // (legacy or test fixtures) should still inherit the prior task so that
+    // redispatch after restart stays deterministic.
+    registerRun({
+      runId: "run-task-preserve-old",
+      childSessionKey: "agent:main:subagent:task-preserve",
+      task: "preserve me verbatim",
+    });
+
+    const previous = listMainRuns()[0];
+    expect(previous?.runId).toBe("run-task-preserve-old");
+
+    const run = replaceRunAfterSteer({
+      previousRunId: "run-task-preserve-old",
+      nextRunId: "run-task-preserve-new",
+      fallback: previous,
+    });
+
+    expect(run.task).toBe("preserve me verbatim");
   });
 
   it("preserves cumulative session timing across steer replacement runs", () => {

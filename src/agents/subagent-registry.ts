@@ -57,6 +57,7 @@ import {
 } from "./subagent-registry-state.js";
 import { configureSubagentRegistrySteerRuntime } from "./subagent-registry-steer-runtime.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
+import { rehydrateSessionStoreEntries, routeResumedRun } from "./subagent-resume.js";
 import { resolveAgentTimeoutMs } from "./timeout.js";
 
 export type { SubagentRunRecord } from "./subagent-registry.types.js";
@@ -493,14 +494,59 @@ function resumeSubagentRun(runId: string) {
     return;
   }
 
-  // Wait for completion again after restart.
+  // Classify the run and route to the appropriate recovery path.
   const cfg = subagentRegistryDeps.loadConfig();
   const waitTimeoutMs = resolveSubagentWaitTimeoutMs(cfg, entry.runTimeoutSeconds);
+  const handled = routeResumedRun({
+    runId,
+    entry,
+    waitTimeoutMs,
+    onCompleteReplay: async (replayRunId, endedAt) => {
+      await completeSubagentRun({
+        runId: replayRunId,
+        endedAt,
+        outcome: { status: "ok" },
+        reason: SUBAGENT_ENDED_REASON_COMPLETE,
+        sendFarewell: true,
+        accountId: entry.requesterOrigin?.accountId,
+        triggerCleanup: true,
+      });
+    },
+    onCompleteRedispatch: async (redispatchRunId, endedAt, outcome) => {
+      const runOutcome =
+        outcome.status === "error"
+          ? {
+              status: "error" as const,
+              error: (outcome as { status: string; error?: string }).error,
+            }
+          : outcome.status === "timeout"
+            ? { status: "timeout" as const }
+            : { status: "ok" as const };
+      await completeSubagentRun({
+        runId: redispatchRunId,
+        endedAt,
+        outcome: runOutcome,
+        reason:
+          outcome.status === "error" ? SUBAGENT_ENDED_REASON_ERROR : SUBAGENT_ENDED_REASON_COMPLETE,
+        sendFarewell: true,
+        accountId: entry.requesterOrigin?.accountId,
+        triggerCleanup: true,
+      });
+    },
+  });
+  if (handled) {
+    resumedRuns.add(runId);
+    return;
+  }
+
+  // Default: wait for completion (covers cases where the gateway dedupe cache
+  // still has a valid snapshot, or agent.wait returns a timeout result that
+  // completeSubagentRun can handle).
   void subagentRunManager.waitForSubagentCompletion(runId, waitTimeoutMs, entry);
   resumedRuns.add(runId);
 }
 
-function restoreSubagentRunsOnce() {
+async function restoreSubagentRunsOnce(): Promise<void> {
   if (restoreAttempted) {
     return;
   }
@@ -513,12 +559,22 @@ function restoreSubagentRunsOnce() {
     if (restoredCount === 0) {
       return;
     }
-    if (
-      reconcileOrphanedRestoredRuns({
-        runs: subagentRuns,
-        resumedRuns,
-      })
-    ) {
+    // Capture restored run IDs BEFORE the async rehydration step.
+    // New runs may be registered into subagentRuns during the await window;
+    // we must only resume the runs that were restored from disk, not any
+    // newly-registered runs that arrived concurrently during gateway startup.
+    const restoredRunIds = new Set(subagentRuns.keys());
+    // Ordering: rehydrateSessionStoreEntries MUST run before
+    // reconcileOrphanedRestoredRuns.  The rehydration step injects synthetic
+    // session-store entries for runs whose store write fell inside the ~400 ms
+    // race window between sessions_spawn returning and the first store write
+    // completing.  reconcileOrphanedRestoredRuns reads the session store to
+    // determine the orphan reason; if it runs first it will mis-classify these
+    // runs as "missing-session-entry" orphans and prune them incorrectly.
+    // rehydrateSessionStoreEntries is async (writes via updateSessionStore to
+    // serialise concurrent store writers during startup through the lock).
+    await rehydrateSessionStoreEntries(subagentRuns);
+    if (reconcileOrphanedRestoredRuns({ runs: subagentRuns, resumedRuns })) {
       persistSubagentRuns();
     }
     if (subagentRuns.size === 0) {
@@ -528,8 +584,13 @@ function restoreSubagentRunsOnce() {
     ensureListener();
     // Always start sweeper — session-mode runs (no archiveAtMs) also need TTL cleanup.
     startSweeper();
-    for (const runId of subagentRuns.keys()) {
-      resumeSubagentRun(runId);
+    // Only resume the runs that were present before the async rehydration step.
+    // Runs registered concurrently during the await window will be managed by
+    // their own lifecycle and must not be routed through restart recovery.
+    for (const runId of restoredRunIds) {
+      if (subagentRuns.has(runId)) {
+        resumeSubagentRun(runId);
+      }
     }
 
     // Cold-start restore path: queue the same recovery pass that restart
@@ -749,6 +810,7 @@ export function replaceSubagentRunAfterSteer(params: {
   fallback?: SubagentRunRecord;
   runTimeoutSeconds?: number;
   preserveFrozenResultFallback?: boolean;
+  task?: string;
 }) {
   return subagentRunManager.replaceSubagentRunAfterSteer(params);
 }
@@ -922,5 +984,5 @@ export function getLatestSubagentRunByChildSessionKey(
 }
 
 export function initSubagentRegistry() {
-  restoreSubagentRunsOnce();
+  void restoreSubagentRunsOnce();
 }
