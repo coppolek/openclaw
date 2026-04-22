@@ -384,6 +384,340 @@ describe("memory cli", () => {
     });
   });
 
+  it("reports phase-level dreaming status for light-only configs", async () => {
+    loadConfig.mockReturnValue({
+      plugins: {
+        entries: {
+          "memory-core": {
+            enabled: true,
+            config: {
+              dreaming: {
+                enabled: true,
+                frequency: "0 3 * * *",
+                timezone: "America/Sao_Paulo",
+                phases: {
+                  light: { enabled: true },
+                  deep: { enabled: false },
+                  rem: { enabled: false },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const close = vi.fn(async () => {});
+    mockManager({
+      probeVectorAvailability: vi.fn(async () => true),
+      status: () => makeMemoryStatus(),
+      close,
+    });
+
+    const log = spyRuntimeLogs(defaultRuntime);
+    await runMemoryCli(["status"]);
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "Dreaming: 0 3 * * * (America/Sao_Paulo) · light on · deep off · rem off",
+      ),
+    );
+    expect(close).toHaveBeenCalled();
+  });
+
+  it("reports phase-level dreaming status for rem-only configs", async () => {
+    loadConfig.mockReturnValue({
+      plugins: {
+        entries: {
+          "memory-core": {
+            enabled: true,
+            config: {
+              dreaming: {
+                enabled: true,
+                frequency: "45 1 * * *",
+                phases: {
+                  light: { enabled: false },
+                  deep: { enabled: false },
+                  rem: { enabled: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const close = vi.fn(async () => {});
+    mockManager({
+      probeVectorAvailability: vi.fn(async () => true),
+      status: () => makeMemoryStatus(),
+      close,
+    });
+
+    const log = spyRuntimeLogs(defaultRuntime);
+    await runMemoryCli(["status"]);
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("Dreaming: 45 1 * * * · light off · deep off · rem on"),
+    );
+    expect(close).toHaveBeenCalled();
+  });
+
+  it("reports phase-level dreaming status for deep-only configs", async () => {
+    loadConfig.mockReturnValue({
+      plugins: {
+        entries: {
+          "memory-core": {
+            enabled: true,
+            config: {
+              dreaming: {
+                enabled: true,
+                frequency: "30 5 * * *",
+                phases: {
+                  light: { enabled: false },
+                  deep: { enabled: true },
+                  rem: { enabled: false },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const close = vi.fn(async () => {});
+    mockManager({
+      probeVectorAvailability: vi.fn(async () => true),
+      status: () => makeMemoryStatus(),
+      close,
+    });
+
+    const log = spyRuntimeLogs(defaultRuntime);
+    await runMemoryCli(["status"]);
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("Dreaming: 30 5 * * * · light off · deep on · rem off"),
+    );
+    expect(close).toHaveBeenCalled();
+  });
+
+  it("keeps legacy dreaming configs readable by showing default phase states", async () => {
+    loadConfig.mockReturnValue({
+      plugins: {
+        entries: {
+          "memory-core": {
+            enabled: true,
+            config: {
+              dreaming: {
+                enabled: true,
+                frequency: "15 2 * * *",
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const close = vi.fn(async () => {});
+    mockManager({
+      probeVectorAvailability: vi.fn(async () => true),
+      status: () => makeMemoryStatus(),
+      close,
+    });
+
+    const log = spyRuntimeLogs(defaultRuntime);
+    await runMemoryCli(["status"]);
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("Dreaming: 15 2 * * * · light on · deep on · rem on"),
+    );
+    expect(close).toHaveBeenCalled();
+  });
+
+  it("shows dreaming off when global dreaming is disabled even if per-phase toggles are present", async () => {
+    loadConfig.mockReturnValue({
+      plugins: {
+        entries: {
+          "memory-core": {
+            enabled: true,
+            config: {
+              dreaming: {
+                enabled: false,
+                frequency: "15 2 * * *",
+                phases: {
+                  light: { enabled: true },
+                  deep: { enabled: true },
+                  rem: { enabled: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const close = vi.fn(async () => {});
+    mockManager({
+      probeVectorAvailability: vi.fn(async () => true),
+      status: () => makeMemoryStatus(),
+      close,
+    });
+
+    const log = spyRuntimeLogs(defaultRuntime);
+    await runMemoryCli(["status"]);
+
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("Dreaming: off"));
+    expect(log).not.toHaveBeenCalledWith(expect.stringContaining("Dreaming: 15 2 * * *"));
+    expect(close).toHaveBeenCalled();
+  });
+
+  it("fills missing dreaming phase toggles with defaults in status output", async () => {
+    loadConfig.mockReturnValue({
+      plugins: {
+        entries: {
+          "memory-core": {
+            enabled: true,
+            config: {
+              dreaming: {
+                enabled: true,
+                frequency: "0 4 * * *",
+                phases: {
+                  light: { enabled: false },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const close = vi.fn(async () => {});
+    mockManager({
+      probeVectorAvailability: vi.fn(async () => true),
+      status: () => makeMemoryStatus(),
+      close,
+    });
+
+    const log = spyRuntimeLogs(defaultRuntime);
+    await runMemoryCli(["status"]);
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("Dreaming: 0 4 * * * · light off · deep on · rem on"),
+    );
+    expect(close).toHaveBeenCalled();
+  });
+
+  it("shows dreaming schedule defaults when frequency and timezone are omitted", async () => {
+    loadConfig.mockReturnValue({
+      plugins: {
+        entries: {
+          "memory-core": {
+            enabled: true,
+            config: {
+              dreaming: {
+                enabled: true,
+                phases: {
+                  light: { enabled: true },
+                  deep: { enabled: false },
+                  rem: { enabled: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const close = vi.fn(async () => {});
+    mockManager({
+      probeVectorAvailability: vi.fn(async () => true),
+      status: () => makeMemoryStatus(),
+      close,
+    });
+
+    const log = spyRuntimeLogs(defaultRuntime);
+    await runMemoryCli(["status"]);
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("Dreaming: 0 3 * * * · light on · deep off · rem on"),
+    );
+    expect(close).toHaveBeenCalled();
+  });
+
+  it("omits timezone suffix when dreaming timezone is blank", async () => {
+    loadConfig.mockReturnValue({
+      plugins: {
+        entries: {
+          "memory-core": {
+            enabled: true,
+            config: {
+              dreaming: {
+                enabled: true,
+                frequency: "0 3 * * *",
+                timezone: "   ",
+                phases: {
+                  light: { enabled: true },
+                  deep: { enabled: true },
+                  rem: { enabled: false },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const close = vi.fn(async () => {});
+    mockManager({
+      probeVectorAvailability: vi.fn(async () => true),
+      status: () => makeMemoryStatus(),
+      close,
+    });
+
+    const log = spyRuntimeLogs(defaultRuntime);
+    await runMemoryCli(["status"]);
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("Dreaming: 0 3 * * * · light on · deep on · rem off"),
+    );
+    expect(log).not.toHaveBeenCalledWith(expect.stringContaining("(   )"));
+    expect(close).toHaveBeenCalled();
+  });
+
+  it("defaults all dreaming phases to on when phases config is present but empty", async () => {
+    loadConfig.mockReturnValue({
+      plugins: {
+        entries: {
+          "memory-core": {
+            enabled: true,
+            config: {
+              dreaming: {
+                enabled: true,
+                frequency: "30 1 * * *",
+                phases: {},
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const close = vi.fn(async () => {});
+    mockManager({
+      probeVectorAvailability: vi.fn(async () => true),
+      status: () => makeMemoryStatus(),
+      close,
+    });
+
+    const log = spyRuntimeLogs(defaultRuntime);
+    await runMemoryCli(["status"]);
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("Dreaming: 30 1 * * * · light on · deep on · rem on"),
+    );
+    expect(close).toHaveBeenCalled();
+  });
+
   it("repairs invalid recall metadata and stale locks with status --fix", async () => {
     await withTempWorkspace(async (workspaceDir) => {
       const storePath = path.join(workspaceDir, "memory", ".dreams", "short-term-recall.json");
@@ -558,6 +892,44 @@ describe("memory cli", () => {
 
     expectCliSync(sync);
     expect(probeEmbeddingAvailability).toHaveBeenCalled();
+    expect(close).toHaveBeenCalled();
+  });
+
+  it("passes force to reindex on status --index --force", async () => {
+    const close = vi.fn(async () => {});
+    const sync = vi.fn(async () => {});
+    mockManager({
+      probeVectorAvailability: vi.fn(async () => true),
+      probeEmbeddingAvailability: vi.fn(async () => ({ ok: true })),
+      sync,
+      status: () => makeMemoryStatus({ files: 1, chunks: 1 }),
+      close,
+    });
+
+    spyRuntimeLogs(defaultRuntime);
+    await runMemoryCli(["status", "--index", "--force"]);
+
+    expect(sync).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "cli", force: true, progress: expect.any(Function) }),
+    );
+    expect(close).toHaveBeenCalled();
+  });
+
+  it("ignores --force on status when --index is not set", async () => {
+    const close = vi.fn(async () => {});
+    const sync = vi.fn(async () => {});
+    mockManager({
+      probeVectorAvailability: vi.fn(async () => true),
+      probeEmbeddingAvailability: vi.fn(async () => ({ ok: true })),
+      sync,
+      status: () => makeMemoryStatus({ files: 1, chunks: 1 }),
+      close,
+    });
+
+    spyRuntimeLogs(defaultRuntime);
+    await runMemoryCli(["status", "--force"]);
+
+    expect(sync).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalled();
   });
 
