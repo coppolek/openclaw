@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { resolveStateDir } from "../config/paths.js";
 import { DEFAULT_AGENT_ID } from "../routing/session-key.js";
 import {
   normalizeLowercaseStringOrEmpty,
@@ -11,7 +12,7 @@ import {
 import { resolveAllowAlwaysPatternEntries } from "./exec-approvals-allowlist.js";
 import type { ExecCommandSegment } from "./exec-approvals-analysis.js";
 import type { ExecAllowlistEntry } from "./exec-approvals.types.js";
-import { expandHomePrefix, resolveRequiredHomeDir } from "./home-dir.js";
+import { expandHomePrefix } from "./home-dir.js";
 import { requestJsonlSocket } from "./jsonl-socket.js";
 export * from "./exec-approvals-analysis.js";
 export * from "./exec-approvals-allowlist.js";
@@ -170,8 +171,6 @@ const DEFAULT_SECURITY: ExecSecurity = "full";
 const DEFAULT_ASK: ExecAsk = "off";
 export const DEFAULT_EXEC_APPROVAL_ASK_FALLBACK: ExecSecurity = "full";
 const DEFAULT_AUTO_ALLOW_SKILLS = false;
-const DEFAULT_SOCKET = "~/.openclaw/exec-approvals.sock";
-const DEFAULT_FILE = "~/.openclaw/exec-approvals.json";
 
 function hashExecApprovalsRaw(raw: string | null): string {
   return crypto
@@ -181,11 +180,11 @@ function hashExecApprovalsRaw(raw: string | null): string {
 }
 
 export function resolveExecApprovalsPath(): string {
-  return expandHomePrefix(DEFAULT_FILE);
+  return path.join(resolveStateDir(), "exec-approvals.json");
 }
 
 export function resolveExecApprovalsSocketPath(): string {
-  return expandHomePrefix(DEFAULT_SOCKET);
+  return path.join(resolveStateDir(), "exec-approvals.sock");
 }
 
 function normalizeAllowlistPattern(value: string | undefined): string | null {
@@ -229,7 +228,7 @@ function mergeLegacyAgent(
 
 function ensureDir(filePath: string) {
   const dir = path.dirname(filePath);
-  assertNoSymlinkPathComponents(dir, resolveRequiredHomeDir());
+  assertNoSymlinkPathComponents(dir);
   fs.mkdirSync(dir, { recursive: true });
   const dirStat = fs.lstatSync(dir);
   if (!dirStat.isDirectory() || dirStat.isSymbolicLink()) {
@@ -238,31 +237,49 @@ function ensureDir(filePath: string) {
   return dir;
 }
 
-function assertNoSymlinkPathComponents(targetPath: string, trustedRoot: string): void {
+function assertNoSymlinkPathComponents(targetPath: string): void {
   const resolvedTarget = path.resolve(targetPath);
-  const resolvedRoot = path.resolve(trustedRoot);
-  if (resolvedTarget !== resolvedRoot && !resolvedTarget.startsWith(`${resolvedRoot}${path.sep}`)) {
-    return;
+  const existingAncestor = findNearestExistingAncestor(resolvedTarget);
+  const relative = path.relative(existingAncestor, resolvedTarget);
+  const realAncestor = fs.realpathSync(existingAncestor);
+  const realTarget = path.resolve(realAncestor, relative);
+  if (
+    normalizeSymlinkComparisonPath(resolvedTarget) !== normalizeSymlinkComparisonPath(realTarget)
+  ) {
+    throw new Error(`Refusing to traverse symlink in exec approvals path: ${existingAncestor}`);
   }
+}
 
-  const relative = path.relative(resolvedRoot, resolvedTarget);
-  const segments = relative && relative !== "." ? relative.split(path.sep) : [];
-  let current = resolvedRoot;
-  for (const segment of [".", ...segments]) {
-    if (segment !== ".") {
-      current = path.join(current, segment);
-    }
+function findNearestExistingAncestor(targetPath: string): string {
+  let current = targetPath;
+  while (true) {
     try {
-      const stat = fs.lstatSync(current);
-      if (stat.isSymbolicLink()) {
-        throw new Error(`Refusing to traverse symlink in exec approvals path: ${current}`);
-      }
+      fs.lstatSync(current);
+      return current;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
         throw err;
       }
     }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return current;
+    }
+    current = parent;
   }
+}
+
+function normalizeSymlinkComparisonPath(targetPath: string): string {
+  const resolvedTarget = path.resolve(targetPath);
+  if (process.platform !== "darwin") {
+    return resolvedTarget;
+  }
+  for (const prefix of ["/private/tmp", "/private/var", "/private/etc"]) {
+    if (resolvedTarget === prefix || resolvedTarget.startsWith(`${prefix}${path.sep}`)) {
+      return resolvedTarget.slice("/private".length);
+    }
+  }
+  return resolvedTarget;
 }
 
 function assertSafeExecApprovalsDestination(filePath: string): void {
