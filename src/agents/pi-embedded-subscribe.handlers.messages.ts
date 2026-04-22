@@ -31,6 +31,7 @@ import {
   extractThinkingFromTaggedText,
   formatReasoningMessage,
   promoteThinkingTagsToBlocks,
+  stripFinalTagsFromMessage,
 } from "./pi-embedded-utils.js";
 
 const stripTrailingDirective = (text: string): string => {
@@ -212,8 +213,7 @@ export function consumePendingToolMediaIntoReply(
     ...payload,
     mediaUrls: mergedMediaUrls.length ? mergedMediaUrls : undefined,
     audioAsVoice: payload.audioAsVoice || state.pendingToolAudioAsVoice || undefined,
-    trustedLocalMedia:
-      payload.trustedLocalMedia || state.pendingToolTrustedLocalMedia || undefined,
+    trustedLocalMedia: payload.trustedLocalMedia || state.pendingToolTrustedLocalMedia || undefined,
   };
   clearPendingToolMedia(state);
   return mergedPayload;
@@ -541,6 +541,7 @@ export function handleMessageEnd(
     return;
   }
   promoteThinkingTagsToBlocks(assistantMessage);
+  stripFinalTagsFromMessage(assistantMessage);
 
   const rawText = coerceChatContentText(extractAssistantText(assistantMessage));
   const rawVisibleText = coerceChatContentText(extractAssistantVisibleText(assistantMessage));
