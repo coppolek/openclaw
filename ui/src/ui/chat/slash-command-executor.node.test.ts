@@ -207,7 +207,7 @@ describe("executeSlashCommand /kill", () => {
               spawnedBy: "agent:main:subagent:mine",
             }),
             row("agent:main:subagent:other-root", {
-              spawnedBy: "agent:main:quietchat:dm:alice",
+              spawnedBy: "agent:main:discord:dm:alice",
             }),
           ],
         };
@@ -520,28 +520,14 @@ describe("executeSlashCommand directives", () => {
     );
 
     expect(result.content).toBe(
-      "Current thinking level: low.\nOptions: off, minimal, low, medium, high.",
+      "Current thinking level: low.\nOptions: off, minimal, low, medium, high, adaptive.",
     );
     expect(request).toHaveBeenNthCalledWith(1, "sessions.list", {});
     expect(request).toHaveBeenNthCalledWith(2, "models.list", {});
   });
 
   it("accepts minimal and xhigh thinking levels", async () => {
-    const request = vi.fn(async (method: string, payload?: unknown) => {
-      if (method === "sessions.list") {
-        return {
-          sessions: [
-            row("agent:main:main", {
-              thinkingOptions: ["off", "minimal", "low", "medium", "high", "xhigh"],
-            }),
-          ],
-        };
-      }
-      if (method === "sessions.patch") {
-        return { ok: true, ...((payload ?? {}) as object) };
-      }
-      throw new Error(`unexpected method: ${method}`);
-    });
+    const request = vi.fn().mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ ok: true });
 
     const minimal = await executeSlashCommand(
       { request } as unknown as GatewayBrowserClient,
@@ -558,13 +544,11 @@ describe("executeSlashCommand directives", () => {
 
     expect(minimal.content).toBe("Thinking level set to **minimal**.");
     expect(xhigh.content).toBe("Thinking level set to **xhigh**.");
-    expect(request).toHaveBeenNthCalledWith(1, "sessions.list", {});
-    expect(request).toHaveBeenNthCalledWith(2, "sessions.patch", {
+    expect(request).toHaveBeenNthCalledWith(1, "sessions.patch", {
       key: "agent:main:main",
       thinkingLevel: "minimal",
     });
-    expect(request).toHaveBeenNthCalledWith(3, "sessions.list", {});
-    expect(request).toHaveBeenNthCalledWith(4, "sessions.patch", {
+    expect(request).toHaveBeenNthCalledWith(2, "sessions.patch", {
       key: "agent:main:main",
       thinkingLevel: "xhigh",
     });
@@ -1043,5 +1027,165 @@ describe("executeSlashCommand /redirect (hard kill-and-restart)", () => {
     );
 
     expect(result.content).toBe("Failed to redirect: Error: connection lost");
+  });
+});
+
+describe("executeSlashCommand /plan auto (PR-10)", () => {
+  it("/plan auto with no arg defaults to 'on'", async () => {
+    const calls: Array<{ method: string; payload: unknown }> = [];
+    const request = vi.fn(async (method: string, payload?: unknown) => {
+      calls.push({ method, payload });
+      return {};
+    });
+    const result = await executeSlashCommand(
+      { request } as unknown as GatewayBrowserClient,
+      "agent:main:main",
+      "plan",
+      "auto",
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0].method).toBe("sessions.patch");
+    expect(calls[0].payload).toMatchObject({
+      planApproval: { action: "auto", autoEnabled: true },
+    });
+    expect(result.content).toContain("auto-approve **enabled**");
+    expect(result.action).toBe("refresh");
+  });
+
+  it("/plan auto on explicitly enables", async () => {
+    const request = vi.fn(async () => ({}));
+    const result = await executeSlashCommand(
+      { request } as unknown as GatewayBrowserClient,
+      "agent:main:main",
+      "plan",
+      "auto on",
+    );
+    expect(request).toHaveBeenCalledWith("sessions.patch", {
+      key: "agent:main:main",
+      planApproval: { action: "auto", autoEnabled: true },
+    });
+    expect(result.content).toContain("**enabled**");
+  });
+
+  it("/plan auto off explicitly disables", async () => {
+    const request = vi.fn(async () => ({}));
+    const result = await executeSlashCommand(
+      { request } as unknown as GatewayBrowserClient,
+      "agent:main:main",
+      "plan",
+      "auto off",
+    );
+    expect(request).toHaveBeenCalledWith("sessions.patch", {
+      key: "agent:main:main",
+      planApproval: { action: "auto", autoEnabled: false },
+    });
+    expect(result.content).toContain("**disabled**");
+  });
+
+  it("/plan auto bogus rejects with usage hint", async () => {
+    const request = vi.fn();
+    const result = await executeSlashCommand(
+      { request } as unknown as GatewayBrowserClient,
+      "agent:main:main",
+      "plan",
+      "auto bogus",
+    );
+    expect(request).not.toHaveBeenCalled();
+    expect(result.content).toContain("Unrecognized auto value");
+  });
+
+  it("/plan auto reports config-disabled error legibly", async () => {
+    const request = vi.fn(async () => {
+      throw new Error("plan mode is disabled at the config level");
+    });
+    const result = await executeSlashCommand(
+      { request } as unknown as GatewayBrowserClient,
+      "agent:main:main",
+      "plan",
+      "auto on",
+    );
+    expect(result.content).toContain("Plan mode is disabled at the config level");
+  });
+
+  it("/plan status mentions the new auto option", async () => {
+    const request = vi.fn();
+    const result = await executeSlashCommand(
+      { request } as unknown as GatewayBrowserClient,
+      "agent:main:main",
+      "plan",
+      "",
+    );
+    expect(request).not.toHaveBeenCalled();
+    expect(result.content).toContain("auto");
+  });
+});
+
+describe("executeSlashCommand /plan approvals (stacked follow-up)", () => {
+  it("/plan accept returns the hidden resume directive", async () => {
+    const request = vi.fn(async () => ({}));
+    const result = await executeSlashCommand(
+      { request } as unknown as GatewayBrowserClient,
+      "agent:main:main",
+      "plan",
+      "accept",
+      {
+        sessionsResult: {
+          sessions: [
+            row("agent:main:main", {
+              planMode: {
+                mode: "plan",
+                approval: "pending",
+                approvalId: "plan-1",
+                rejectionCount: 0,
+              },
+            }),
+          ],
+        } as SessionsListResult,
+      },
+    );
+    expect(request).toHaveBeenCalledWith("sessions.patch", {
+      key: "agent:main:main",
+      planApproval: { action: "approve", approvalId: "plan-1" },
+    });
+    expect(result.resumePlanInteraction).toBe(true);
+  });
+
+  it("/plan answer uses pendingInteraction questionId and returns the hidden resume directive", async () => {
+    const request = vi.fn(async () => ({}));
+    const result = await executeSlashCommand(
+      { request } as unknown as GatewayBrowserClient,
+      "agent:main:main",
+      "plan",
+      "answer Option A",
+      {
+        sessionsResult: {
+          sessions: [
+            row("agent:main:main", {
+              pendingInteraction: {
+                kind: "question",
+                approvalId: "question-1",
+                questionId: "q-1",
+                title: "Agent has a question",
+                prompt: "Pick one",
+                options: ["Option A", "Option B"],
+                allowFreetext: false,
+                createdAt: 1,
+                status: "pending",
+              },
+            }),
+          ],
+        } as SessionsListResult,
+      },
+    );
+    expect(request).toHaveBeenCalledWith("sessions.patch", {
+      key: "agent:main:main",
+      planApproval: {
+        action: "answer",
+        answer: "Option A",
+        approvalId: "question-1",
+        questionId: "q-1",
+      },
+    });
+    expect(result.resumePlanInteraction).toBe(true);
   });
 });

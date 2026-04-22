@@ -12,7 +12,6 @@ import {
   resolveSessionOptionGroups,
 } from "./chat/session-controls.ts";
 import { refreshSlashCommands } from "./chat/slash-commands.ts";
-import { resolveControlUiAuthToken } from "./control-ui-auth.ts";
 import { ChatState, loadChatHistory } from "./controllers/chat.ts";
 import { loadSessions } from "./controllers/sessions.ts";
 import { icons } from "./icons.ts";
@@ -45,9 +44,11 @@ type ChatRefreshHost = AppViewState & {
 };
 
 export function resolveAssistantAttachmentAuthToken(
-  state: Pick<AppViewState, "hello" | "settings" | "password">,
+  state: Pick<AppViewState, "settings" | "password">,
 ) {
-  return resolveControlUiAuthToken(state);
+  return (
+    normalizeOptionalString(state.settings.token) ?? normalizeOptionalString(state.password) ?? null
+  );
 }
 
 function resolveSidebarChatSessionKey(state: AppViewState): string {
@@ -233,8 +234,26 @@ export function renderChatControls(state: AppViewState) {
       <circle cx="12" cy="12" r="3"></circle>
     </svg>
   `;
+  // PR-8 follow-up: track whether the right sidebar is currently
+  // showing the live plan markdown. Used to set aria-pressed on the
+  // plan-view toggle so the chip looks "on" while the sidebar is open.
+  const sidebarPlanOpen =
+    state.sidebarOpen &&
+    state.sidebarContent?.kind === "markdown" &&
+    state.latestPlanMarkdown != null &&
+    state.sidebarContent.content === state.latestPlanMarkdown;
   return html`
     <div class="chat-controls">
+      <button
+        class="btn btn--sm btn--icon ${sidebarPlanOpen ? "active" : ""}"
+        @click=${() => {
+          state.togglePlanViewSidebar();
+        }}
+        aria-pressed=${sidebarPlanOpen}
+        title=${t("chat.planViewToggle")}
+      >
+        ${icons.scrollText}
+      </button>
       <button
         class="btn btn--sm btn--icon"
         ?disabled=${state.chatLoading || !state.connected}
