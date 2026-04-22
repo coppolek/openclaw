@@ -3053,6 +3053,14 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                         description:
                           "Ordered fallback models (provider/model). Used when the primary model fails.",
                       },
+                      timeoutMs: {
+                        type: "integer",
+                        exclusiveMinimum: 0,
+                        maximum: 9007199254740991,
+                        title: "Model Timeout (ms, reserved)",
+                        description:
+                          "Reserved for future use. Accepted by the schema but not yet wired through this runtime. Today only `agents.defaults.imageGenerationModel.timeoutMs` is honored.",
+                      },
                     },
                     additionalProperties: false,
                   },
@@ -3079,6 +3087,14 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                         },
                         title: "Image Model Fallbacks",
                         description: "Ordered fallback image models (provider/model).",
+                      },
+                      timeoutMs: {
+                        type: "integer",
+                        exclusiveMinimum: 0,
+                        maximum: 9007199254740991,
+                        title: "Image Model Timeout (ms, reserved)",
+                        description:
+                          "Reserved for future use. Accepted by the schema but not yet wired through this runtime. Today only `agents.defaults.imageGenerationModel.timeoutMs` is honored.",
                       },
                     },
                     additionalProperties: false,
@@ -3107,6 +3123,14 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                         title: "Image Generation Model Fallbacks",
                         description: "Ordered fallback image-generation models (provider/model).",
                       },
+                      timeoutMs: {
+                        type: "integer",
+                        exclusiveMinimum: 0,
+                        maximum: 9007199254740991,
+                        title: "Image Generation Timeout (ms)",
+                        description:
+                          "Optional per-request HTTP timeout (milliseconds) applied to image-generation provider calls. Overrides the provider's built-in default (currently 60000 ms for OpenAI and Google Gemini). Useful when reference-image edits or high-resolution outputs routinely exceed 60s.",
+                      },
                     },
                     additionalProperties: false,
                   },
@@ -3134,6 +3158,14 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                         title: "Video Generation Model Fallbacks",
                         description: "Ordered fallback video-generation models (provider/model).",
                       },
+                      timeoutMs: {
+                        type: "integer",
+                        exclusiveMinimum: 0,
+                        maximum: 9007199254740991,
+                        title: "Video Generation Timeout (ms, reserved)",
+                        description:
+                          "Reserved for future use. Accepted by the schema but not yet wired through this runtime. Today only `agents.defaults.imageGenerationModel.timeoutMs` is honored.",
+                      },
                     },
                     additionalProperties: false,
                   },
@@ -3160,6 +3192,14 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                         },
                         title: "Music Generation Model Fallbacks",
                         description: "Ordered fallback music-generation models (provider/model).",
+                      },
+                      timeoutMs: {
+                        type: "integer",
+                        exclusiveMinimum: 0,
+                        maximum: 9007199254740991,
+                        title: "Music Generation Timeout (ms, reserved)",
+                        description:
+                          "Reserved for future use. Accepted by the schema but not yet wired through this runtime. Today only `agents.defaults.imageGenerationModel.timeoutMs` is honored.",
                       },
                     },
                     additionalProperties: false,
@@ -3193,6 +3233,14 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                         },
                         title: "PDF Model Fallbacks",
                         description: "Ordered fallback PDF models (provider/model).",
+                      },
+                      timeoutMs: {
+                        type: "integer",
+                        exclusiveMinimum: 0,
+                        maximum: 9007199254740991,
+                        title: "PDF Model Timeout (ms, reserved)",
+                        description:
+                          "Reserved for future use. Accepted by the schema but not yet wired through this runtime. Today only `agents.defaults.imageGenerationModel.timeoutMs` is honored.",
                       },
                     },
                     additionalProperties: false,
@@ -5127,6 +5175,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                               type: "string",
                             },
                           },
+                          timeoutMs: {
+                            type: "integer",
+                            exclusiveMinimum: 0,
+                            maximum: 9007199254740991,
+                          },
                         },
                         additionalProperties: false,
                       },
@@ -5749,6 +5802,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                           items: {
                             type: "string",
                           },
+                        },
+                        timeoutMs: {
+                          type: "integer",
+                          exclusiveMinimum: 0,
+                          maximum: 9007199254740991,
                         },
                       },
                       additionalProperties: false,
@@ -25719,6 +25777,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       help: "Ordered fallback models (provider/model). Used when the primary model fails.",
       tags: ["reliability", "models"],
     },
+    "agents.defaults.model.timeoutMs": {
+      label: "Model Timeout (ms, reserved)",
+      help: "Reserved for future use. Accepted by the schema but not yet wired through this runtime. Today only `agents.defaults.imageGenerationModel.timeoutMs` is honored.",
+      tags: ["performance", "models"],
+    },
     "agents.defaults.imageModel.primary": {
       label: "Image Model",
       help: "Optional image model (provider/model) used when the primary model lacks image input.",
@@ -25728,6 +25791,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       label: "Image Model Fallbacks",
       help: "Ordered fallback image models (provider/model).",
       tags: ["reliability", "models", "media"],
+    },
+    "agents.defaults.imageModel.timeoutMs": {
+      label: "Image Model Timeout (ms, reserved)",
+      help: "Reserved for future use. Accepted by the schema but not yet wired through this runtime. Today only `agents.defaults.imageGenerationModel.timeoutMs` is honored.",
+      tags: ["performance", "models", "media"],
     },
     "agents.defaults.imageGenerationModel.primary": {
       label: "Image Generation Model",
@@ -25739,6 +25807,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       help: "Ordered fallback image-generation models (provider/model).",
       tags: ["reliability", "media"],
     },
+    "agents.defaults.imageGenerationModel.timeoutMs": {
+      label: "Image Generation Timeout (ms)",
+      help: "Optional per-request HTTP timeout (milliseconds) applied to image-generation provider calls. Overrides the provider's built-in default (currently 60000 ms for OpenAI and Google Gemini). Useful when reference-image edits or high-resolution outputs routinely exceed 60s.",
+      tags: ["performance", "media"],
+    },
     "agents.defaults.videoGenerationModel.primary": {
       label: "Video Generation Model",
       help: "Optional video-generation model (provider/model) used by the shared video generation capability.",
@@ -25749,6 +25822,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       help: "Ordered fallback video-generation models (provider/model).",
       tags: ["reliability", "media"],
     },
+    "agents.defaults.videoGenerationModel.timeoutMs": {
+      label: "Video Generation Timeout (ms, reserved)",
+      help: "Reserved for future use. Accepted by the schema but not yet wired through this runtime. Today only `agents.defaults.imageGenerationModel.timeoutMs` is honored.",
+      tags: ["performance", "media"],
+    },
     "agents.defaults.musicGenerationModel.primary": {
       label: "Music Generation Model",
       help: "Optional music-generation model (provider/model) used by the shared music generation capability.",
@@ -25758,6 +25836,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       label: "Music Generation Model Fallbacks",
       help: "Ordered fallback music-generation models (provider/model).",
       tags: ["reliability"],
+    },
+    "agents.defaults.musicGenerationModel.timeoutMs": {
+      label: "Music Generation Timeout (ms, reserved)",
+      help: "Reserved for future use. Accepted by the schema but not yet wired through this runtime. Today only `agents.defaults.imageGenerationModel.timeoutMs` is honored.",
+      tags: ["performance"],
     },
     "agents.defaults.mediaGenerationAutoProviderFallback": {
       label: "Media Generation Auto Provider Fallback",
@@ -25773,6 +25856,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       label: "PDF Model Fallbacks",
       help: "Ordered fallback PDF models (provider/model).",
       tags: ["reliability"],
+    },
+    "agents.defaults.pdfModel.timeoutMs": {
+      label: "PDF Model Timeout (ms, reserved)",
+      help: "Reserved for future use. Accepted by the schema but not yet wired through this runtime. Today only `agents.defaults.imageGenerationModel.timeoutMs` is honored.",
+      tags: ["performance"],
     },
     "agents.defaults.pdfMaxBytesMb": {
       label: "PDF Max Size (MB)",
