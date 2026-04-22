@@ -15,7 +15,7 @@ import {
   SESSIONS_LIST_TOOL_DISPLAY_SUMMARY,
 } from "../tool-description-presets.js";
 import type { AnyAgentTool } from "./common.js";
-import { jsonResult, readStringArrayParam } from "./common.js";
+import { jsonResult, readStringArrayParam, readStringParam } from "./common.js";
 import {
   createSessionVisibilityGuard,
   createAgentToAgentPolicy,
@@ -35,6 +35,11 @@ const SessionsListToolSchema = Type.Object({
   limit: Type.Optional(Type.Number({ minimum: 1 })),
   activeMinutes: Type.Optional(Type.Number({ minimum: 1 })),
   messageLimit: Type.Optional(Type.Number({ minimum: 0 })),
+  label: Type.Optional(Type.String({ minLength: 1 })),
+  agentId: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+  search: Type.Optional(Type.String({ minLength: 1 })),
+  includeDerivedTitles: Type.Optional(Type.Boolean()),
+  includeLastMessage: Type.Optional(Type.Boolean()),
 });
 
 type GatewayCaller = typeof callGateway;
@@ -97,6 +102,11 @@ export function createSessionsListTool(opts?: {
           ? Math.max(0, Math.floor(params.messageLimit))
           : 0;
       const messageLimit = Math.min(messageLimitRaw, 20);
+      const label = readStringParam(params, "label");
+      const agentId = readStringParam(params, "agentId");
+      const search = readStringParam(params, "search");
+      const includeDerivedTitles = params.includeDerivedTitles === true ? true : undefined;
+      const includeLastMessage = params.includeLastMessage === true ? true : undefined;
       const gatewayCall = opts?.callGateway ?? callGateway;
 
       const list = await gatewayCall<{ sessions: Array<SessionListRow>; path: string }>({
@@ -104,6 +114,11 @@ export function createSessionsListTool(opts?: {
         params: {
           limit,
           activeMinutes,
+          label,
+          agentId,
+          search,
+          includeDerivedTitles,
+          includeLastMessage,
           includeGlobal: !restrictToSpawned,
           includeUnknown: !restrictToSpawned,
           spawnedBy: restrictToSpawned ? effectiveRequesterKey : undefined,
@@ -186,21 +201,23 @@ export function createSessionsListTool(opts?: {
         const sessionId = readStringValue(entry.sessionId);
         const sessionFileRaw = (entry as { sessionFile?: unknown }).sessionFile;
         const sessionFile = readStringValue(sessionFileRaw);
+        const resolvedAgentId = resolveAgentIdFromSessionKey(key);
         let transcriptPath: string | undefined;
         if (sessionId) {
           try {
-            const agentId = resolveAgentIdFromSessionKey(key);
             const trimmedStorePath = storePath?.trim();
             let effectiveStorePath: string | undefined;
             if (trimmedStorePath && trimmedStorePath !== "(multiple)") {
               if (trimmedStorePath.includes("{agentId}") || trimmedStorePath.startsWith("~")) {
-                effectiveStorePath = resolveStorePath(trimmedStorePath, { agentId });
+                effectiveStorePath = resolveStorePath(trimmedStorePath, {
+                  agentId: resolvedAgentId,
+                });
               } else if (path.isAbsolute(trimmedStorePath)) {
                 effectiveStorePath = trimmedStorePath;
               }
             }
             const filePathOpts = resolveSessionFilePathOptions({
-              agentId,
+              agentId: resolvedAgentId,
               storePath: effectiveStorePath,
             });
             transcriptPath = resolveSessionFilePath(
@@ -215,6 +232,7 @@ export function createSessionsListTool(opts?: {
 
         const row: SessionListRow = {
           key: displayKey,
+          agentId: resolvedAgentId,
           kind,
           channel: derivedChannel,
           origin:
@@ -235,6 +253,8 @@ export function createSessionsListTool(opts?: {
               : undefined,
           label: readStringValue(entry.label),
           displayName: readStringValue(entry.displayName),
+          derivedTitle: readStringValue(entry.derivedTitle),
+          lastMessagePreview: readStringValue(entry.lastMessagePreview),
           parentSessionKey:
             typeof entry.parentSessionKey === "string"
               ? resolveDisplaySessionKey({
