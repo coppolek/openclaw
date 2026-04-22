@@ -1,0 +1,12 @@
+{
+  "id": "agnes-ai",
+  "name": "Agnes AI",
+  "enabledByDefault": false,
+  "providers": ["agnes-ai"],
+  "providerAuthEnvVars": ["AGNES_API_KEY"],
+  "providerAuthChoices": ["apiKey"],
+  "configSchema": {
+    "type": "object",
+    "properties": {}
+  }
+}
