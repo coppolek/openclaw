@@ -1,10 +1,11 @@
-import { createCodingTools, createReadTool } from "@mariozechner/pi-coding-agent";
+import { codingTools, createReadTool, readTool } from "@mariozechner/pi-coding-agent";
 import type { ModelCompatConfig } from "../config/types.models.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { ToolLoopDetectionConfig } from "../config/types.tools.js";
 import { resolveMergedSafeBinProfileFixtures } from "../infra/exec-safe-bin-runtime-policy.js";
 import { logWarn } from "../logger.js";
 import { getPluginToolMeta } from "../plugins/tools.js";
+import { isSubagentSessionKey } from "../routing/session-key.js";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
@@ -48,10 +49,6 @@ import {
 import { cleanToolSchemaForGemini, normalizeToolParameters } from "./pi-tools.schema.js";
 import type { AnyAgentTool } from "./pi-tools.types.js";
 import type { SandboxContext } from "./sandbox.js";
-import {
-  isSubagentEnvelopeSession,
-  resolveSubagentCapabilityStore,
-} from "./subagent-capabilities.js";
 import {
   EXEC_TOOL_DISPLAY_SUMMARY,
   PROCESS_TOOL_DISPLAY_SUMMARY,
@@ -268,6 +265,36 @@ export function createOpenClawCodingTools(options?: {
   sessionId?: string;
   /** Stable run identifier for this agent invocation. */
   runId?: string;
+  /**
+   * Current plan-mode session state (PR-8). When `"plan"`, the runtime
+   * mutation gate (src/agents/plan-mode/mutation-gate.ts) blocks
+   * write/edit/exec/etc. The embedded runner reads
+   * `SessionEntry.planMode.mode` once when assembling tools and
+   * threads it through to the before-tool-call hook so the gate fires
+   * without re-loading the session store on every call.
+   */
+  planMode?: "plan" | "normal";
+  /**
+   * Bug 3+4 fix: live-read accessor for the session's current planMode.
+   * Returns the LATEST mode from the in-memory SessionEntry on every
+   * tool-call (O(1) map lookup, no disk I/O). Threaded through to the
+   * before-tool-call hook's HookContext so the mutation gate can
+   * detect mid-turn approval transitions where the cached
+   * `planMode` snapshot is stale (sessions.patch flipped mode →
+   * "normal" but the runtime still has "plan" cached for the rest of
+   * the current run).
+   */
+  getLatestPlanMode?: () => "plan" | "normal" | undefined;
+  /**
+   * Cherry-pick of b6b2783ba3 (acceptEdits gate): live-read accessor
+   * for the session's `postApprovalPermissions.acceptEdits` flag.
+   * Returns `true` only when the user approved the plan with
+   * "Accept, allow edits" (granting acceptEdits permission); `false`
+   * otherwise. Threaded to the before-tool-call HookContext so the
+   * acceptEdits constraint gate can run on post-approval tool calls
+   * without re-reading the session store on each call.
+   */
+  getLatestAcceptEdits?: () => boolean;
   /** What initiated this run (for trigger-specific tool restrictions). */
   trigger?: string;
   /** Relative workspace path that memory-triggered writes may append to. */
@@ -333,8 +360,6 @@ export function createOpenClawCodingTools(options?: {
   requireExplicitMessageTarget?: boolean;
   /** If true, omit the message tool from the tool list. */
   disableMessageTool?: boolean;
-  /** Keep the message tool available even when the selected profile omits it. */
-  forceMessageTool?: boolean;
   /** Whether the sender is an owner (required for owner-only tools). */
   senderIsOwner?: boolean;
   /** Callback invoked when sessions_yield tool is called. */
@@ -385,31 +410,18 @@ export function createOpenClawCodingTools(options?: {
   const profilePolicy = resolveToolProfilePolicy(profile);
   const providerProfilePolicy = resolveToolProfilePolicy(providerProfile);
 
-  const runtimeProfileAlsoAllow = options?.forceMessageTool ? ["message"] : [];
-  const profilePolicyWithAlsoAllow = mergeAlsoAllowPolicy(profilePolicy, [
-    ...(profileAlsoAllow ?? []),
-    ...runtimeProfileAlsoAllow,
-  ]);
-  const providerProfilePolicyWithAlsoAllow = mergeAlsoAllowPolicy(providerProfilePolicy, [
-    ...(providerProfileAlsoAllow ?? []),
-    ...runtimeProfileAlsoAllow,
-  ]);
+  const profilePolicyWithAlsoAllow = mergeAlsoAllowPolicy(profilePolicy, profileAlsoAllow);
+  const providerProfilePolicyWithAlsoAllow = mergeAlsoAllowPolicy(
+    providerProfilePolicy,
+    providerProfileAlsoAllow,
+  );
   // Prefer sessionKey for process isolation scope to prevent cross-session process visibility/killing.
   // Fallback to agentId if no sessionKey is available (e.g. legacy or global contexts).
   const scopeKey =
     options?.exec?.scopeKey ?? options?.sessionKey ?? (agentId ? `agent:${agentId}` : undefined);
-  const subagentStore = resolveSubagentCapabilityStore(options?.sessionKey, {
-    cfg: options?.config,
-  });
   const subagentPolicy =
-    options?.sessionKey &&
-    isSubagentEnvelopeSession(options.sessionKey, {
-      cfg: options.config,
-      store: subagentStore,
-    })
-      ? resolveSubagentToolPolicyForSession(options.config, options.sessionKey, {
-          store: subagentStore,
-        })
+    isSubagentSessionKey(options?.sessionKey) && options?.sessionKey
+      ? resolveSubagentToolPolicyForSession(options.config, options.sessionKey)
       : undefined;
   const allowBackground = isToolAllowedByPolicies("process", [
     profilePolicyWithAlsoAllow,
@@ -450,8 +462,8 @@ export function createOpenClawCodingTools(options?: {
   }
   const imageSanitization = resolveImageSanitizationLimits(options?.config);
 
-  const base = (createCodingTools(workspaceRoot) as unknown as AnyAgentTool[]).flatMap((tool) => {
-    if (tool.name === "read") {
+  const base = (codingTools as unknown as AnyAgentTool[]).flatMap((tool) => {
+    if (tool.name === readTool.name) {
       if (sandboxRoot) {
         const sandboxed = createSandboxedReadTool({
           root: sandboxRoot,
@@ -627,6 +639,7 @@ export function createOpenClawCodingTools(options?: {
       requesterSenderId: options?.senderId,
       senderIsOwner: options?.senderIsOwner,
       sessionId: options?.sessionId,
+      runId: options?.runId,
       onYield: options?.onYield,
       allowGatewaySubagentBinding: options?.allowGatewaySubagentBinding,
     }),
@@ -708,6 +721,21 @@ export function createOpenClawCodingTools(options?: {
       sessionId: options?.sessionId,
       runId: options?.runId,
       loopDetection: resolveToolLoopDetectionConfig({ cfg: options?.config, agentId }),
+      // PR-8: thread plan-mode state into the before-tool-call hook so
+      // the mutation gate fires without re-loading the session store
+      // on every tool call.
+      ...(options?.planMode ? { planMode: options.planMode } : {}),
+      // Bug 3+4 fix: also forward the live-read accessor so the gate
+      // can re-check after mid-turn approval transitions (cached
+      // planMode goes stale; getLatestPlanMode reads fresh).
+      ...(options?.getLatestPlanMode ? { getLatestPlanMode: options.getLatestPlanMode } : {}),
+      // Cherry-pick of b6b2783ba3 (acceptEdits gate): mirror
+      // getLatestPlanMode for the postApprovalPermissions.acceptEdits
+      // flag. Paired so the gate activates post-approval without a
+      // session store re-read per tool call.
+      ...(options?.getLatestAcceptEdits
+        ? { getLatestAcceptEdits: options.getLatestAcceptEdits }
+        : {}),
     }),
   );
   const withAbort = options?.abortSignal
