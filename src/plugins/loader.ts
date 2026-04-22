@@ -65,8 +65,8 @@ import {
   restoreRegisteredMemoryEmbeddingProviders,
 } from "./memory-embedding-providers.js";
 import {
+  clearActiveMemoryCapability,
   clearMemoryPluginState,
-  getMemoryCapabilityRegistration,
   getMemoryFlushPlanResolver,
   getMemoryPromptSectionBuilder,
   getMemoryRuntime,
@@ -202,7 +202,6 @@ export class PluginLoadReentryError extends Error {
 type CachedPluginState = {
   registry: PluginRegistry;
   detachedTaskRuntimeRegistration: ReturnType<typeof getDetachedTaskLifecycleRuntimeRegistration>;
-  memoryCapability: ReturnType<typeof getMemoryCapabilityRegistration>;
   memoryCorpusSupplements: ReturnType<typeof listMemoryCorpusSupplements>;
   agentHarnesses: ReturnType<typeof listRegisteredAgentHarnesses>;
   compactionProviders: ReturnType<typeof listRegisteredCompactionProviders>;
@@ -243,9 +242,105 @@ export function clearPluginLoaderCache(): void {
   clearDetachedTaskLifecycleRuntimeRegistration();
   clearMemoryEmbeddingProviders();
   clearMemoryPluginState();
+  clearActiveMemoryCapability();
 }
 
 const defaultLogger = () => createSubsystemLogger("plugins");
+
+function resolvePluginScopeDebugMemorySlotInScope(params: {
+  onlyPluginIds?: readonly string[];
+  memorySlot: string | null | undefined;
+}): boolean | "memory-slot-unknown" {
+  if (params.memorySlot === null) {
+    return false;
+  }
+  if (typeof params.memorySlot !== "string" || params.memorySlot.length === 0) {
+    return "memory-slot-unknown";
+  }
+  return params.onlyPluginIds === undefined
+    ? true
+    : params.onlyPluginIds.includes(params.memorySlot);
+}
+
+const PLUGIN_SCOPE_DEBUG_MAX_CALLER_FRAMES = 5;
+const PLUGIN_SCOPE_DEBUG_HELPER_LABELS = new Set([
+  "buildPluginScopeDebugCaller",
+  "emitPluginScopeDebugLog",
+]);
+
+function isAbsoluteFilesystemPathLike(value: string): boolean {
+  return /^(?:file:\/\/\/|file:\/\/|\/|[A-Za-z]:[\\/]|\\\\)/.test(value);
+}
+
+function sanitizePluginScopeDebugCallerFrame(frame: string): string | null {
+  const trimmedFrame = frame.trim();
+  if (trimmedFrame.length === 0 || trimmedFrame.includes("node_modules")) {
+    return null;
+  }
+
+  const withoutAtPrefix = trimmedFrame.startsWith("at ")
+    ? trimmedFrame.slice(3).trim()
+    : trimmedFrame;
+  if (withoutAtPrefix.length === 0) {
+    return null;
+  }
+
+  const label = withoutAtPrefix.includes(" (")
+    ? withoutAtPrefix.slice(0, withoutAtPrefix.lastIndexOf(" (")).trim()
+    : withoutAtPrefix;
+  if (label.length === 0) {
+    return null;
+  }
+
+  if (
+    PLUGIN_SCOPE_DEBUG_HELPER_LABELS.has(label) ||
+    [...PLUGIN_SCOPE_DEBUG_HELPER_LABELS].some((helperLabel) => label.includes(helperLabel))
+  ) {
+    return null;
+  }
+
+  if (isAbsoluteFilesystemPathLike(label) || /:\d+:\d+/.test(label)) {
+    return null;
+  }
+
+  return label;
+}
+
+function buildPluginScopeDebugCaller(): string[] {
+  const sanitizedFrames = (new Error().stack ?? "")
+    .split("\n")
+    .slice(1)
+    .map((frame) => sanitizePluginScopeDebugCallerFrame(frame))
+    .filter((frame): frame is string => Boolean(frame));
+
+  return [...new Set(sanitizedFrames)].slice(0, PLUGIN_SCOPE_DEBUG_MAX_CALLER_FRAMES);
+}
+
+function emitPluginScopeDebugLog(params: {
+  logger: PluginLogger;
+  tag: "plugin-load" | "memory-state-clear";
+  onlyPluginIds?: readonly string[];
+  memorySlot: string | null | undefined;
+  shouldActivate: boolean;
+  cacheKey: string;
+}): void {
+  const payload = {
+    tag: params.tag,
+    onlyPluginIds: params.onlyPluginIds ?? "all",
+    memorySlotInScope: resolvePluginScopeDebugMemorySlotInScope({
+      onlyPluginIds: params.onlyPluginIds,
+      memorySlot: params.memorySlot,
+    }),
+    shouldActivate: params.shouldActivate,
+    cacheKey: params.cacheKey,
+    caller: buildPluginScopeDebugCaller(),
+  };
+  (
+    params.logger as PluginLogger & {
+      warn: (message: string, meta?: Record<string, unknown>) => void;
+    }
+  ).warn(`[plugin-scope-debug] ${JSON.stringify(payload)}`, payload);
+}
 
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return (
@@ -1449,6 +1544,16 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
     runtimeSubagentMode,
   } = resolvePluginLoadCacheContext(options);
   const logger = options.logger ?? defaultLogger();
+  if (process.env.OPENCLAW_DEBUG_PLUGIN_SCOPE === "1") {
+    emitPluginScopeDebugLog({
+      logger,
+      tag: "plugin-load",
+      onlyPluginIds,
+      memorySlot: normalized.slots.memory,
+      shouldActivate,
+      cacheKey,
+    });
+  }
   const validateOnly = options.mode === "validate";
   const onlyPluginIdSet = createPluginIdScopeSet(onlyPluginIds);
   const cacheEnabled = options.cache !== false;
@@ -1460,7 +1565,6 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
       restoreDetachedTaskLifecycleRuntimeRegistration(cached.detachedTaskRuntimeRegistration);
       restoreRegisteredMemoryEmbeddingProviders(cached.memoryEmbeddingProviders);
       restoreMemoryPluginState({
-        capability: cached.memoryCapability,
         corpusSupplements: cached.memoryCorpusSupplements,
         promptBuilder: cached.memoryPromptBuilder,
         promptSupplements: cached.memoryPromptSupplements,
@@ -1489,6 +1593,16 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
       clearAgentHarnesses();
       clearPluginCommands();
       clearPluginInteractiveHandlers();
+      if (process.env.OPENCLAW_DEBUG_PLUGIN_SCOPE === "1") {
+        emitPluginScopeDebugLog({
+          logger,
+          tag: "memory-state-clear",
+          onlyPluginIds,
+          memorySlot: normalized.slots.memory,
+          shouldActivate,
+          cacheKey,
+        });
+      }
       clearDetachedTaskLifecycleRuntimeRegistration();
       clearMemoryPluginState();
     }
@@ -2279,7 +2393,6 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
       const previousAgentHarnesses = listRegisteredAgentHarnesses();
       const previousCompactionProviders = listRegisteredCompactionProviders();
       const previousDetachedTaskRuntimeRegistration = getDetachedTaskLifecycleRuntimeRegistration();
-      const previousMemoryCapability = getMemoryCapabilityRegistration();
       const previousMemoryEmbeddingProviders = listRegisteredMemoryEmbeddingProviders();
       const previousMemoryFlushPlanResolver = getMemoryFlushPlanResolver();
       const previousMemoryPromptBuilder = getMemoryPromptSectionBuilder();
@@ -2300,7 +2413,6 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
           restoreDetachedTaskLifecycleRuntimeRegistration(previousDetachedTaskRuntimeRegistration);
           restoreRegisteredMemoryEmbeddingProviders(previousMemoryEmbeddingProviders);
           restoreMemoryPluginState({
-            capability: previousMemoryCapability,
             corpusSupplements: previousMemoryCorpusSupplements,
             promptBuilder: previousMemoryPromptBuilder,
             promptSupplements: previousMemoryPromptSupplements,
@@ -2318,7 +2430,6 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
         restoreDetachedTaskLifecycleRuntimeRegistration(previousDetachedTaskRuntimeRegistration);
         restoreRegisteredMemoryEmbeddingProviders(previousMemoryEmbeddingProviders);
         restoreMemoryPluginState({
-          capability: previousMemoryCapability,
           corpusSupplements: previousMemoryCorpusSupplements,
           promptBuilder: previousMemoryPromptBuilder,
           promptSupplements: previousMemoryPromptSupplements,
@@ -2374,7 +2485,6 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
     if (cacheEnabled) {
       setCachedPluginRegistry(cacheKey, {
         detachedTaskRuntimeRegistration: getDetachedTaskLifecycleRuntimeRegistration(),
-        memoryCapability: getMemoryCapabilityRegistration(),
         memoryCorpusSupplements: listMemoryCorpusSupplements(),
         registry,
         agentHarnesses: listRegisteredAgentHarnesses(),
