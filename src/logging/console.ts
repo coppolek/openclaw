@@ -7,6 +7,7 @@ import { resolveEnvLogLevelOverride } from "./env-log-level.js";
 import { type LogLevel, normalizeLogLevel } from "./levels.js";
 import { getLogger } from "./logger.js";
 import { resolveNodeRequireFromMeta } from "./node-require.js";
+import { redactSensitiveText } from "./redact.js";
 import { loggingState } from "./state.js";
 import { formatLocalIsoWithOffset, formatTimestamp } from "./timestamps.js";
 import type { ConsoleStyle, LoggerSettings } from "./types.js";
@@ -241,7 +242,7 @@ export function enableConsoleCapture(): void {
         : "";
       try {
         const resolvedLogger = getLoggerLazy();
-        // Map console levels to file logger
+        // Pass unredacted `formatted` — file transport exit redacts at the sink boundary.
         if (level === "trace") {
           resolvedLogger.trace(formatted);
         } else if (level === "debug") {
@@ -261,7 +262,8 @@ export function enableConsoleCapture(): void {
       if (loggingState.forceConsoleToStderr) {
         // In --json mode, all console.* writes are diagnostics and should stay off stdout.
         try {
-          const line = timestamp ? `${timestamp} ${formatted}` : formatted;
+          const redacted = redactSensitiveText(formatted);
+          const line = timestamp ? `${timestamp} ${redacted}` : redacted;
           process.stderr.write(`${line}\n`);
         } catch (err) {
           if (isEpipeError(err)) {
@@ -271,19 +273,26 @@ export function enableConsoleCapture(): void {
         }
       } else {
         try {
+          // Redact string-typed args in-place; non-string args (objects, Errors, …) are
+          // passed through as-is so Node's inspector formatting and terminal colours are
+          // preserved. Note: secrets embedded in object values are NOT redacted here —
+          // that requires deep structural traversal and is out of scope for this sink.
+          const redactedArgs = args.map((a) =>
+            typeof a === "string" ? redactSensitiveText(a) : a,
+          );
           if (!timestamp) {
-            orig.apply(console, args as []);
+            orig.apply(console, redactedArgs as []);
             return;
           }
           if (args.length === 0) {
             orig.call(console, timestamp);
             return;
           }
-          if (typeof args[0] === "string") {
-            orig.call(console, `${timestamp} ${args[0]}`, ...args.slice(1));
-            return;
+          if (typeof redactedArgs[0] === "string") {
+            orig.call(console, `${timestamp} ${redactedArgs[0]}`, ...redactedArgs.slice(1));
+          } else {
+            orig.call(console, timestamp, ...redactedArgs);
           }
-          orig.call(console, timestamp, ...args);
         } catch (err) {
           if (isEpipeError(err)) {
             return;

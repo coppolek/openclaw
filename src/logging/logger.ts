@@ -10,6 +10,7 @@ import { readLoggingConfig, shouldSkipMutatingLoggingConfigRead } from "./config
 import { resolveEnvLogLevelOverride } from "./env-log-level.js";
 import { type LogLevel, levelToMinLevel, normalizeLogLevel } from "./levels.js";
 import { resolveNodeRequireFromMeta } from "./node-require.js";
+import { redactSensitiveText } from "./redact.js";
 import { loggingState } from "./state.js";
 import { formatTimestamp } from "./timestamps.js";
 import type { LoggerSettings } from "./types.js";
@@ -176,7 +177,8 @@ function buildLogger(settings: ResolvedSettings): TsLogger<LogObj> {
   logger.attachTransport((logObj: LogObj) => {
     try {
       const time = formatTimestamp(logObj.date ?? new Date(), { style: "long" });
-      const line = JSON.stringify({ ...logObj, time });
+      // Redact at the sink exit, same pattern as the diagnostics-otel transport.
+      const line = redactSensitiveText(JSON.stringify({ ...logObj, time }));
       const payload = `${line}\n`;
       const payloadBytes = Buffer.byteLength(payload, "utf8");
       const nextBytes = currentFileBytes + payloadBytes;
