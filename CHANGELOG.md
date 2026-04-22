@@ -15,6 +15,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Gateway/skills: redact `apiKey` and secret-named `env` values from the `skills.update` RPC response to prevent leaking credentials into WebSocket traffic, client logs, or session transcripts. Config is still written to disk in full — only the response payload is redacted. Fixes #66769.
 - Ollama: forward OpenClaw thinking control to native `/api/chat` requests as top-level `think`, so `/think off` and `openclaw agent --thinking off` suppress thinking on models such as qwen3 instead of idling until the watchdog fires. Fixes #69902. (#69967) Thanks @WZH8898.
 - Memory-core/dreaming: suppress the startup-only managed dreaming cron unavailable warning when the cron service is still attaching, while preserving the runtime warning if cron genuinely remains unavailable. Fixes #69939. (#69941) Thanks @Sanjays2402.
 - Mattermost: suppress reasoning-only payloads even when they arrive as blockquoted `> Reasoning:` text, preventing `/reasoning on` from leaking thinking into channel posts. (#69927) Thanks @lawrence3699.
