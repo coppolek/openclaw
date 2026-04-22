@@ -102,6 +102,7 @@ import {
   branchSessionFromCheckpoint,
   deleteSessionsAndRefresh,
   loadSessions,
+  loadVisibleSessionPreviews,
   patchSession,
   restoreSessionFromCheckpoint,
   toggleSessionCompactionCheckpoints,
@@ -1563,6 +1564,7 @@ export function renderApp(state: AppViewState) {
                 sortDir: state.sessionsSortDir,
                 page: state.sessionsPage,
                 pageSize: state.sessionsPageSize,
+                previewTextByKey: state.sessionsPreviewTextByKey,
                 selectedKeys: state.sessionsSelectedKeys,
                 expandedCheckpointKey: state.sessionsExpandedCheckpointKey,
                 checkpointItemsByKey: state.sessionsCheckpointItemsByKey,
@@ -1578,18 +1580,22 @@ export function renderApp(state: AppViewState) {
                 onSearchChange: (q) => {
                   state.sessionsSearchQuery = q;
                   state.sessionsPage = 0;
+                  void loadVisibleSessionPreviews(state);
                 },
                 onSortChange: (col, dir) => {
                   state.sessionsSortColumn = col;
                   state.sessionsSortDir = dir;
                   state.sessionsPage = 0;
+                  void loadVisibleSessionPreviews(state);
                 },
                 onPageChange: (p) => {
                   state.sessionsPage = p;
+                  void loadVisibleSessionPreviews(state);
                 },
                 onPageSizeChange: (s) => {
                   state.sessionsPageSize = s;
                   state.sessionsPage = 0;
+                  void loadVisibleSessionPreviews(state);
                 },
                 onRefresh: () => loadSessions(state),
                 onPatch: (key, patch) => patchSession(state, key, patch),
