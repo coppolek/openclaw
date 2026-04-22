@@ -473,7 +473,7 @@ export function resolveSessionOptionGroups(
   };
 
   const addOption = (key: string) => {
-    if (!key || seenKeys.has(key)) {
+    if (!key || seenKeys.has(key) || key.includes(":subagent:")) {
       return;
     }
     seenKeys.add(key);
