@@ -730,22 +730,24 @@ export async function runTui(opts: TuiOptions) {
     abortActive,
   } = sessionActions;
 
-  const { handleChatEvent, handleAgentEvent, handleBtwEvent } = createEventHandlers({
-    chatLog,
-    btw,
-    tui,
-    state,
-    setActivityStatus,
-    refreshSessionInfo,
-    loadHistory,
-    noteLocalRunId,
-    isLocalRunId,
-    forgetLocalRunId,
-    clearLocalRunIds,
-    isLocalBtwRunId,
-    forgetLocalBtwRunId,
-    clearLocalBtwRunIds,
-  });
+  const { handleChatEvent, handleAgentEvent, handleBtwEvent, handleEventGap } = createEventHandlers(
+    {
+      chatLog,
+      btw,
+      tui,
+      state,
+      setActivityStatus,
+      refreshSessionInfo,
+      loadHistory,
+      noteLocalRunId,
+      isLocalRunId,
+      forgetLocalRunId,
+      clearLocalRunIds,
+      isLocalBtwRunId,
+      forgetLocalBtwRunId,
+      clearLocalBtwRunIds,
+    },
+  );
 
   const requestExit = () => {
     if (exitRequested) {
@@ -905,6 +907,7 @@ export async function runTui(opts: TuiOptions) {
   };
 
   client.onDisconnected = (reason) => {
+    handleEventGap({ reload: false });
     isConnected = false;
     wasDisconnected = true;
     historyLoaded = false;
@@ -920,6 +923,7 @@ export async function runTui(opts: TuiOptions) {
   };
 
   client.onGap = (info) => {
+    handleEventGap();
     setConnectionStatus(`event gap: expected ${info.expected}, got ${info.received}`, 5000);
     tui.requestRender();
   };
