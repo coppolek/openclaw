@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { resolveSessionAgentId } from "../../agents/agent-scope.js";
+import { resolveAgentWorkspaceDir, resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { canExecRequestNode } from "../../agents/exec-defaults.js";
 import { buildWorkspaceSkillSnapshot } from "../../agents/skills.js";
 import { matchesSkillFilter } from "../../agents/skills/filter.js";
@@ -16,6 +16,7 @@ import {
   type SessionEntry,
   updateSessionStore,
 } from "../../config/sessions.js";
+import { loadSessionStore, resolveSessionStoreEntry } from "../../config/sessions/store.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { resolveStableSessionEndTranscript } from "../../gateway/session-transcript-files.fs.js";
 import { logVerbose } from "../../globals.js";
@@ -205,6 +206,46 @@ export async function ensureSkillSnapshot(params: {
   }
 
   return { sessionEntry: nextEntry, skillsSnapshot, systemSent };
+}
+
+export async function prewarmMirroredSession(params: {
+  cfg: OpenClawConfig;
+  storePath: string;
+  sessionKey: string;
+}): Promise<void> {
+  if (process.env.OPENCLAW_TEST_FAST === "1") {
+    return;
+  }
+  const sessionKey = normalizeOptionalString(params.sessionKey);
+  if (!sessionKey) {
+    return;
+  }
+  const sessionStore = loadSessionStore(params.storePath, { skipCache: true });
+  const sessionEntry = resolveSessionStoreEntry({
+    store: sessionStore,
+    sessionKey,
+  }).existing;
+  if (!sessionEntry?.sessionId) {
+    return;
+  }
+  if (sessionEntry.systemSent === true && sessionEntry.skillsSnapshot) {
+    return;
+  }
+  const agentId = resolveSessionAgentId({
+    sessionKey,
+    config: params.cfg,
+  });
+  const workspaceDir = resolveAgentWorkspaceDir(params.cfg, agentId);
+  await ensureSkillSnapshot({
+    sessionEntry,
+    sessionStore,
+    sessionKey,
+    storePath: params.storePath,
+    sessionId: sessionEntry.sessionId,
+    isFirstTurnInSession: true,
+    workspaceDir,
+    cfg: params.cfg,
+  });
 }
 
 export async function incrementCompactionCount(params: {
