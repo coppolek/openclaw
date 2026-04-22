@@ -157,7 +157,17 @@ function shouldEagerWarmContextWindowCache(argv: string[] = process.argv): boole
     return false;
   }
   const [primary] = getCommandPathFromArgv(argv);
-  return Boolean(primary) && !SKIP_EAGER_WARMUP_PRIMARY_COMMANDS.has(primary);
+  if (!primary || SKIP_EAGER_WARMUP_PRIMARY_COMMANDS.has(primary)) {
+    return false;
+  }
+  const stdoutIsTTY = Reflect.get(process.stdout, "isTTY") as boolean | undefined;
+  // Captured sessions commands can finish writing output while bundled model
+  // discovery still has active AWS SDK credential-provider FS/DNS work alive.
+  // Keep TTY sessions warmup so display paths can still benefit from discovery.
+  if (primary === "sessions" && stdoutIsTTY !== true) {
+    return false;
+  }
+  return true;
 }
 
 function primeConfiguredContextWindows(): OpenClawConfig | undefined {

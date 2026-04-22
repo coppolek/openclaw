@@ -24,6 +24,10 @@ vi.mock("./models-config.js", () => ({
   ensureOpenClawModelsJson: contextTestState.ensureOpenClawModelsJson,
 }));
 
+vi.mock("./models-config.runtime.js", () => ({
+  ensureOpenClawModelsJson: contextTestState.ensureOpenClawModelsJson,
+}));
+
 vi.mock("./agent-paths.js", () => ({
   resolveOpenClawAgentDir: () => "/tmp/openclaw-agent",
 }));
@@ -95,6 +99,23 @@ async function importFreshContextModule(): Promise<ContextModule> {
 async function importResolveContextTokensForModel() {
   const { resolveContextTokensForModel } = await importContextModule();
   return resolveContextTokensForModel;
+}
+
+function setStdoutIsTTY(value: boolean | undefined): () => void {
+  const stdout = process.stdout as NodeJS.WriteStream & { isTTY?: boolean };
+  const hadOwnIsTTY = Object.prototype.hasOwnProperty.call(stdout, "isTTY");
+  const previousIsTTYDescriptor = Object.getOwnPropertyDescriptor(stdout, "isTTY");
+  Object.defineProperty(stdout, "isTTY", {
+    value,
+    configurable: true,
+  });
+  return () => {
+    if (hadOwnIsTTY && previousIsTTYDescriptor) {
+      Object.defineProperty(stdout, "isTTY", previousIsTTYDescriptor);
+      return;
+    }
+    Reflect.deleteProperty(stdout as { isTTY?: boolean }, "isTTY");
+  };
 }
 
 describe("lookupContextTokens", () => {
@@ -202,6 +223,17 @@ describe("lookupContextTokens", () => {
         {
           argv: ["node", "openclaw", "chat"],
           expectedCalls: 1,
+          stdoutIsTTY: true,
+        },
+        {
+          argv: ["node", "openclaw", "chat"],
+          expectedCalls: 1,
+          stdoutIsTTY: false,
+        },
+        {
+          argv: ["node", "openclaw", "chat"],
+          expectedCalls: 1,
+          stdoutIsTTY: undefined,
         },
         {
           argv: ["node", "openclaw", "--profile", "--", "config", "validate"],
@@ -216,16 +248,59 @@ describe("lookupContextTokens", () => {
           expectedCalls: 0,
         },
         {
+          argv: ["node", "openclaw", "sessions"],
+          expectedCalls: 1,
+          stdoutIsTTY: true,
+        },
+        {
+          argv: ["node", "openclaw", "sessions"],
+          expectedCalls: 0,
+          stdoutIsTTY: false,
+        },
+        {
+          argv: ["node", "openclaw", "sessions", "--json"],
+          expectedCalls: 1,
+          stdoutIsTTY: true,
+        },
+        {
+          argv: ["node", "openclaw", "sessions", "--json"],
+          expectedCalls: 0,
+          stdoutIsTTY: false,
+        },
+        {
+          argv: ["node", "openclaw", "sessions", "cleanup", "--dry-run"],
+          expectedCalls: 1,
+          stdoutIsTTY: true,
+        },
+        {
+          argv: ["node", "openclaw", "sessions", "cleanup", "--dry-run"],
+          expectedCalls: 0,
+          stdoutIsTTY: false,
+        },
+        {
           argv: ["node", "scripts/test-built-plugin-singleton.mjs"],
           expectedCalls: 0,
         },
       ]) {
         const loadConfigMock = vi.fn(() => ({ models: {} }));
         const { ensureOpenClawModelsJson } = mockContextModuleDeps(loadConfigMock);
+        contextModule.resetContextWindowCacheForTest();
         process.argv = scenario.argv;
-        await importFreshContextModule();
-        expect(loadConfigMock).toHaveBeenCalledTimes(scenario.expectedCalls);
-        expect(ensureOpenClawModelsJson).toHaveBeenCalledTimes(scenario.expectedCalls);
+        const restoreStdoutIsTTY = Object.prototype.hasOwnProperty.call(scenario, "stdoutIsTTY")
+          ? setStdoutIsTTY(scenario.stdoutIsTTY)
+          : null;
+        try {
+          await importFreshContextModule();
+          await flushAsyncWarmup();
+        } finally {
+          restoreStdoutIsTTY?.();
+        }
+        expect(loadConfigMock, scenario.argv.join(" ")).toHaveBeenCalledTimes(
+          scenario.expectedCalls,
+        );
+        expect(ensureOpenClawModelsJson, scenario.argv.join(" ")).toHaveBeenCalledTimes(
+          scenario.expectedCalls,
+        );
       }
     } finally {
       process.argv = argvSnapshot;
