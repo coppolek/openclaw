@@ -62,7 +62,31 @@ export type LoggerResolvedSettings = ResolvedSettings;
 export type LogTransportRecord = Record<string, unknown>;
 export type LogTransport = (logObj: LogTransportRecord) => void;
 
-const externalTransports = new Set<LogTransport>();
+// Log transports must survive dual module loading (host ESM bundle + jiti plugin instance).
+// Use a globalThis-based singleton so plugins loaded via jiti register in the same Set
+// that the gateway's logger reads. Mirrors the pattern in diagnostic-events.ts.
+type LogTransportGlobalState = {
+  transports: Set<LogTransport>;
+  activeLogger: unknown; // TsLogger<LogObj> — stored as unknown to avoid type import in global
+  _activeLoggerOwner: unknown; // identity marker: the loggingState object that owns activeLogger
+};
+
+function getLogTransportGlobalState(): LogTransportGlobalState {
+  const g = globalThis as typeof globalThis & {
+    __openclawLogTransportState?: LogTransportGlobalState;
+  };
+  if (!g.__openclawLogTransportState) {
+    g.__openclawLogTransportState = {
+      transports: new Set<LogTransport>(),
+      activeLogger: null,
+      _activeLoggerOwner: null,
+    };
+  }
+  return g.__openclawLogTransportState;
+}
+
+// Keep a module-level alias for hot-path reads (avoids repeated globalThis lookup).
+const externalTransports = getLogTransportGlobalState().transports;
 
 function attachExternalTransport(logger: TsLogger<LogObj>, transport: LogTransport): void {
   logger.attachTransport((logObj: LogObj) => {
@@ -162,6 +186,7 @@ function buildLogger(settings: ResolvedSettings): TsLogger<LogObj> {
     for (const transport of externalTransports) {
       attachExternalTransport(logger, transport);
     }
+    publishActiveLogger(logger);
     return logger;
   }
 
@@ -207,7 +232,22 @@ function buildLogger(settings: ResolvedSettings): TsLogger<LogObj> {
     attachExternalTransport(logger, transport);
   }
 
+  publishActiveLogger(logger);
+
   return logger;
+}
+
+// Publish the active logger to globalThis so plugins loaded via jiti can find it
+// when calling registerLogTransport after the logger is already built.
+// Uses loggingState object identity as an ownership marker so only the first
+// module instance (host ESM) can set/update activeLogger — jiti-loaded plugin
+// instances get their own loggingState and are blocked from overwriting.
+function publishActiveLogger(logger: TsLogger<LogObj>): void {
+  const state = getLogTransportGlobalState();
+  if (!state.activeLogger || state._activeLoggerOwner === loggingState) {
+    state.activeLogger = logger;
+    state._activeLoggerOwner = loggingState;
+  }
 }
 
 function resolveMaxLogFileBytes(raw: unknown): number {
@@ -303,6 +343,9 @@ export function setLoggerOverride(settings: LoggerSettings | null) {
   loggingState.cachedLogger = null;
   loggingState.cachedSettings = null;
   loggingState.cachedConsoleSettings = null;
+  const setOverrideState = getLogTransportGlobalState();
+  setOverrideState.activeLogger = null;
+  setOverrideState._activeLoggerOwner = null;
 }
 
 export function resetLogger() {
@@ -310,16 +353,22 @@ export function resetLogger() {
   loggingState.cachedSettings = null;
   loggingState.cachedConsoleSettings = null;
   loggingState.overrideSettings = null;
+  const resetState = getLogTransportGlobalState();
+  resetState.activeLogger = null;
+  resetState._activeLoggerOwner = null;
 }
 
 export function registerLogTransport(transport: LogTransport): () => void {
-  externalTransports.add(transport);
-  const logger = loggingState.cachedLogger as TsLogger<LogObj> | null;
+  const globalState = getLogTransportGlobalState();
+  globalState.transports.add(transport);
+  // Use the globally-published active logger so plugins loaded via jiti (separate module
+  // instance) can still attach to the gateway's logger after it has been built.
+  const logger = globalState.activeLogger as TsLogger<LogObj> | null;
   if (logger) {
     attachExternalTransport(logger, transport);
   }
   return () => {
-    externalTransports.delete(transport);
+    globalState.transports.delete(transport);
   };
 }
 
