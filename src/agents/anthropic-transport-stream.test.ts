@@ -40,6 +40,7 @@ function makeAnthropicTransportModel(
   params: {
     id?: string;
     name?: string;
+    provider?: AnthropicMessagesModel["provider"];
     reasoning?: boolean;
     maxTokens?: number;
     headers?: Record<string, string>;
@@ -51,7 +52,7 @@ function makeAnthropicTransportModel(
       id: params.id ?? "claude-sonnet-4-6",
       name: params.name ?? "Claude Sonnet 4.6",
       api: "anthropic-messages",
-      provider: "anthropic",
+      provider: params.provider ?? "anthropic",
       baseUrl: "https://api.anthropic.com",
       reasoning: params.reasoning ?? true,
       input: ["text"],
@@ -411,6 +412,104 @@ describe("anthropic transport stream", () => {
     expect(latestAnthropicRequest().payload).toMatchObject({
       thinking: { type: "adaptive" },
       output_config: { effort: "xhigh" },
+    });
+  });
+
+  it("skips output_config.effort for github-copilot claude-opus-4.7 with effort=high (regression #69928)", async () => {
+    const model = makeAnthropicTransportModel({
+      id: "claude-opus-4-7",
+      name: "Claude Opus 4.7",
+      provider: "github-copilot",
+      maxTokens: 8192,
+    });
+
+    await runTransportStream(
+      model,
+      {
+        messages: [{ role: "user", content: "Think." }],
+      } as AnthropicStreamContext,
+      {
+        apiKey: "copilot-token",
+        reasoning: "high",
+      } as AnthropicStreamOptions,
+    );
+
+    const payload = latestAnthropicRequest().payload;
+    expect(payload).toMatchObject({ thinking: { type: "adaptive" } });
+    expect(payload.output_config).toBeUndefined();
+  });
+
+  it("skips output_config.effort for github-copilot claude-opus-4.7 with effort=xhigh (regression #69928)", async () => {
+    const model = makeAnthropicTransportModel({
+      id: "claude-opus-4-7",
+      name: "Claude Opus 4.7",
+      provider: "github-copilot",
+      maxTokens: 8192,
+    });
+
+    await runTransportStream(
+      model,
+      {
+        messages: [{ role: "user", content: "Think." }],
+      } as AnthropicStreamContext,
+      {
+        apiKey: "copilot-token",
+        reasoning: "xhigh",
+      } as AnthropicStreamOptions,
+    );
+
+    const payload = latestAnthropicRequest().payload;
+    expect(payload).toMatchObject({ thinking: { type: "adaptive" } });
+    expect(payload.output_config).toBeUndefined();
+  });
+
+  it("preserves output_config.effort for anthropic-direct claude-opus-4.7 (regression #69928)", async () => {
+    const model = makeAnthropicTransportModel({
+      id: "claude-opus-4-7",
+      name: "Claude Opus 4.7",
+      provider: "anthropic",
+      maxTokens: 8192,
+    });
+
+    await runTransportStream(
+      model,
+      {
+        messages: [{ role: "user", content: "Think." }],
+      } as AnthropicStreamContext,
+      {
+        apiKey: "sk-ant-api",
+        reasoning: "high",
+      } as AnthropicStreamOptions,
+    );
+
+    expect(latestAnthropicRequest().payload).toMatchObject({
+      thinking: { type: "adaptive" },
+      output_config: { effort: "high" },
+    });
+  });
+
+  it("preserves output_config.effort for github-copilot claude-opus-4.6 (regression #69928 scope)", async () => {
+    const model = makeAnthropicTransportModel({
+      id: "claude-opus-4-6",
+      name: "Claude Opus 4.6",
+      provider: "github-copilot",
+      maxTokens: 8192,
+    });
+
+    await runTransportStream(
+      model,
+      {
+        messages: [{ role: "user", content: "Think." }],
+      } as AnthropicStreamContext,
+      {
+        apiKey: "copilot-token",
+        reasoning: "high",
+      } as AnthropicStreamOptions,
+    );
+
+    expect(latestAnthropicRequest().payload).toMatchObject({
+      thinking: { type: "adaptive" },
+      output_config: { effort: "high" },
     });
   });
 });

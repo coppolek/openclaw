@@ -658,7 +658,16 @@ function buildAnthropicParams(
       if (supportsAdaptiveThinking(model.id)) {
         params.thinking = { type: "adaptive" };
         if (options.effort) {
-          params.output_config = { effort: options.effort };
+          // The GitHub Copilot proxy for claude-opus-4.7 only accepts
+          // output_config.effort="medium" and 400s on low/high/xhigh, which
+          // cascades to auth-profile cooldown and fallback collapse. Skip the
+          // emission for the Copilot surface; Anthropic-direct opus-4.7 still
+          // receives the full effort range. See issue #69928.
+          const isCopilotOpus47 =
+            model.provider === "github-copilot" && isClaudeOpus47Model(model.id);
+          if (!isCopilotOpus47) {
+            params.output_config = { effort: options.effort };
+          }
         }
       } else {
         params.thinking = {
