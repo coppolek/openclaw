@@ -56,6 +56,23 @@ describe("buildOllamaChatRequest", () => {
       model: "qwen3:14b-q8_0",
     });
   });
+
+  it("preserves keep_alive when provided", () => {
+    expect(
+      buildOllamaChatRequest({
+        modelId: "gemma4:26b",
+        messages: [{ role: "user", content: "hello" }],
+        options: { num_ctx: 65536 },
+        keep_alive: "15m",
+      }),
+    ).toEqual({
+      model: "gemma4:26b",
+      messages: [{ role: "user", content: "hello" }],
+      stream: true,
+      options: { num_ctx: 65536 },
+      keep_alive: "15m",
+    });
+  });
 });
 
 describe("createConfiguredOllamaCompatStreamWrapper", () => {
@@ -530,6 +547,7 @@ async function createOllamaTestStream(params: {
     maxTokens?: number;
     signal?: AbortSignal;
     headers?: Record<string, string>;
+    keepAlive?: string | number;
   };
 }) {
   const streamFn = createOllamaStreamFn(params.baseUrl, params.defaultHeaders);
@@ -797,9 +815,40 @@ describe("createOllamaStreamFn", () => {
 
         const requestBody = JSON.parse(requestInit.body) as {
           options: { num_ctx?: number; num_predict?: number };
+          keep_alive?: unknown;
         };
         expect(requestBody.options.num_ctx).toBe(131072);
         expect(requestBody.options.num_predict).toBe(123);
+        expect(requestBody.keep_alive).toBe("15m");
+      },
+    );
+  });
+
+  it("allows overriding keep_alive via stream options", async () => {
+    await withMockNdjsonFetch(
+      [
+        '{"model":"m","created_at":"t","message":{"role":"assistant","content":"ok"},"done":false}',
+        '{"model":"m","created_at":"t","message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":1,"eval_count":1}',
+      ],
+      async (fetchMock) => {
+        const stream = await createOllamaTestStream({
+          baseUrl: "http://ollama-host:11434",
+          options: { keepAlive: 0 },
+        });
+
+        const events = await collectStreamEvents(stream);
+        expect(events.at(-1)?.type).toBe("done");
+
+        const request = getGuardedFetchCall(fetchMock);
+        const requestInit = request.init ?? {};
+        if (typeof requestInit.body !== "string") {
+          throw new Error("Expected string request body");
+        }
+
+        const requestBody = JSON.parse(requestInit.body) as {
+          keep_alive?: unknown;
+        };
+        expect(requestBody.keep_alive).toBe(0);
       },
     );
   });
