@@ -58,7 +58,7 @@ import { clearPluginInteractiveHandlers } from "./interactive-registry.js";
 import { getCachedPluginJitiLoader, type PluginJitiLoaderCache } from "./jiti-loader-cache.js";
 import { loadPluginManifestRegistry } from "./manifest-registry.js";
 import type { PluginBundleFormat, PluginDiagnostic, PluginFormat } from "./manifest-types.js";
-import type { PluginManifestContracts } from "./manifest.js";
+import { loadPluginManifest, type PluginManifestContracts } from "./manifest.js";
 import {
   clearMemoryEmbeddingProviders,
   listRegisteredMemoryEmbeddingProviders,
@@ -1309,6 +1309,21 @@ function resolveCandidateDuplicateRank(params: {
   return 4;
 }
 
+function resolveCandidatePluginId(params: {
+  candidate: ReturnType<typeof discoverOpenClawPlugins>["candidates"][number];
+  manifestByRoot: Map<string, ReturnType<typeof loadPluginManifestRegistry>["plugins"][number]>;
+}): string | undefined {
+  const manifestId = params.manifestByRoot.get(params.candidate.rootDir)?.id;
+  if (manifestId) {
+    return manifestId;
+  }
+  const manifestResult = loadPluginManifest(
+    params.candidate.rootDir,
+    params.candidate.origin !== "bundled",
+  );
+  return manifestResult.ok ? manifestResult.manifest.id : params.candidate.idHint;
+}
+
 function compareDuplicateCandidateOrder(params: {
   left: ReturnType<typeof discoverOpenClawPlugins>["candidates"][number];
   right: ReturnType<typeof discoverOpenClawPlugins>["candidates"][number];
@@ -1316,8 +1331,14 @@ function compareDuplicateCandidateOrder(params: {
   provenance: PluginProvenanceIndex;
   env: NodeJS.ProcessEnv;
 }): number {
-  const leftPluginId = params.manifestByRoot.get(params.left.rootDir)?.id;
-  const rightPluginId = params.manifestByRoot.get(params.right.rootDir)?.id;
+  const leftPluginId = resolveCandidatePluginId({
+    candidate: params.left,
+    manifestByRoot: params.manifestByRoot,
+  });
+  const rightPluginId = resolveCandidatePluginId({
+    candidate: params.right,
+    manifestByRoot: params.manifestByRoot,
+  });
   if (!leftPluginId || leftPluginId !== rightPluginId) {
     return 0;
   }
@@ -1650,10 +1671,13 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
 
     for (const candidate of orderedCandidates) {
       const manifestRecord = manifestByRoot.get(candidate.rootDir);
-      if (!manifestRecord) {
+      const pluginId = resolveCandidatePluginId({
+        candidate,
+        manifestByRoot,
+      });
+      if (!pluginId) {
         continue;
       }
-      const pluginId = manifestRecord.id;
       const matchesRequestedScope = matchesScopedPluginRequest({
         onlyPluginIdSet,
         pluginId,
@@ -1668,11 +1692,31 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
         origin: candidate.origin,
         config: normalized,
         rootConfig: cfg,
-        enabledByDefault: manifestRecord.enabledByDefault,
+        enabledByDefault: manifestRecord?.enabledByDefault ?? false,
         activationSource,
         autoEnabledReason: formatAutoEnabledActivationReason(autoEnabledReasons[pluginId]),
       });
       const existingOrigin = seenIds.get(pluginId);
+      if (!manifestRecord) {
+        if (!existingOrigin) {
+          continue;
+        }
+        const record = createPluginRecord({
+          id: pluginId,
+          source: candidate.source,
+          rootDir: candidate.rootDir,
+          origin: candidate.origin,
+          workspaceDir: candidate.workspaceDir,
+          enabled: false,
+          activationState,
+          configSchema: false,
+        });
+        record.status = "disabled";
+        record.error = `overridden by ${existingOrigin} plugin`;
+        markPluginActivationDisabled(record, record.error);
+        registry.plugins.push(record);
+        continue;
+      }
       if (existingOrigin) {
         const record = createPluginRecord({
           id: pluginId,
