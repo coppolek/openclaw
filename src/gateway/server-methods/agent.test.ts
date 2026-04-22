@@ -125,6 +125,7 @@ const makeContext = (): GatewayRequestContext =>
     logGateway: { info: vi.fn(), error: vi.fn() },
     broadcastToConnIds: vi.fn(),
     getSessionEventSubscriberConnIds: () => new Set(),
+    chatAbortControllers: new Map(),
   }) as unknown as GatewayRequestContext;
 
 type AgentHandlerArgs = Parameters<typeof agentHandlers.agent>[0];
@@ -552,6 +553,7 @@ describe("gateway agent handler", () => {
           logGateway: { info: vi.fn(), error: vi.fn() },
           broadcastToConnIds,
           getSessionEventSubscriberConnIds: () => new Set(["conn-1"]),
+          chatAbortControllers: new Map(),
         } as unknown as GatewayRequestContext,
       },
     );
@@ -632,6 +634,7 @@ describe("gateway agent handler", () => {
           logGateway: { info: vi.fn(), error: vi.fn() },
           broadcastToConnIds,
           getSessionEventSubscriberConnIds: () => new Set(["conn-1"]),
+          chatAbortControllers: new Map(),
         } as unknown as GatewayRequestContext,
       },
     );
@@ -772,6 +775,7 @@ describe("gateway agent handler", () => {
           logGateway: { info: logInfo, error: vi.fn() },
           broadcastToConnIds: vi.fn(),
           getSessionEventSubscriberConnIds: () => new Set(),
+          chatAbortControllers: new Map(),
         } as unknown as GatewayRequestContext,
       },
     );
@@ -1435,5 +1439,242 @@ describe("gateway agent handler", () => {
         message: expect.stringContaining("malformed session key"),
       }),
     );
+  });
+
+  describe("abort support for agent RPC runs (issue #42172)", () => {
+    function makeContextWithAbort() {
+      return {
+        ...makeContext(),
+        chatAbortControllers: new Map(),
+        chatRunBuffers: new Map(),
+        chatDeltaSentAt: new Map(),
+        chatDeltaLastBroadcastLen: new Map(),
+        chatAbortedRuns: new Map(),
+        agentRunSeq: new Map(),
+        removeChatRun: vi.fn().mockReturnValue(undefined),
+        broadcast: vi.fn(),
+        nodeSendToSession: vi.fn(),
+      } as unknown as GatewayRequestContext;
+    }
+
+    it("passes abortSignal to agentCommandFromIngress", async () => {
+      primeMainAgentRun();
+
+      let capturedAbortSignal: AbortSignal | undefined;
+      mocks.agentCommand.mockImplementation(async (opts: { abortSignal?: AbortSignal }) => {
+        capturedAbortSignal = opts.abortSignal;
+        return { payloads: [], meta: { durationMs: 0 } };
+      });
+
+      await runMainAgent("test", "abort-signal-test-idem");
+
+      expect(capturedAbortSignal).toBeInstanceOf(AbortSignal);
+      expect(capturedAbortSignal?.aborted).toBe(false);
+    });
+
+    it("registers the run in chatAbortControllers while agentCommandFromIngress is running", async () => {
+      primeMainAgentRun();
+
+      const context = makeContextWithAbort();
+      let resolveAgent!: () => void;
+      mocks.agentCommand.mockImplementation(
+        () =>
+          new Promise<{ payloads: []; meta: { durationMs: number } }>((r) => {
+            resolveAgent = () => r({ payloads: [], meta: { durationMs: 0 } });
+          }),
+      );
+
+      // dispatchAgentRunFromGateway is called synchronously at the tail of the
+      // handler before it returns, and the registration happens synchronously
+      // before the fire-and-forget agentCommandFromIngress call. Awaiting the
+      // handler is therefore sufficient to observe the registration.
+      await invokeAgent(
+        {
+          message: "hello",
+          agentId: "main",
+          sessionKey: "agent:main:main",
+          idempotencyKey: "reg-test-idem",
+        },
+        { context },
+      );
+
+      expect(context.chatAbortControllers.has("reg-test-idem")).toBe(true);
+      const entry = context.chatAbortControllers.get("reg-test-idem");
+      expect(entry?.sessionKey).toBe("agent:main:main");
+      expect(entry?.controller).toBeInstanceOf(AbortController);
+      expect(entry?.controller.signal.aborted).toBe(false);
+
+      resolveAgent();
+      // Flush the .then() and .finally() callbacks
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(context.chatAbortControllers.has("reg-test-idem")).toBe(false);
+    });
+
+    it("removes the run from chatAbortControllers when agentCommandFromIngress throws", async () => {
+      primeMainAgentRun();
+
+      const context = makeContextWithAbort();
+      mocks.agentCommand.mockRejectedValue(new Error("upstream failure"));
+
+      await invokeAgent(
+        {
+          message: "fail",
+          agentId: "main",
+          sessionKey: "agent:main:main",
+          idempotencyKey: "fail-test-idem",
+        },
+        { context },
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(context.chatAbortControllers.has("fail-test-idem")).toBe(false);
+    });
+
+    it("captures caller ownership metadata so chat.abort stays scoped to the run owner", async () => {
+      primeMainAgentRun();
+
+      const context = makeContextWithAbort();
+      let resolveAgent!: () => void;
+      mocks.agentCommand.mockImplementation(
+        () =>
+          new Promise<{ payloads: []; meta: { durationMs: number } }>((r) => {
+            resolveAgent = () => r({ payloads: [], meta: { durationMs: 0 } });
+          }),
+      );
+
+      await invokeAgent(
+        {
+          message: "hello",
+          agentId: "main",
+          sessionKey: "agent:main:main",
+          idempotencyKey: "owner-test-idem",
+        },
+        {
+          context,
+          client: {
+            connId: "conn-owner",
+            connect: { device: { id: "dev-owner" } },
+          } as unknown as AgentHandlerArgs["client"],
+        },
+      );
+
+      const entry = context.chatAbortControllers.get("owner-test-idem");
+      expect(entry?.ownerConnId).toBe("conn-owner");
+      expect(entry?.ownerDeviceId).toBe("dev-owner");
+
+      resolveAgent();
+    });
+
+    it("treats a subagent-lane run without an explicit timeout as no-timeout for abort expiry", async () => {
+      primeMainAgentRun();
+
+      const context = makeContextWithAbort();
+      let resolveAgent!: () => void;
+      mocks.agentCommand.mockImplementation(
+        () =>
+          new Promise<{ payloads: []; meta: { durationMs: number } }>((r) => {
+            resolveAgent = () => r({ payloads: [], meta: { durationMs: 0 } });
+          }),
+      );
+
+      const before = Date.now();
+      await invokeAgent(
+        {
+          message: "subagent-work",
+          agentId: "main",
+          sessionKey: "agent:main:main",
+          idempotencyKey: "subagent-timeout-test-idem",
+          lane: "subagent",
+          // No explicit timeout. agent-command.ts treats subagent lane +
+          // missing timeout as 0 (no timeout); the abort entry must match so
+          // the maintenance loop doesn't force-abort long-running subagent
+          // runs after the default-timeout window.
+        },
+        { context },
+      );
+
+      const entry = context.chatAbortControllers.get("subagent-timeout-test-idem");
+      expect(entry).toBeDefined();
+      // 0 seconds -> MAX_SAFE_TIMEOUT_MS in resolveAgentTimeoutMs, then
+      // clamped to the 24h maximum in resolveChatRunExpiresAtMs. A naive
+      // default (e.g. 48h default agent timeout without the subagent rule)
+      // would still produce ~24h, so guard against both: the expiry must be
+      // right at the 24h cap.
+      const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+      expect(entry!.expiresAtMs).toBeGreaterThanOrEqual(before + TWENTY_FOUR_HOURS_MS - 1_000);
+
+      resolveAgent();
+    });
+
+    it("derives expiresAtMs from the request timeout, not a hard-coded value", async () => {
+      primeMainAgentRun();
+
+      const context = makeContextWithAbort();
+      let resolveAgent!: () => void;
+      mocks.agentCommand.mockImplementation(
+        () =>
+          new Promise<{ payloads: []; meta: { durationMs: number } }>((r) => {
+            resolveAgent = () => r({ payloads: [], meta: { durationMs: 0 } });
+          }),
+      );
+
+      const before = Date.now();
+      await invokeAgent(
+        {
+          message: "long-running",
+          agentId: "main",
+          sessionKey: "agent:main:main",
+          idempotencyKey: "timeout-test-idem",
+          // 2-hour timeout in seconds; maintenance loop must not evict this
+          // run before the timeout + grace period actually elapses.
+          timeout: 2 * 60 * 60,
+        },
+        { context },
+      );
+
+      const entry = context.chatAbortControllers.get("timeout-test-idem");
+      expect(entry).toBeDefined();
+      // expiresAtMs should be at least the requested timeout past `before`,
+      // proving it is derived from request.timeout rather than a fixed 30m
+      // default that would clamp shorter runs unexpectedly.
+      expect(entry!.expiresAtMs).toBeGreaterThanOrEqual(before + 2 * 60 * 60 * 1000);
+
+      resolveAgent();
+    });
+
+    it("does not register a controller when resolvedSessionKey is missing", async () => {
+      // chat.abort matches entries by exact sessionKey equality (chat.ts:1723).
+      // Registering an entry with an empty sessionKey would leave the run
+      // unabortable anyway — chat.abort always passes a non-empty key — and
+      // would pollute chatAbortControllers with an entry keyed to "". Skip
+      // registration in that case so the map only contains abort-capable
+      // entries.
+      const context = makeContextWithAbort();
+      let resolveAgent!: () => void;
+      mocks.agentCommand.mockImplementation(
+        () =>
+          new Promise<{ payloads: []; meta: { durationMs: number } }>((r) => {
+            resolveAgent = () => r({ payloads: [], meta: { durationMs: 0 } });
+          }),
+      );
+
+      // Omit both agentId and sessionKey so resolveExplicitAgentSessionKey
+      // returns undefined and resolvedSessionKey stays unset through dispatch.
+      await invokeAgent(
+        {
+          message: "hello",
+          idempotencyKey: "no-session-key-idem",
+        },
+        { context },
+      );
+
+      expect(context.chatAbortControllers.has("no-session-key-idem")).toBe(false);
+      expect(context.chatAbortControllers.size).toBe(0);
+
+      resolveAgent();
+    });
   });
 });

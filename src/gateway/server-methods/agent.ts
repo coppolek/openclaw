@@ -45,6 +45,12 @@ import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
 } from "../../shared/string-coerce.js";
+import {
+  type ChatAbortControllerEntry,
+  resolveChatRunExpiresAtMs,
+} from "../chat-abort.js";
+import { AGENT_LANE_SUBAGENT } from "../../agents/lanes.js";
+import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { createRunningTaskRun } from "../../tasks/detached-task-runtime.js";
 import {
   mergeDeliveryContext,
@@ -232,6 +238,7 @@ function dispatchAgentRunFromGateway(params: {
   idempotencyKey: string;
   respond: GatewayRequestHandlerOptions["respond"];
   context: GatewayRequestHandlerOptions["context"];
+  abortController: AbortController;
 }) {
   const inputProvenance = normalizeInputProvenance(params.ingressOpts.inputProvenance);
   const shouldTrackTask =
@@ -259,7 +266,11 @@ function dispatchAgentRunFromGateway(params: {
       // Best-effort only: background task tracking must not block agent runs.
     }
   }
-  void agentCommandFromIngress(params.ingressOpts, defaultRuntime, params.context.deps)
+  void agentCommandFromIngress(
+    { ...params.ingressOpts, abortSignal: params.abortController.signal },
+    defaultRuntime,
+    params.context.deps,
+  )
     .then((result) => {
       const payload = {
         runId: params.runId,
@@ -301,6 +312,15 @@ function dispatchAgentRunFromGateway(params: {
         runId: params.runId,
         error: formatForLog(err),
       });
+    })
+    .finally(() => {
+      // Only delete if this agent run's controller is still the registered
+      // one. A concurrent chat.send may have taken ownership of the slot, in
+      // which case we must not remove their entry.
+      const current = params.context.chatAbortControllers.get(params.runId);
+      if (current?.controller === params.abortController) {
+        params.context.chatAbortControllers.delete(params.runId);
+      }
     });
 }
 
@@ -872,6 +892,51 @@ export const agentHandlers: GatewayRequestHandlers = {
         payload: accepted,
       },
     });
+
+    // Register the run in chatAbortControllers BEFORE responding, so that any
+    // follow-up `chat.abort` or `agent.wait` call sees the in-flight run. If
+    // we registered later (e.g. just before dispatchAgentRunFromGateway), the
+    // client could race the async setup between respond() and the dispatch
+    // call and observe an empty controller map.
+    const now = Date.now();
+    const abortController = new AbortController();
+    // Match the lane-aware timeout resolution in
+    // `src/agents/agent-command.ts` (around line 338): `lane: "subagent"`
+    // requests without an explicit `timeout` are treated as "no timeout"
+    // (0 seconds), not as default-timeout runs. Without this mirror, the
+    // maintenance loop would force-abort long-running subagent runs based on
+    // the default-timeout window even though the run itself was started as
+    // no-timeout.
+    const isSubagentLane = request.lane === AGENT_LANE_SUBAGENT;
+    const overrideSeconds =
+      request.timeout !== undefined ? request.timeout : isSubagentLane ? 0 : undefined;
+    const runTimeoutMs = resolveAgentTimeoutMs({
+      cfg: cfgForAgent ?? cfg,
+      overrideSeconds,
+    });
+    // Register the run so chat.abort can target it. Two guard conditions:
+    // (1) resolvedSessionKey must be set — chat.abort matches entries by
+    //     exact sessionKey equality (see chat.ts "runId does not match
+    //     sessionKey"), and the RPC schema requires a non-empty sessionKey.
+    //     An entry keyed with "" would never match.
+    // (2) no other run with the same runId is already tracked — a concurrent
+    //     chat.send with the same idempotency key may already hold an entry;
+    //     overwriting it would discard the chat.send's controller, and the
+    //     .finally() cleanup above would then remove the entry prematurely.
+    if (resolvedSessionKey && !context.chatAbortControllers.has(runId)) {
+      const abortEntry: ChatAbortControllerEntry = {
+        controller: abortController,
+        sessionId: resolvedSessionId ?? runId,
+        sessionKey: resolvedSessionKey,
+        startedAtMs: now,
+        expiresAtMs: resolveChatRunExpiresAtMs({ now, timeoutMs: runTimeoutMs }),
+        ownerConnId: normalizeOptionalString(client?.connId),
+        ownerDeviceId: normalizeOptionalString(client?.connect?.device?.id),
+        kind: "agent",
+      };
+      context.chatAbortControllers.set(runId, abortEntry);
+    }
+
     respond(true, accepted, undefined, { runId });
 
     if (resolvedSessionKey) {
@@ -962,6 +1027,7 @@ export const agentHandlers: GatewayRequestHandlers = {
       idempotencyKey: idem,
       respond,
       context,
+      abortController,
     });
   },
   "agent.identity.get": ({ params, respond }) => {
@@ -1036,13 +1102,22 @@ export const agentHandlers: GatewayRequestHandlers = {
       typeof p.timeoutMs === "number" && Number.isFinite(p.timeoutMs)
         ? Math.max(0, Math.floor(p.timeoutMs))
         : 30_000;
-    const hasActiveChatRun = context.chatAbortControllers.has(runId);
+    const activeRunEntry = context.chatAbortControllers.get(runId);
+    // When a chat.send run is active with the same runId, ignore cached
+    // agent terminal snapshots so stale agent results do not preempt it.
+    // When an agent RPC run is active, all cached terminal snapshots (both
+    // chat and agent) are stale by definition — ignore everything.
+    const hasActiveChatRun =
+      activeRunEntry !== undefined && activeRunEntry.kind !== "agent";
+    const hasActiveAgentRun = activeRunEntry?.kind === "agent";
 
-    const cachedGatewaySnapshot = readTerminalSnapshotFromGatewayDedupe({
-      dedupe: context.dedupe,
-      runId,
-      ignoreAgentTerminalSnapshot: hasActiveChatRun,
-    });
+    const cachedGatewaySnapshot = hasActiveAgentRun
+      ? null
+      : readTerminalSnapshotFromGatewayDedupe({
+          dedupe: context.dedupe,
+          runId,
+          ignoreAgentTerminalSnapshot: hasActiveChatRun,
+        });
     if (cachedGatewaySnapshot) {
       respond(true, {
         runId,
@@ -1054,28 +1129,43 @@ export const agentHandlers: GatewayRequestHandlers = {
       return;
     }
 
+    const ignoreStaleSnapshots = hasActiveChatRun || hasActiveAgentRun;
     const lifecycleAbortController = new AbortController();
     const dedupeAbortController = new AbortController();
     const lifecyclePromise = waitForAgentJob({
       runId,
       timeoutMs,
       signal: lifecycleAbortController.signal,
-      // When chat.send is active with the same runId, ignore cached lifecycle
-      // snapshots so stale agent results do not preempt the active chat run.
-      ignoreCachedSnapshot: hasActiveChatRun,
+      ignoreCachedSnapshot: ignoreStaleSnapshots,
     });
-    const dedupePromise = waitForTerminalGatewayDedupe({
-      dedupe: context.dedupe,
-      runId,
-      timeoutMs,
-      signal: dedupeAbortController.signal,
-      ignoreAgentTerminalSnapshot: hasActiveChatRun,
-    });
+    // When an agent RPC run is active, ALL cached terminal snapshots (both
+    // chat and agent) are stale from previous runs with the same idempotency
+    // key. The dedupe watcher would immediately return the stale chat snapshot
+    // and win the race. Skip it entirely — rely only on the lifecycle watcher
+    // to detect the current run's completion.
+    const dedupePromise = hasActiveAgentRun
+      ? null
+      : waitForTerminalGatewayDedupe({
+          dedupe: context.dedupe,
+          runId,
+          timeoutMs,
+          signal: dedupeAbortController.signal,
+          ignoreAgentTerminalSnapshot: ignoreStaleSnapshots,
+        });
 
-    const first = await Promise.race([
+    type RaceEntry =
+      | { source: "lifecycle"; snapshot: Awaited<ReturnType<typeof waitForAgentJob>> }
+      | { source: "dedupe"; snapshot: AgentWaitTerminalSnapshot | null };
+
+    const racers: Promise<RaceEntry>[] = [
       lifecyclePromise.then((snapshot) => ({ source: "lifecycle" as const, snapshot })),
-      dedupePromise.then((snapshot) => ({ source: "dedupe" as const, snapshot })),
-    ]);
+    ];
+    if (dedupePromise) {
+      racers.push(
+        dedupePromise.then((snapshot) => ({ source: "dedupe" as const, snapshot })),
+      );
+    }
+    const first = await Promise.race(racers);
 
     let snapshot: AgentWaitTerminalSnapshot | Awaited<ReturnType<typeof waitForAgentJob>> =
       first.snapshot;
@@ -1086,7 +1176,12 @@ export const agentHandlers: GatewayRequestHandlers = {
         lifecycleAbortController.abort();
       }
     } else {
-      snapshot = first.source === "lifecycle" ? await dedupePromise : await lifecyclePromise;
+      snapshot =
+        first.source === "lifecycle" && dedupePromise
+          ? await dedupePromise
+          : first.source === "dedupe"
+            ? await lifecyclePromise
+            : null;
       lifecycleAbortController.abort();
       dedupeAbortController.abort();
     }
