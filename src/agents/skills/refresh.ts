@@ -177,7 +177,7 @@ export function ensureSkillsWatcher(params: { workspaceDir: string; config?: Ope
       pollInterval: 100,
     },
     usePolling,
-    interval,
+    ...(typeof interval === "number" ? { interval } : {}),
     // Avoid FD exhaustion on macOS when a workspace contains huge trees.
     // This watcher only needs to react to SKILL.md changes.
     ignored: DEFAULT_SKILLS_WATCH_IGNORED,
