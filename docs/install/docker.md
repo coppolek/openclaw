@@ -124,15 +124,15 @@ and setup-time config writes through `openclaw-gateway` with
 
 The setup script accepts these optional environment variables:
 
-| Variable                       | Purpose                                                          |
-| ------------------------------ | ---------------------------------------------------------------- |
-| `OPENCLAW_IMAGE`               | Use a remote image instead of building locally                   |
-| `OPENCLAW_DOCKER_APT_PACKAGES` | Install extra apt packages during build (space-separated)        |
-| `OPENCLAW_EXTENSIONS`          | Pre-install extension deps at build time (space-separated names) |
-| `OPENCLAW_EXTRA_MOUNTS`        | Extra host bind mounts (comma-separated `source:target[:opts]`)  |
-| `OPENCLAW_HOME_VOLUME`         | Persist `/home/node` in a named Docker volume                    |
-| `OPENCLAW_SANDBOX`             | Opt in to sandbox bootstrap (`1`, `true`, `yes`, `on`)           |
-| `OPENCLAW_DOCKER_SOCKET`       | Override Docker socket path                                      |
+| Variable                      | Purpose                                                          |
+| ----------------------------- | ---------------------------------------------------------------- |
+| `OPENCLAW_IMAGE`              | Use a remote image instead of building locally                   |
+| `OPENCLAW_IMAGE_APT_PACKAGES` | Install extra apt packages during build (space-separated)        |
+| `OPENCLAW_EXTENSIONS`         | Pre-install extension deps at build time (space-separated names) |
+| `OPENCLAW_EXTRA_MOUNTS`       | Extra host bind mounts (comma-separated `source:target[:opts]`)  |
+| `OPENCLAW_HOME_VOLUME`        | Persist `/home/node` in a named Docker volume                    |
+| `OPENCLAW_SANDBOX`            | Opt in to sandbox bootstrap (`1`, `true`, `yes`, `on`)           |
+| `OPENCLAW_DOCKER_SOCKET`      | Override Docker socket path                                      |
 
 ### Health checks
 
@@ -277,7 +277,7 @@ See [ClawDock](/install/clawdock) for the full helper guide.
     full-featured container:
 
     1. **Persist `/home/node`**: `export OPENCLAW_HOME_VOLUME="openclaw_home"`
-    2. **Bake system deps**: `export OPENCLAW_DOCKER_APT_PACKAGES="git curl jq"`
+    2. **Bake system deps**: `export OPENCLAW_IMAGE_APT_PACKAGES="git curl jq"`
     3. **Install Playwright browsers**:
        ```bash
        docker compose run --rm openclaw-cli \

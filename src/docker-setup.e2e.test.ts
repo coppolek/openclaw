@@ -213,13 +213,13 @@ describe("scripts/docker/setup.sh", () => {
     const activeSandbox = requireSandbox(sandbox);
 
     const result = runDockerSetup(activeSandbox, {
-      OPENCLAW_DOCKER_APT_PACKAGES: "ffmpeg build-essential",
+      OPENCLAW_DOCKER_APT_PACKAGES: "curl wget",
       OPENCLAW_EXTRA_MOUNTS: undefined,
       OPENCLAW_HOME_VOLUME: "openclaw-home",
     });
     expect(result.status).toBe(0);
     const envFile = await readFile(join(activeSandbox.rootDir, ".env"), "utf8");
-    expect(envFile).toContain("OPENCLAW_DOCKER_APT_PACKAGES=ffmpeg build-essential");
+    expect(envFile).toContain("OPENCLAW_IMAGE_APT_PACKAGES=curl wget");
     expect(envFile).toContain("OPENCLAW_EXTRA_MOUNTS=");
     expect(envFile).toContain("OPENCLAW_HOME_VOLUME=openclaw-home"); // pragma: allowlist secret
     const extraCompose = await readFile(
@@ -230,7 +230,7 @@ describe("scripts/docker/setup.sh", () => {
     expect(extraCompose).toContain("volumes:");
     expect(extraCompose).toContain("openclaw-home:");
     const log = await readDockerLog(activeSandbox);
-    expect(log).toContain("--build-arg OPENCLAW_DOCKER_APT_PACKAGES=ffmpeg build-essential");
+    expect(log).toContain("--build-arg OPENCLAW_IMAGE_APT_PACKAGES=curl wget");
     expect(log).toContain(
       "run --rm --no-deps --entrypoint node openclaw-gateway dist/index.js onboard --mode local --no-install-daemon",
     );
@@ -238,6 +238,61 @@ describe("scripts/docker/setup.sh", () => {
       'run --rm --no-deps --entrypoint node openclaw-gateway dist/index.js config set --batch-json [{"path":"gateway.mode","value":"local"},{"path":"gateway.bind","value":"lan"},{"path":"gateway.controlUi.allowedOrigins","value":["http://localhost:18789","http://127.0.0.1:18789"]}]',
     );
     expect(log).not.toContain("run --rm openclaw-cli onboard --mode local --no-install-daemon");
+  });
+
+  it("normalizes legacy OPENCLAW_DOCKER_APT_PACKAGES into OPENCLAW_IMAGE_APT_PACKAGES", async () => {
+    const activeSandbox = requireSandbox(sandbox);
+    await resetDockerLog(activeSandbox);
+
+    const result = runDockerSetup(activeSandbox, {
+      OPENCLAW_DOCKER_APT_PACKAGES: "curl wget",
+    });
+    expect(result.status).toBe(0);
+
+    const envFile = await readFile(join(activeSandbox.rootDir, ".env"), "utf8");
+    expect(envFile).toContain("OPENCLAW_IMAGE_APT_PACKAGES=curl wget");
+    expect(envFile).not.toContain("OPENCLAW_DOCKER_APT_PACKAGES");
+
+    const log = await readDockerLog(activeSandbox);
+    expect(log).toContain("--build-arg OPENCLAW_IMAGE_APT_PACKAGES=curl wget");
+    expect(log).not.toContain("--build-arg OPENCLAW_DOCKER_APT_PACKAGES");
+  });
+
+  it("prefers OPENCLAW_IMAGE_APT_PACKAGES over legacy OPENCLAW_DOCKER_APT_PACKAGES", async () => {
+    const activeSandbox = requireSandbox(sandbox);
+    await resetDockerLog(activeSandbox);
+
+    const result = runDockerSetup(activeSandbox, {
+      OPENCLAW_IMAGE_APT_PACKAGES: "curl wget httpie",
+      OPENCLAW_DOCKER_APT_PACKAGES: "curl wget",
+    });
+    expect(result.status).toBe(0);
+
+    const envFile = await readFile(join(activeSandbox.rootDir, ".env"), "utf8");
+    expect(envFile).toContain("OPENCLAW_IMAGE_APT_PACKAGES=curl wget httpie");
+    expect(envFile).not.toContain("OPENCLAW_DOCKER_APT_PACKAGES");
+
+    const log = await readDockerLog(activeSandbox);
+    expect(log).toContain("--build-arg OPENCLAW_IMAGE_APT_PACKAGES=curl wget httpie");
+    expect(log).not.toMatch(/--build-arg OPENCLAW_IMAGE_APT_PACKAGES=curl wget(?! httpie)/);
+  });
+
+  it("explicitly empty OPENCLAW_IMAGE_APT_PACKAGES suppresses legacy fallback", async () => {
+    const activeSandbox = requireSandbox(sandbox);
+    await resetDockerLog(activeSandbox);
+
+    const result = runDockerSetup(activeSandbox, {
+      OPENCLAW_IMAGE_APT_PACKAGES: "",
+      OPENCLAW_DOCKER_APT_PACKAGES: "curl wget",
+    });
+    expect(result.status).toBe(0);
+
+    const envFile = await readFile(join(activeSandbox.rootDir, ".env"), "utf8");
+    expect(envFile).toContain("OPENCLAW_IMAGE_APT_PACKAGES=");
+    expect(envFile).not.toContain("curl wget");
+
+    const log = await readDockerLog(activeSandbox);
+    expect(log).not.toContain("--build-arg OPENCLAW_IMAGE_APT_PACKAGES=curl wget");
   });
 
   it("avoids shared-network openclaw-cli before the gateway is started", async () => {
@@ -550,5 +605,20 @@ describe("scripts/docker/setup.sh", () => {
   it("keeps docker-compose timezone env defaults aligned across services", async () => {
     const compose = await readFile(join(repoRoot, "docker-compose.yml"), "utf8");
     expect(compose.match(/TZ: \$\{OPENCLAW_TZ:-UTC\}/g)).toHaveLength(2);
+  });
+
+  it("Dockerfile ARG OPENCLAW_IMAGE_APT_PACKAGES must not have a default value", async () => {
+    // If the ARG has a default (e.g. ARG OPENCLAW_IMAGE_APT_PACKAGES=""), Docker treats it as
+    // "set" even when no --build-arg is passed. That breaks the RUN fallback expression
+    // ${OPENCLAW_IMAGE_APT_PACKAGES-$OPENCLAW_DOCKER_APT_PACKAGES} because the variable is
+    // never truly unset, so legacy-only callers using --build-arg OPENCLAW_DOCKER_APT_PACKAGES
+    // get nothing installed — a backward-compat regression.
+    const dockerfile = await readFile(join(repoRoot, "Dockerfile"), "utf8");
+    const argLine = dockerfile
+      .split("\n")
+      .find((line) => line.startsWith("ARG OPENCLAW_IMAGE_APT_PACKAGES"));
+    expect(argLine).toBeDefined();
+    // Must be bare `ARG OPENCLAW_IMAGE_APT_PACKAGES` with no default assignment
+    expect(argLine).toBe("ARG OPENCLAW_IMAGE_APT_PACKAGES");
   });
 });

@@ -63,7 +63,7 @@ You can also set `OPENCLAW_PODMAN_QUADLET=1`.
 Optional build/setup env vars:
 
 - `OPENCLAW_IMAGE` or `OPENCLAW_PODMAN_IMAGE` -- use an existing/pulled image instead of building `openclaw:local`
-- `OPENCLAW_DOCKER_APT_PACKAGES` -- install extra apt packages during image build
+- `OPENCLAW_IMAGE_APT_PACKAGES` -- install extra apt packages during image build (also accepts legacy `OPENCLAW_DOCKER_APT_PACKAGES`)
 - `OPENCLAW_EXTENSIONS` -- pre-install extension dependencies at build time
 
 Container start:
