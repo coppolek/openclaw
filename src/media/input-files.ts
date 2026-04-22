@@ -373,21 +373,26 @@ export async function extractFileContentFromSource(params: {
   }
 
   if (mimeType === "application/pdf") {
-    const extracted = await extractPdfContent({
-      buffer,
-      maxPages: limits.pdf.maxPages,
-      maxPixels: limits.pdf.maxPixels,
-      minTextChars: limits.pdf.minTextChars,
-      onImageExtractionError: (err) => {
-        logWarn(`media: PDF image extraction skipped, ${String(err)}`);
-      },
-    });
-    const text = extracted.text ? clampText(extracted.text, limits.maxChars) : "";
-    return {
-      filename,
-      text,
-      images: extracted.images.length > 0 ? extracted.images : undefined,
-    };
+    try {
+      const extracted = await extractPdfContent({
+        buffer,
+        maxPages: limits.pdf.maxPages,
+        maxPixels: limits.pdf.maxPixels,
+        minTextChars: limits.pdf.minTextChars,
+        onImageExtractionError: (err) => {
+          logWarn(`media: PDF image extraction skipped, ${String(err)}`);
+        },
+      });
+      const text = extracted.text ? clampText(extracted.text, limits.maxChars) : "";
+      return {
+        filename,
+        text,
+        images: extracted.images.length > 0 ? extracted.images : undefined,
+      };
+    } catch (pdfErr) {
+      logWarn(`media: PDF extraction failed for ${filename}: ${String(pdfErr)}`);
+      return { filename, text: `[PDF: ${filename} — text extraction failed]` };
+    }
   }
 
   const text = clampText(decodeTextContent(buffer, charset), limits.maxChars);

@@ -1,3 +1,7 @@
+import { createRequire } from "node:module";
+import { dirname, join, sep } from "node:path";
+import { registerUnhandledRejectionHandler } from "../infra/unhandled-rejections.js";
+
 type CanvasLike = {
   toBuffer(type: "image/png"): Buffer;
 };
@@ -31,7 +35,11 @@ type PdfDocument = {
 };
 
 type PdfJsModule = {
-  getDocument(params: { data: Uint8Array; disableWorker?: boolean }): {
+  getDocument(params: {
+    data: Uint8Array;
+    disableWorker?: boolean;
+    standardFontDataUrl?: string;
+  }): {
     promise: Promise<PdfDocument>;
   };
 };
@@ -41,6 +49,57 @@ const PDFJS_MODULE = "pdfjs-dist/legacy/build/pdf.mjs";
 
 let canvasModulePromise: Promise<CanvasModule> | null = null;
 let pdfJsModulePromise: Promise<PdfJsModule> | null = null;
+let standardFontDataPathCache: string | null = null;
+
+// pdf.js dynamically imports pdf.worker.mjs during `getDocument()`. Even with
+// `disableWorker: true`, the worker module initialization can throw an
+// unhandled rejection (`BaseExceptionClosure` at module top-level). This
+// rejection is asynchronous and escapes all try-catch boundaries at the call
+// site. Without suppression, it reaches the gateway's unhandled-rejection
+// handler, which calls `process.exit(1)` and crashes the entire gateway.
+//
+// Register a handler through OpenClaw's own unhandled-rejection system so the
+// pdfjs worker error is marked as handled before the crash handler sees it.
+//
+// The check is intentionally narrow: we require the stack to contain both the
+// pdf.worker.mjs module path AND the `ModuleJob.run` frame that indicates this
+// is the known top-level worker initialization error, not a runtime failure
+// from an actual pdf.js operation.
+registerUnhandledRejectionHandler((reason: unknown): boolean => {
+  const err = reason as { message?: string; stack?: string } | undefined;
+  const stack = err?.stack ?? "";
+  return stack.includes("pdf.worker") && stack.includes("ModuleJob.run");
+});
+
+// pdf.js needs `standardFontDataUrl` to render PDFs that reference the 14
+// standard PDF fonts (Helvetica, Times, Courier, etc.). Without it, every such
+// document throws `UnknownErrorException: Ensure that the standardFontDataUrl
+// API parameter is provided`, which then yields empty/garbled text extraction.
+//
+// The font files ship inside `pdfjs-dist/standard_fonts/`, so we resolve that
+// directory through the actual module resolver (works regardless of bundling).
+//
+// IMPORTANT: pdf.js's Node-side font fetcher reads via `fs.promises.readFile`
+// and expects a plain filesystem path with a trailing separator — not a
+// `file://` URL. Passing a `file://` URL triggers
+// `Unable to load font data at: file:///...` warnings even though the file
+// exists. This module is server-side only (the gateway runs in Node), so we
+// always pass a filesystem path.
+function getStandardFontDataPath(): string | undefined {
+  if (standardFontDataPathCache !== null) {
+    return standardFontDataPathCache || undefined;
+  }
+  try {
+    const require = createRequire(import.meta.url);
+    const pkgPath = require.resolve("pdfjs-dist/package.json");
+    const fontDir = join(dirname(pkgPath), "standard_fonts") + sep;
+    standardFontDataPathCache = fontDir;
+    return standardFontDataPathCache;
+  } catch {
+    standardFontDataPathCache = "";
+    return undefined;
+  }
+}
 
 async function loadCanvasModule(): Promise<CanvasModule> {
   if (!canvasModulePromise) {
@@ -87,8 +146,11 @@ export async function extractPdfContent(params: {
 }): Promise<PdfExtractedContent> {
   const { buffer, maxPages, maxPixels, minTextChars, pageNumbers, onImageExtractionError } = params;
   const pdfJsModule = await loadPdfJsModule();
-  const pdf = await pdfJsModule.getDocument({ data: new Uint8Array(buffer), disableWorker: true })
-    .promise;
+  const pdf = await pdfJsModule.getDocument({
+    data: new Uint8Array(buffer),
+    disableWorker: true,
+    standardFontDataUrl: getStandardFontDataPath(),
+  }).promise;
 
   const effectivePages: number[] = pageNumbers
     ? pageNumbers.filter((p) => p >= 1 && p <= pdf.numPages).slice(0, maxPages)
