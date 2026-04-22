@@ -640,6 +640,7 @@ export async function processDiscordMessage(
     const formatted = convertMarkdownTables(
       stripInlineDirectiveTagsForDelivery(text).text,
       tableMode,
+      "> ",
     );
     const chunks = chunkDiscordTextWithMode(formatted, {
       maxChars: draftMaxChars,
