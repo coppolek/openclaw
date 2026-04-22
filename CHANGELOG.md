@@ -219,6 +219,7 @@ Docs: https://docs.openclaw.ai
 - Anthropic/models: add Claude Opus 4.7 `xhigh` reasoning effort support and keep it separate from adaptive thinking.
 - Control UI/settings: overhaul the settings and slash-command experience with faster presets, quick-create flows, and refreshed command discovery. (#67819) Thanks @BunsDev.
 - macOS/gateway: add `screen.snapshot` support for macOS app nodes, including runtime plumbing, default macOS allowlisting, and docs for monitor preview flows. (#67954) Thanks @BunsDev.
+- Agents/ZAI: auto-inject an `X-Session-Id` request header on z.ai (GLM) provider calls from the agent `sessionId` so the z.ai load balancer keeps prefix-identical turns on the same inference node, raising prompt-cache hit rate for long sessions. Per ZhipuAI support team's recommended best practice for prompt cache stickiness; analogous to OpenAI's `prompt_cache_key` and xAI's `x-grok-conv-id`. No-ops for missing, empty, whitespace-only, or >256-char session ids.
 
 ### Fixes
 
