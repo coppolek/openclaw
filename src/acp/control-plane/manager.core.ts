@@ -702,6 +702,10 @@ export class AcpSessionManager {
       throw new AcpRuntimeError("ACP_SESSION_INIT_FAILED", "ACP session key is required.");
     }
     await this.evictIdleRuntimeHandles({ cfg: input.cfg });
+    // Pass input.signal so throwIfAborted() fires before any work starts when
+    // the queue drains for a turn whose caller already timed out (ghost turn
+    // prevention). Without this, the queued runTurn executes fully even after
+    // withTimeout() has already rejected the caller. refs #17258
     await this.withSessionActor(
       sessionKey,
       async () => {
@@ -761,10 +765,14 @@ export class AcpSessionManager {
 
             internalAbortController = new AbortController();
             onCallerAbort = () => {
-              internalAbortController?.abort();
+              try {
+                internalAbortController?.abort(input.signal?.reason);
+              } catch (err) {
+                logVerbose(`acp-manager: onCallerAbort threw for ${sessionKey}: ${String(err)}`);
+              }
             };
             if (input.signal?.aborted) {
-              internalAbortController.abort();
+              internalAbortController.abort(input.signal.reason);
             } else if (input.signal) {
               input.signal.addEventListener("abort", onCallerAbort, { once: true });
             }
@@ -937,6 +945,7 @@ export class AcpSessionManager {
                 handle,
                 meta,
                 failOnStatusError: false,
+                signal: input.signal,
               }));
             }
             if (
@@ -1943,6 +1952,7 @@ export class AcpSessionManager {
     meta: SessionAcpMeta;
     runtimeStatus?: AcpRuntimeStatus;
     failOnStatusError: boolean;
+    signal?: AbortSignal;
   }): Promise<{
     handle: AcpRuntimeHandle;
     meta: SessionAcpMeta;

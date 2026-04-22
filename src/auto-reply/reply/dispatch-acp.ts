@@ -1,3 +1,4 @@
+import { resolveRuntimeOptionsFromMeta } from "../../acp/control-plane/runtime-options.js";
 import { resolveAcpAgentPolicyError, resolveAcpDispatchPolicyError } from "../../acp/policy.js";
 import { formatAcpRuntimeErrorText } from "../../acp/runtime/error-text.js";
 import { toAcpRuntimeError } from "../../acp/runtime/errors.js";
@@ -6,6 +7,7 @@ import {
   isSessionIdentityPending,
   resolveSessionIdentityFromMeta,
 } from "../../acp/runtime/session-identity.js";
+import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { TtsAutoMode } from "../../config/types.tts.js";
 import { logVerbose } from "../../globals.js";
@@ -13,6 +15,7 @@ import { emitAgentEvent } from "../../infra/agent-events.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { generateSecureUuid } from "../../infra/secure-random.js";
 import { prefixSystemMessage } from "../../infra/system-message.js";
+import { withTimeout } from "../../node-host/with-timeout.js";
 import { resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
 import {
   normalizeLowercaseStringOrEmpty,
@@ -417,15 +420,92 @@ export async function tryDispatchAcpReply(params: {
       logVerbose(`dispatch-acp: start reply lifecycle failed: ${formatErrorMessage(error)}`);
     }
 
-    await acpManager.runTurn({
-      cfg: params.cfg,
-      sessionKey: canonicalSessionKey,
-      text: promptText,
-      attachments: attachments.length > 0 ? attachments : undefined,
-      mode: "prompt",
-      requestId: resolveAcpRequestId(params.ctx),
-      ...(params.abortSignal ? { signal: params.abortSignal } : {}),
-      onEvent: async (event) => await projector.onEvent(event),
+    // Guard against stalled upstream streams: abort the turn after the configured
+    // agent timeout (agents.defaults.timeoutSeconds, default 600s). Without this,
+    // a silently hung SSE connection blocks the session queue forever. refs #17258
+    //
+    // P2 (rev): Re-resolve session state immediately before runTurn so the wrapper
+    // timeout reflects the most current runtimeOptions — not the stale snapshot
+    // captured at the top of tryDispatchAcpReply (before media work and before
+    // runTurn acquires the session actor). If the session was updated in that window,
+    // this ensures dispatch and AcpSessionManager.runTurn share the same budget.
+    const { readAcpSessionEntry: readLiveAcpSessionEntry } = await loadDispatchAcpSessionRuntime();
+    const liveAcpMeta =
+      readLiveAcpSessionEntry({ cfg: params.cfg, sessionKey: canonicalSessionKey })?.acp ??
+      undefined;
+    const liveTimeoutSeconds = liveAcpMeta
+      ? resolveRuntimeOptionsFromMeta(liveAcpMeta).timeoutSeconds
+      : undefined;
+    const turnTimeoutMs =
+      typeof liveTimeoutSeconds === "number" &&
+      Number.isFinite(liveTimeoutSeconds) &&
+      liveTimeoutSeconds > 0
+        ? Math.max(30_000, Math.round(liveTimeoutSeconds * 1_000))
+        : resolveAgentTimeoutMs({ cfg: params.cfg, minMs: 30_000 });
+
+    // P1b: Track the runTurn promise so that when the dispatch-level timeout fires
+    // we can wait for runTurn to settle before surfacing the error. Without this,
+    // withTimeout() returns while runTurn drains in the background, causing late
+    // events and keeping the session actor queue locked.
+    const DRAIN_GRACE_MS = 5_000;
+    let runTurnSettlePromise: Promise<void> | undefined;
+    await withTimeout(
+      (timeoutSignal) => {
+        // P1a: Combine the caller's upstream abort signal with the timeout signal
+        // so that either cancellation path (caller abort OR dispatch timeout)
+        // reaches runTurn. Previously only the timeout signal was forwarded,
+        // dropping params.abortSignal entirely.
+        let signal: AbortSignal | undefined;
+        if (params.abortSignal != null && typeof AbortSignal.any === "function") {
+          signal = AbortSignal.any([timeoutSignal!, params.abortSignal]);
+        } else if (params.abortSignal != null && timeoutSignal != null) {
+          // Fallback for runtimes without AbortSignal.any: relay params.abortSignal
+          // into a local controller that also listens to the timeout signal.
+          const controller = new AbortController();
+          const relayAbort = (source: AbortSignal) => () => {
+            if (!controller.signal.aborted) {
+              controller.abort(source.reason);
+            }
+          };
+          timeoutSignal.addEventListener("abort", relayAbort(timeoutSignal), { once: true });
+          params.abortSignal.addEventListener("abort", relayAbort(params.abortSignal), {
+            once: true,
+          });
+          signal = controller.signal;
+        } else {
+          signal = timeoutSignal;
+        }
+        runTurnSettlePromise = acpManager.runTurn({
+          cfg: params.cfg,
+          sessionKey: canonicalSessionKey,
+          text: promptText,
+          attachments: attachments.length > 0 ? attachments : undefined,
+          mode: "prompt",
+          requestId: resolveAcpRequestId(params.ctx),
+          onEvent: (event) => projector.onEvent(event),
+          signal,
+        });
+        return runTurnSettlePromise;
+      },
+      turnTimeoutMs,
+      "ACP turn",
+    ).catch(async (err: unknown) => {
+      // P1b: On timeout (or upstream abort), wait for runTurn to drain before
+      // re-throwing. runTurn's own internal cleanup (cleanupTimedOutTurn) will
+      // abort and close the runtime, but we need to wait for that to finish
+      // so the session actor queue is fully released before we hand back control.
+      if (runTurnSettlePromise !== undefined) {
+        await Promise.race([
+          runTurnSettlePromise.catch(() => {
+            /* runTurn's own error is irrelevant here — we already have err */
+          }),
+          new Promise<void>((resolve) => {
+            const t = setTimeout(resolve, DRAIN_GRACE_MS);
+            t.unref?.();
+          }),
+        ]);
+      }
+      throw err;
     });
 
     await projector.flush(true);
