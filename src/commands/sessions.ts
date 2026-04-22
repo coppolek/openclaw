@@ -9,6 +9,7 @@ import { resolveSessionStoreTargetsOrExit } from "./session-store-targets.js";
 import {
   resolveSessionDisplayDefaults,
   resolveSessionDisplayModel,
+  resolveSessionDisplayModelRef,
 } from "./sessions-display-model.js";
 import {
   formatSessionAgeCell,
@@ -180,19 +181,21 @@ export async function sessionsCommand(
       activeMinutes: activeMinutes ?? null,
       sessions: await Promise.all(
         rows.map(async (r) => {
-          const model = resolveSessionDisplayModel(cfg, r);
+          const ref = resolveSessionDisplayModelRef(cfg, r);
+          const model = ref.model;
           return {
             ...r,
             totalTokens: resolveSessionTotalTokens(r) ?? null,
             totalTokensFresh:
               typeof r.totalTokens === "number" ? r.totalTokensFresh !== false : false,
             contextTokens:
-              r.contextTokens ??
+              (r.modelIsFromFallback ? undefined : r.contextTokens) ??
               configuredContextTokens ??
               (await lookupContextTokensForDisplay(model)) ??
               configContextTokens ??
               null,
             model,
+            ...(r.modelIsFromFallback ? { modelProvider: ref.provider } : undefined),
           };
         }),
       ),
@@ -232,8 +235,12 @@ export async function sessionsCommand(
 
   for (const row of rows) {
     const model = resolveSessionDisplayModel(cfg, row);
+    // When the last run used a fallback model, ignore its stored context
+    // window — compute from the displayed (primary/override) model instead.
+    // See #47705.
+    const storedContextTokens = row.modelIsFromFallback ? undefined : row.contextTokens;
     const contextTokens =
-      row.contextTokens ??
+      storedContextTokens ??
       configuredContextTokens ??
       (await lookupContextTokensForDisplay(model)) ??
       configContextTokens;

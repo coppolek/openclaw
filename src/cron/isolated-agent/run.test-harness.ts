@@ -262,6 +262,7 @@ function makeDefaultModelFallbackResult() {
     },
     provider: "openai",
     model: "gpt-5.4",
+    attempts: [],
   };
 }
 

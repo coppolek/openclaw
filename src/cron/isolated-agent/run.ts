@@ -708,9 +708,45 @@ async function finalizeCronRun(params: {
     resolvePositiveContextTokens(prepared.cronSession.sessionEntry.contextTokens) ??
     DEFAULT_CONTEXT_TOKENS;
 
+  // Model is from fallback if the successfully-used provider/model differs
+  // from the configured target. LiveSessionModelSwitchError updates the
+  // configured snapshot so model switches are not treated as fallbacks.
+  // When runWithModelFallback consumes a LiveSessionModelSwitchError internally
+  // (without it reaching the outer retry loop in executeCronRun), the configured
+  // snapshot is not updated. Check fallbackAttempts for switch requests to
+  // derive the actual intended target so live switches aren't mislabelled.
+  let intendedProvider = execution.configuredProvider;
+  let intendedModel = execution.configuredModel;
+  if (execution.fallbackAttempts?.length) {
+    for (const attempt of execution.fallbackAttempts) {
+      const match = attempt.error?.match(/^Live session model switch requested: (.+?)\/(.+)/);
+      if (match) {
+        intendedProvider = match[1];
+        intendedModel = match[2];
+      }
+    }
+  }
+  // A fallback occurred if the fallback resolution settled on a different
+  // model than the user intended.  However, in embedded runs hook selection
+  // can rewrite the effective model (agentMeta), so the model actually
+  // persisted may differ from both the fallback candidate and the intended
+  // target.  Only mark the session as "from fallback" when the persisted
+  // runtime model still matches the fallback candidate — if hooks rewrote
+  // it, the stored model is not "sticky fallback" and should not be
+  // suppressed during later resolution.
+  const fallbackOccurred =
+    execution.fallbackProvider !== intendedProvider || execution.fallbackModel !== intendedModel;
+  const runtimeModel = finalRunResult.meta?.agentMeta?.model;
+  const runtimeProvider = finalRunResult.meta?.agentMeta?.provider;
+  const isFromFallback =
+    fallbackOccurred &&
+    (!runtimeModel ||
+      (runtimeModel === execution.fallbackModel &&
+        (runtimeProvider ?? execution.fallbackProvider) === execution.fallbackProvider));
   setSessionRuntimeModel(prepared.cronSession.sessionEntry, {
     provider: providerUsed,
     model: modelUsed,
+    isFromFallback,
   });
   prepared.cronSession.sessionEntry.contextTokens = contextTokens;
   if (isCliProvider(providerUsed, prepared.cfgWithAgentDefaults)) {

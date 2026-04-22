@@ -173,6 +173,7 @@ export function createFollowupRunner(params: {
       let runResult: Awaited<ReturnType<typeof runEmbeddedPiAgent>>;
       let fallbackProvider = run.provider;
       let fallbackModel = run.model;
+      let fallbackAttempts: { error: string }[] = [];
       let activeSessionEntry =
         (sessionKey ? sessionStore?.[sessionKey] : undefined) ?? sessionEntry;
       activeSessionEntry = await runPreflightCompactionIfNeeded({
@@ -288,6 +289,7 @@ export function createFollowupRunner(params: {
         runResult = fallbackResult.result;
         fallbackProvider = fallbackResult.provider;
         fallbackModel = fallbackResult.model;
+        fallbackAttempts = fallbackResult.attempts ?? [];
       } catch (err) {
         const message = formatErrorMessage(err);
         replyOperation.fail("run_failed", err);
@@ -311,6 +313,40 @@ export function createFollowupRunner(params: {
         }) ?? DEFAULT_CONTEXT_TOKENS;
 
       if (storePath && sessionKey) {
+        // Determine the intended model target for fallback detection.
+        // When a LiveSessionModelSwitchError is handled inside the fallback chain
+        // (model-fallback.ts), the switch target becomes the user's intended model
+        // but queued.run.provider/model still reflect the original primary. Use
+        // the switch target as the baseline so the successful switch isn't
+        // mislabelled as a fallback.
+        let intendedProvider = queued.run.provider;
+        let intendedModel = queued.run.model;
+        if (fallbackAttempts.length) {
+          for (const attempt of fallbackAttempts) {
+            const match = attempt.error?.match(/^Live session model switch requested: (.+?)\/(.+)/);
+            if (match) {
+              intendedProvider = match[1];
+              intendedModel = match[2];
+            }
+          }
+        }
+        // A fallback occurred if the fallback resolution settled on a
+        // different model than the user intended.  However, in embedded runs
+        // hook selection can rewrite the effective model (agentMeta), so the
+        // model actually persisted may differ from both the fallback candidate
+        // and the intended target.  Only mark the session as "from fallback"
+        // when the persisted runtime model still matches the fallback
+        // candidate — if hooks rewrote it, the stored model is not "sticky
+        // fallback" and should not be suppressed during later resolution.
+        const fallbackOccurred =
+          fallbackProvider !== intendedProvider || fallbackModel !== intendedModel;
+        const runtimeModel = runResult.meta?.agentMeta?.model;
+        const runtimeProvider = runResult.meta?.agentMeta?.provider;
+        const isFromFallback =
+          fallbackOccurred &&
+          (!runtimeModel ||
+            (runtimeModel === fallbackModel &&
+              (runtimeProvider ?? fallbackProvider) === fallbackProvider));
         await persistRunSessionUsage({
           storePath,
           sessionKey,
@@ -320,6 +356,7 @@ export function createFollowupRunner(params: {
           promptTokens,
           modelUsed,
           providerUsed,
+          isFromFallback,
           contextTokensUsed,
           systemPromptReport: runResult.meta?.systemPromptReport,
           cliSessionBinding: runResult.meta?.agentMeta?.cliSessionBinding,

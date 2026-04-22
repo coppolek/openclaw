@@ -1083,7 +1083,10 @@ export function resolveSessionModelRef(
   cfg: OpenClawConfig,
   entry?:
     | SessionEntry
-    | Pick<SessionEntry, "model" | "modelProvider" | "modelOverride" | "providerOverride">,
+    | Pick<
+        SessionEntry,
+        "model" | "modelProvider" | "modelOverride" | "providerOverride" | "modelIsFromFallback"
+      >,
   agentId?: string,
 ): { provider: string; model: string } {
   const resolved = agentId
@@ -1099,10 +1102,18 @@ export function resolveSessionModelRef(
     modelOverride: entry?.modelOverride,
   });
 
+  // Skip session-stored runtime model if it came from the fallback chain.
+  // This ensures the primary model is retried on subsequent requests rather
+  // than permanently sticking with the fallback. See #47705.
+  const isFromFallback =
+    entry && "modelIsFromFallback" in entry && entry.modelIsFromFallback === true;
+
   const persisted = resolvePersistedSelectedModelRef({
     defaultProvider: resolved.provider || DEFAULT_PROVIDER,
-    runtimeProvider: entry?.modelProvider,
-    runtimeModel: entry?.model,
+    // Skip session-stored runtime model when it came from the fallback chain,
+    // but still honour explicit model overrides set via sessions.patch.
+    runtimeProvider: isFromFallback ? undefined : entry?.modelProvider,
+    runtimeModel: isFromFallback ? undefined : entry?.model,
     overrideProvider: normalizedOverride.providerOverride,
     overrideModel: normalizedOverride.modelOverride,
   });
@@ -1187,12 +1198,16 @@ export function resolveSessionModelIdentityRef(
   cfg: OpenClawConfig,
   entry?:
     | SessionEntry
-    | Pick<SessionEntry, "model" | "modelProvider" | "modelOverride" | "providerOverride">,
+    | Pick<
+        SessionEntry,
+        "model" | "modelProvider" | "modelOverride" | "providerOverride" | "modelIsFromFallback"
+      >,
   agentId?: string,
   fallbackModelRef?: string,
 ): { provider?: string; model: string } {
-  const runtimeModel = entry?.model?.trim();
-  const runtimeProvider = entry?.modelProvider?.trim();
+  const isFromFallback = entry && "modelIsFromFallback" in entry && entry.modelIsFromFallback;
+  const runtimeModel = isFromFallback ? undefined : entry?.model?.trim();
+  const runtimeProvider = isFromFallback ? undefined : entry?.modelProvider?.trim();
   if (runtimeModel) {
     if (runtimeProvider) {
       return { provider: runtimeProvider, model: runtimeModel };
@@ -1310,10 +1325,12 @@ export function buildGatewaySessionRow(params: {
           fallbackModel: resolvedModel.model ?? DEFAULT_MODEL,
         })
       : null;
+  const isEntryFromFallback = entry && "modelIsFromFallback" in entry && entry.modelIsFromFallback;
   const preferLiveSubagentModelIdentity =
     Boolean(subagentRun?.model?.trim()) && subagentStatus === "running";
   const shouldUseTranscriptModelIdentity =
     runtimeModelPresent &&
+    !isEntryFromFallback &&
     !preferLiveSubagentModelIdentity &&
     (needsTranscriptTotalTokens || needsTranscriptContextTokens);
   const resolvedModelIdentity = {
@@ -1343,14 +1360,18 @@ export function buildGatewaySessionRow(params: {
       model,
       entry,
     }) ?? resolveNonNegativeNumber(transcriptUsage?.estimatedCostUsd);
+  // When the entry is from a fallback run, skip both the stored entry
+  // context tokens and transcript-derived context tokens — both reflect the
+  // fallback model's context window rather than the resolved primary model.
   const contextTokens =
-    resolvePositiveNumber(entry?.contextTokens) ??
-    resolvePositiveNumber(transcriptUsage?.contextTokens) ??
+    (!isEntryFromFallback ? resolvePositiveNumber(entry?.contextTokens) : undefined) ??
+    (!isEntryFromFallback ? resolvePositiveNumber(transcriptUsage?.contextTokens) : undefined) ??
     resolvePositiveNumber(
       resolveContextTokensForModel({
         cfg,
         provider: modelProvider,
         model,
+        contextTokensOverride: cfg.agents?.defaults?.contextTokens,
         // Gateway/session listing is read-only; don't start async model discovery.
         allowAsyncLoad: false,
       }),
