@@ -67,6 +67,11 @@ const resolveAgentDir = vi.hoisted(() => vi.fn(() => "/tmp/agent"));
 const resolveDefaultModelForAgent = vi.hoisted(() =>
   vi.fn(() => ({ provider: "openai", model: "gpt-test" })),
 );
+const resolveHumanDelayConfig = vi.hoisted(() =>
+  vi.fn((cfg: { agents?: { defaults?: { humanDelay?: unknown } } }) => {
+    return cfg?.agents?.defaults?.humanDelay ?? undefined;
+  }),
+);
 
 vi.mock("./draft-stream.js", () => ({
   createTelegramDraftStream,
@@ -110,6 +115,7 @@ vi.mock("./bot-message-dispatch.agent.runtime.js", () => ({
   modelSupportsVision,
   resolveAgentDir,
   resolveDefaultModelForAgent,
+  resolveHumanDelayConfig,
 }));
 
 vi.mock("./sticker-cache.js", () => ({
@@ -495,6 +501,34 @@ describe("dispatchTelegramMessage draft streaming", () => {
         replyOptions: expect.objectContaining({
           disableBlockStreaming: false,
           onPartialReply: undefined,
+        }),
+      }),
+    );
+  });
+
+  it("forwards configured humanDelay to the block dispatcher", async () => {
+    dispatchReplyWithBufferedBlockDispatcher.mockImplementation(async ({ dispatcherOptions }) => {
+      await dispatcherOptions.deliver({ text: "Hello" }, { kind: "final" });
+      return { queuedFinal: true };
+    });
+    deliverReplies.mockResolvedValue({ delivered: true });
+
+    await dispatchWithContext({
+      context: createContext(),
+      telegramCfg: { streaming: { block: { enabled: true } } },
+      cfg: {
+        agents: {
+          defaults: {
+            humanDelay: { mode: "custom", minMs: 800, maxMs: 2500 },
+          },
+        },
+      },
+    });
+
+    expect(dispatchReplyWithBufferedBlockDispatcher).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dispatcherOptions: expect.objectContaining({
+          humanDelay: { mode: "custom", minMs: 800, maxMs: 2500 },
         }),
       }),
     );

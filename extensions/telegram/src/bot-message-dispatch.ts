@@ -38,6 +38,7 @@ import {
   modelSupportsVision,
   resolveAgentDir,
   resolveDefaultModelForAgent,
+  resolveHumanDelayConfig,
 } from "./bot-message-dispatch.agent.runtime.js";
 import {
   generateTopicLabel,
@@ -770,6 +771,7 @@ export const dispatchTelegramMessage = async ({
         cfg,
         dispatcherOptions: {
           ...replyPipeline,
+          humanDelay: resolveHumanDelayConfig(cfg, route.agentId),
           deliver: async (payload, info) => {
             if (isDispatchSuperseded()) {
               return;
