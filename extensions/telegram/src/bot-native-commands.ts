@@ -93,6 +93,8 @@ type TelegramNativeReplyChannelData = {
 type TelegramResolvedGroupConfig = {
   groupConfig?: TelegramGroupConfig | TelegramDirectConfig;
   topicConfig?: TelegramTopicConfig;
+  promptGroupConfig?: TelegramGroupConfig | TelegramDirectConfig;
+  promptTopicConfig?: TelegramTopicConfig;
 };
 
 type TelegramCommandAuthResult = {
@@ -104,6 +106,8 @@ type TelegramCommandAuthResult = {
   senderUsername: string;
   groupConfig?: TelegramGroupConfig | TelegramDirectConfig;
   topicConfig?: TelegramTopicConfig;
+  promptGroupConfig?: TelegramGroupConfig | TelegramDirectConfig;
+  promptTopicConfig?: TelegramTopicConfig;
   commandAuthorized: boolean;
 };
 
@@ -317,6 +321,8 @@ async function resolveTelegramCommandAuth(params: {
     storeAllowFrom,
     groupConfig,
     topicConfig,
+    promptGroupConfig,
+    promptTopicConfig,
     groupAllowOverride,
     effectiveGroupAllow,
     hasGroupAllowOverride,
@@ -462,6 +468,8 @@ async function resolveTelegramCommandAuth(params: {
     senderUsername,
     groupConfig,
     topicConfig,
+    promptGroupConfig,
+    promptTopicConfig,
     commandAuthorized,
   };
 }
@@ -759,6 +767,8 @@ export const registerTelegramNativeCommands = ({
           senderUsername,
           groupConfig,
           topicConfig,
+          promptGroupConfig,
+          promptTopicConfig,
           commandAuthorized,
         } = auth;
         const runtimeContext = await resolveCommandRuntimeContext({
@@ -851,6 +861,8 @@ export const registerTelegramNativeCommands = ({
         const { skillFilter, groupSystemPrompt } = resolveTelegramGroupPromptSettings({
           groupConfig,
           topicConfig,
+          promptGroupConfig,
+          promptTopicConfig,
         });
         const { sessionKey: commandSessionKey, commandTargetSessionKey } =
           resolveNativeCommandSessionTargets({

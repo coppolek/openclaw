@@ -208,7 +208,8 @@ export const buildTelegramMessageContext = async ({
   }
 
   const threadIdForConfig = resolvedThreadId ?? dmThreadId;
-  const { groupConfig, topicConfig } = resolveTelegramGroupConfig(chatId, threadIdForConfig);
+  const { groupConfig, topicConfig, promptGroupConfig, promptTopicConfig } =
+    resolveTelegramGroupConfig(chatId, threadIdForConfig);
   const directConfig = !isGroup ? (groupConfig as TelegramDirectConfig | undefined) : undefined;
   const telegramGroupConfig = isGroup
     ? (groupConfig as TelegramGroupConfig | undefined)
@@ -572,6 +573,8 @@ export const buildTelegramMessageContext = async ({
     groupHistories,
     groupConfig,
     topicConfig,
+    promptGroupConfig,
+    promptTopicConfig,
     stickerCacheHit: bodyResult.stickerCacheHit,
     effectiveWasMentioned: bodyResult.effectiveWasMentioned,
     locationData: bodyResult.locationData,

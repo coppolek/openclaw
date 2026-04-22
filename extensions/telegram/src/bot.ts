@@ -23,7 +23,7 @@ import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
 } from "openclaw/plugin-sdk/text-runtime";
-import { resolveTelegramAccount } from "./accounts.js";
+import { resolveTelegramAccount, resolveTelegramAccountConfig } from "./accounts.js";
 import { defaultTelegramBotDeps } from "./bot-deps.js";
 import { registerTelegramHandlers } from "./bot-handlers.runtime.js";
 import { createTelegramMessageProcessor } from "./bot-message.js";
@@ -507,20 +507,31 @@ export function createTelegramBot(opts: TelegramBotOptions): TelegramBotInstance
     });
   const loadFreshTelegramAccountConfig = () => {
     try {
-      return resolveTelegramAccount({
-        cfg: telegramDeps.loadConfig(),
-        accountId: account.accountId,
-      }).config;
+      const freshCfg = telegramDeps.loadConfig();
+      return {
+        cfg: freshCfg,
+        accountConfig: resolveTelegramAccount({
+          cfg: freshCfg,
+          accountId: account.accountId,
+        }).config,
+        accountGroups: resolveTelegramAccountConfig(freshCfg, account.accountId)?.groups,
+      };
     } catch (error) {
       logVerbose(
         `telegram: failed to load fresh config for account ${account.accountId}; using startup snapshot: ${String(error)}`,
       );
-      return telegramCfg;
+      return {
+        cfg,
+        accountConfig: telegramCfg,
+        accountGroups: resolveTelegramAccountConfig(cfg, account.accountId)?.groups,
+      };
     }
   };
   const resolveTelegramGroupConfig = (chatId: string | number, messageThreadId?: number) => {
-    const freshTelegramCfg = loadFreshTelegramAccountConfig();
-    const groups = freshTelegramCfg.groups;
+    const { cfg: freshCfg, accountConfig: freshTelegramCfg, accountGroups } =
+      loadFreshTelegramAccountConfig();
+    const groups = accountGroups ?? freshTelegramCfg.groups;
+    const promptGroups = accountGroups ? groups : (freshCfg.channels?.telegram?.groups ?? groups);
     const direct = freshTelegramCfg.direct;
     const chatIdStr = String(chatId);
     const isDm = !chatIdStr.startsWith("-");
@@ -530,19 +541,37 @@ export function createTelegramBot(opts: TelegramBotOptions): TelegramBotInstance
       if (directConfig) {
         const topicConfig =
           messageThreadId != null ? directConfig.topics?.[String(messageThreadId)] : undefined;
-        return { groupConfig: directConfig, topicConfig };
+        return {
+          groupConfig: directConfig,
+          topicConfig,
+          promptGroupConfig: directConfig,
+          promptTopicConfig: topicConfig,
+        };
       }
       // DMs without direct config: don't fall through to groups lookup
-      return { groupConfig: undefined, topicConfig: undefined };
+      return {
+        groupConfig: undefined,
+        topicConfig: undefined,
+        promptGroupConfig: undefined,
+        promptTopicConfig: undefined,
+      };
     }
 
-    if (!groups) {
-      return { groupConfig: undefined, topicConfig: undefined };
+    if (!groups && !promptGroups) {
+      return {
+        groupConfig: undefined,
+        topicConfig: undefined,
+        promptGroupConfig: undefined,
+        promptTopicConfig: undefined,
+      };
     }
-    const groupConfig = groups[chatIdStr] ?? groups["*"];
+    const groupConfig = groups?.[chatIdStr] ?? groups?.["*"];
+    const promptGroupConfig = promptGroups?.[chatIdStr] ?? promptGroups?.["*"];
     const topicConfig =
       messageThreadId != null ? groupConfig?.topics?.[String(messageThreadId)] : undefined;
-    return { groupConfig, topicConfig };
+    const promptTopicConfig =
+      messageThreadId != null ? promptGroupConfig?.topics?.[String(messageThreadId)] : undefined;
+    return { groupConfig, topicConfig, promptGroupConfig, promptTopicConfig };
   };
 
   // Global sendChatAction handler with 401 backoff / circuit breaker (issue #27092).
