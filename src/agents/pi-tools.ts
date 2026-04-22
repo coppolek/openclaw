@@ -11,6 +11,7 @@ import {
 } from "../shared/string-coerce.js";
 import { resolveGatewayMessageChannel } from "../utils/message-channel.js";
 import { resolveAgentConfig } from "./agent-scope.js";
+import { resolveGlobalSenderToolPolicy } from "./sender-tool-policy.js";
 import { createApplyPatchTool } from "./apply-patch.js";
 import { describeExecTool, describeProcessTool } from "./bash-tools.descriptions.js";
 import type { ExecToolDefaults } from "./bash-tools.exec-types.js";
@@ -382,6 +383,17 @@ export function createOpenClawCodingTools(options?: {
     senderUsername: options?.senderUsername,
     senderE164: options?.senderE164,
   });
+  // Per-sender capability tier: strips tools from the model's schema entirely so the LLM
+  // has no knowledge of denied capabilities for this specific sender.
+  const senderPolicy = resolveGlobalSenderToolPolicy({
+    config: options?.config,
+    agentId,
+    senderId: options?.senderId,
+    senderName: options?.senderName,
+    senderUsername: options?.senderUsername,
+    senderE164: options?.senderE164,
+    messageProvider: options?.messageProvider,
+  });
   const profilePolicy = resolveToolProfilePolicy(profile);
   const providerProfilePolicy = resolveToolProfilePolicy(providerProfile);
 
@@ -419,6 +431,7 @@ export function createOpenClawCodingTools(options?: {
     agentPolicy,
     agentProviderPolicy,
     groupPolicy,
+    senderPolicy,
     sandboxToolPolicy,
     subagentPolicy,
   ]);
@@ -610,6 +623,7 @@ export function createOpenClawCodingTools(options?: {
         agentPolicy,
         agentProviderPolicy,
         groupPolicy,
+        senderPolicy,
         sandboxToolPolicy,
         subagentPolicy,
       ]),
@@ -687,6 +701,7 @@ export function createOpenClawCodingTools(options?: {
         groupPolicy,
         agentId,
       }),
+      { policy: senderPolicy, label: "toolsBySender" },
       { policy: sandboxToolPolicy, label: "sandbox tools.allow" },
       { policy: subagentPolicy, label: "subagent tools.allow" },
     ],

@@ -6,6 +6,7 @@ import {
   resolveGroupToolPolicy,
   resolveSubagentToolPolicyForSession,
 } from "../pi-tools.policy.js";
+import { resolveGlobalSenderToolPolicy } from "../sender-tool-policy.js";
 import {
   isSubagentEnvelopeSession,
   resolveSubagentCapabilityStore,
@@ -149,6 +150,15 @@ export function applyFinalEffectiveToolPolicy(
           store: subagentStore,
         })
       : undefined;
+  const senderPolicy = resolveGlobalSenderToolPolicy({
+    config: params.config,
+    agentId: params.agentId,
+    senderId: params.senderId,
+    senderName: params.senderName,
+    senderUsername: params.senderUsername,
+    senderE164: params.senderE164,
+    messageProvider: params.messageProvider,
+  });
   const ownerFiltered = applyOwnerOnlyToolPolicy(
     params.bundledTools,
     params.senderIsOwner === true,
@@ -178,6 +188,7 @@ export function applyFinalEffectiveToolPolicy(
       groupPolicy,
       agentId,
     }),
+    { policy: senderPolicy, label: "toolsBySender" },
     { policy: params.sandboxToolPolicy, label: "sandbox tools.allow" },
     { policy: subagentPolicy, label: "subagent tools.allow" },
   ].map((step) => Object.assign({}, step, { suppressUnavailableCoreToolWarning: true }));
