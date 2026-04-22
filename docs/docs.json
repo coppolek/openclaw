@@ -1176,7 +1176,8 @@
                   "automation/tasks",
                   "automation/taskflow",
                   "automation/standing-orders",
-                  "automation/hooks"
+                  "automation/hooks",
+                  "automation/feishu-session-trace"
                 ]
               },
               {
