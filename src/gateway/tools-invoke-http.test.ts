@@ -128,6 +128,11 @@ vi.mock("../agents/openclaw-tools.js", () => {
       execute: async () => ({ ok: true, result: "nodes" }),
     },
     {
+      name: "browser",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ ok: true, enabled: true }),
+    },
+    {
       name: "owner_only_test",
       ownerOnly: true,
       parameters: { type: "object", properties: {} },
@@ -878,4 +883,16 @@ describe("POST /tools/invoke", () => {
     expect(nodesRes.status).toBe(404);
     expect(nodesAdminRes.status).toBe(404);
   });
-});
+
+  it("keeps plugin tools enabled for browser tool invoke despite being in CORE_TOOL_DEFINITIONS", async () => {
+    setMainAllowedTools({ allow: ["browser"] });
+
+    const res = await invokeToolAuthed({
+      tool: "browser",
+      args: {},
+      sessionKey: "main",
+    });
+
+    expect(res.status).toBe(200);
+    expect(lastCreateOpenClawToolsContext?.disablePluginTools).toBe(false);
+  });});

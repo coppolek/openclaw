@@ -34,6 +34,7 @@ type CoreToolDefinition = {
   sectionId: string;
   profiles: ToolProfileId[];
   includeInOpenClawGroup?: boolean;
+  pluginImplemented?: boolean;
 };
 
 const CORE_TOOL_SECTION_ORDER: Array<{ id: string; label: string }> = [
@@ -200,6 +201,7 @@ const CORE_TOOL_DEFINITIONS: CoreToolDefinition[] = [
   {
     id: "browser",
     label: "browser",
+    pluginImplemented: true,
     description: "Control web browser",
     sectionId: "ui",
     profiles: [],
@@ -391,4 +393,9 @@ export function resolveCoreToolProfiles(toolId: string): ToolProfileId[] {
 
 export function isKnownCoreToolId(toolId: string): boolean {
   return CORE_TOOL_BY_ID.has(toolId);
+}
+
+export function isCoreToolPluginImplemented(toolName: string): boolean {
+  const tool = CORE_TOOL_DEFINITIONS.find(t => t.id === toolName);
+  return tool?.pluginImplemented === true;
 }
