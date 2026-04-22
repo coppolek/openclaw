@@ -263,6 +263,9 @@ vi.mock("../skills-runtime.js", () => ({
     shouldLoadSkillEntries: false,
     skillEntries: undefined,
   }),
+  // Stub the skill-template seeder — tests using this support module
+  // don't need plan-template emission to fire (#67541).
+  applySkillPlanTemplateSeed: () => null,
 }));
 
 vi.mock("../context-engine-maintenance.js", () => ({
@@ -284,13 +287,6 @@ vi.mock("../../pi-project-settings.js", () => ({
 
 vi.mock("../../pi-settings.js", () => ({
   applyPiAutoCompactionGuard: () => {},
-  applyPiCompactionSettingsFromConfig: () => ({
-    didOverride: false,
-    compaction: {
-      reserveTokens: 0,
-      keepRecentTokens: 40_000,
-    },
-  }),
 }));
 
 vi.mock("../extensions.js", () => ({
