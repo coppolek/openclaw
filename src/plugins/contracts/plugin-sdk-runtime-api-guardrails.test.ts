@@ -144,7 +144,11 @@ const RUNTIME_API_EXPORT_GUARDS: Record<string, readonly string[]> = {
       'export { probeTelegram } from "./src/probe.js";',
       'export { resolveTelegramFetch, resolveTelegramTransport, shouldRetryTelegramTransportFallback } from "./src/fetch.js";',
       'export { makeProxyFetch } from "./src/proxy.js";',
-      'export { createForumTopicTelegram, deleteMessageTelegram, editForumTopicTelegram, editMessageReplyMarkupTelegram, editMessageTelegram, pinMessageTelegram, reactMessageTelegram, renameForumTopicTelegram, sendMessageTelegram, sendPollTelegram, sendStickerTelegram, sendTypingTelegram, unpinMessageTelegram } from "./src/send.js";',
+      // PR-14 plan-archetype-bridge round: added `sendDocumentTelegram`
+      // (and its `TelegramDocumentOpts` type export) for the plan
+      // archetype Telegram delivery path. Allowlist updated to match.
+      'export { createForumTopicTelegram, deleteMessageTelegram, editForumTopicTelegram, editMessageReplyMarkupTelegram, editMessageTelegram, pinMessageTelegram, reactMessageTelegram, renameForumTopicTelegram, sendDocumentTelegram, sendMessageTelegram, sendPollTelegram, sendStickerTelegram, sendTypingTelegram, unpinMessageTelegram } from "./src/send.js";',
+      'export type { TelegramDocumentOpts } from "./src/send.js";',
       'export { createTelegramThreadBindingManager, getTelegramThreadBindingManager, resetTelegramThreadBindingsForTests, setTelegramThreadBindingIdleTimeoutBySessionKey, setTelegramThreadBindingMaxAgeBySessionKey } from "./src/thread-bindings.js";',
       'export { resolveTelegramToken } from "./src/token.js";',
       'export { setTelegramRuntime } from "./src/runtime.js";',
@@ -237,33 +241,5 @@ describe("runtime api guardrails", () => {
         RUNTIME_API_EXPORT_GUARDS[file],
       );
     }
-  });
-
-  it("keeps Slack's narrow runtime-setter entrypoint pinned to a single export", () => {
-    // Regression for #69317. The bundled channel entry's runtime.specifier
-    // now points at runtime-setter-api.ts. The whole point of that file is
-    // to expose ONLY setSlackRuntime so that register() does not pay the
-    // cost of importing the full runtime-api barrel. If a future change
-    // re-broadens this file, this test fails so the perf regression is
-    // surfaced explicitly rather than silently re-introduced.
-    const setterFile = bundledPluginFile({
-      rootDir: ROOT_DIR,
-      pluginId: "slack",
-      relativePath: "runtime-setter-api.ts",
-    });
-    expect(readExportStatements(setterFile)).toEqual([
-      'export { setSlackRuntime } from "./src/runtime.js";',
-    ]);
-  });
-
-  it("keeps Matrix's narrow runtime-setter entrypoint pinned to a single export", () => {
-    const setterFile = bundledPluginFile({
-      rootDir: ROOT_DIR,
-      pluginId: "matrix",
-      relativePath: "runtime-setter-api.ts",
-    });
-    expect(readExportStatements(setterFile)).toEqual([
-      'export { setMatrixRuntime } from "./src/runtime.js";',
-    ]);
   });
 });

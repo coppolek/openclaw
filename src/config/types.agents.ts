@@ -79,7 +79,7 @@ export type AgentConfig = {
   embeddedHarness?: AgentEmbeddedHarnessConfig;
   model?: AgentModelConfig;
   /** Optional per-agent default thinking level (overrides agents.defaults.thinkingDefault). */
-  thinkingDefault?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "adaptive" | "max";
+  thinkingDefault?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "adaptive";
   /** Optional per-agent default verbosity level. */
   verboseDefault?: "off" | "on" | "full";
   /** Optional per-agent default reasoning visibility. */
@@ -111,6 +111,23 @@ export type AgentConfig = {
   embeddedPi?: {
     /** Optional per-agent execution contract override. */
     executionContract?: EmbeddedPiExecutionContract;
+    /**
+     * Optional per-agent auto-continue override (PR #67538). Cascade is
+     * per-field: per-agent → agents.defaults → DEFAULT_AUTO_CONTINUE.
+     */
+    autoContinue?: {
+      enabled?: boolean;
+      maxCycles?: number;
+      stopOnMutation?: boolean;
+    };
+    /**
+     * PR-9 Tier 1: optional per-agent override for the outer-loop turn
+     * budget. Mirror of `agents.defaults.embeddedPi.maxIterations` —
+     * fully replaces the default scaled formula when set. Range
+     * [1, 100_000]. Subagents (`lightContext: true`) keep a separate
+     * lower cap and ignore this setting.
+     */
+    maxIterations?: number;
   };
   /** Optional per-agent sandbox overrides. */
   sandbox?: AgentSandboxConfig;

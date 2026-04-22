@@ -254,6 +254,36 @@ export const TOOL_DISPLAY_CONFIG: ToolDisplayConfig = {
       title: "Update Plan",
       detailKeys: ["explanation", "plan.0.step"],
     },
+    enter_plan_mode: {
+      emoji: "🧭",
+      title: "Enter Plan Mode",
+      detailKeys: ["reason"],
+    },
+    exit_plan_mode: {
+      emoji: "✅",
+      title: "Exit Plan Mode",
+      detailKeys: ["title", "summary", "plan.0.step"],
+    },
+    // iter-3 D6: read-only introspection tool. Display-config required
+    // by `tool-display:check`; the tool ignores args entirely so the
+    // detail-keys list is empty (the runtime renders just the title).
+    plan_mode_status: {
+      emoji: "🔍",
+      title: "Plan Mode Status",
+      detailKeys: [],
+    },
+    // Copilot review #68939 (2026-04-19): the prior detailKeys
+    // (`question.prompt` / `question.options.0.label`) didn't match
+    // the actual tool result shape — `ask-user-question-tool.ts:113`
+    // returns a FLAT details record (`{ question: string, options:
+    // string[], allowFreetext, ... }`), not a nested
+    // `question.prompt` object. The nested keys resolved to undefined
+    // and the display rendered empty. Realign to the flat shape.
+    ask_user_question: {
+      emoji: "❓",
+      title: "Ask User",
+      detailKeys: ["question", "options.0"],
+    },
     gateway: {
       emoji: "🔌",
       title: "Gateway",
@@ -261,6 +291,140 @@ export const TOOL_DISPLAY_CONFIG: ToolDisplayConfig = {
         restart: {
           label: "restart",
           detailKeys: ["reason", "delayMs"],
+        },
+      },
+    },
+    whatsapp_login: {
+      emoji: "🟢",
+      title: "WhatsApp Login",
+      actions: {
+        start: {
+          label: "start",
+        },
+        wait: {
+          label: "wait",
+        },
+      },
+    },
+    discord: {
+      emoji: "💬",
+      title: "Discord",
+      actions: {
+        react: {
+          label: "react",
+          detailKeys: ["channelId", "messageId", "emoji"],
+        },
+        reactions: {
+          label: "reactions",
+          detailKeys: ["channelId", "messageId"],
+        },
+        sticker: {
+          label: "sticker",
+          detailKeys: ["to", "stickerIds"],
+        },
+        poll: {
+          label: "poll",
+          detailKeys: ["question", "to"],
+        },
+        permissions: {
+          label: "permissions",
+          detailKeys: ["channelId"],
+        },
+        readMessages: {
+          label: "read messages",
+          detailKeys: ["channelId", "limit"],
+        },
+        sendMessage: {
+          label: "send",
+          detailKeys: ["to", "content"],
+        },
+        editMessage: {
+          label: "edit",
+          detailKeys: ["channelId", "messageId"],
+        },
+        deleteMessage: {
+          label: "delete",
+          detailKeys: ["channelId", "messageId"],
+        },
+        threadCreate: {
+          label: "thread create",
+          detailKeys: ["channelId", "name"],
+        },
+        threadList: {
+          label: "thread list",
+          detailKeys: ["guildId", "channelId"],
+        },
+        threadReply: {
+          label: "thread reply",
+          detailKeys: ["channelId", "content"],
+        },
+        pinMessage: {
+          label: "pin",
+          detailKeys: ["channelId", "messageId"],
+        },
+        unpinMessage: {
+          label: "unpin",
+          detailKeys: ["channelId", "messageId"],
+        },
+        listPins: {
+          label: "list pins",
+          detailKeys: ["channelId"],
+        },
+        searchMessages: {
+          label: "search",
+          detailKeys: ["guildId", "content"],
+        },
+        memberInfo: {
+          label: "member",
+          detailKeys: ["guildId", "userId"],
+        },
+        roleInfo: {
+          label: "roles",
+          detailKeys: ["guildId"],
+        },
+        emojiList: {
+          label: "emoji list",
+          detailKeys: ["guildId"],
+        },
+        roleAdd: {
+          label: "role add",
+          detailKeys: ["guildId", "userId", "roleId"],
+        },
+        roleRemove: {
+          label: "role remove",
+          detailKeys: ["guildId", "userId", "roleId"],
+        },
+        channelInfo: {
+          label: "channel",
+          detailKeys: ["channelId"],
+        },
+        channelList: {
+          label: "channels",
+          detailKeys: ["guildId"],
+        },
+        voiceStatus: {
+          label: "voice",
+          detailKeys: ["guildId", "userId"],
+        },
+        eventList: {
+          label: "events",
+          detailKeys: ["guildId"],
+        },
+        eventCreate: {
+          label: "event create",
+          detailKeys: ["guildId", "name"],
+        },
+        timeout: {
+          label: "timeout",
+          detailKeys: ["guildId", "userId"],
+        },
+        kick: {
+          label: "kick",
+          detailKeys: ["guildId", "userId"],
+        },
+        ban: {
+          label: "ban",
+          detailKeys: ["guildId", "userId"],
         },
       },
     },
