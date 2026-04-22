@@ -14,7 +14,7 @@ function makeOllamaResponse(params: {
   content?: string;
   thinking?: string;
   reasoning?: string;
-  tool_calls?: Array<{ function: { name: string; arguments: Record<string, unknown> } }>;
+  tool_calls?: Array<{ function: { name: string; arguments: Record<string, unknown> | string } }>;
 }) {
   return {
     model: "qwen3.5",
@@ -84,6 +84,67 @@ describe("buildAssistantMessage", () => {
     const msg = buildAssistantMessage(response, MODEL_INFO);
     expect(msg.content).toHaveLength(1);
     expect(msg.content[0]).toEqual({ type: "text", text: "Just text" });
+  });
+
+  it("parses tool call arguments when Ollama returns a JSON string", () => {
+    const response = makeOllamaResponse({
+      tool_calls: [
+        {
+          function: {
+            name: "exec",
+            arguments: '{"command":"ls","path":"/tmp"}',
+          },
+        },
+      ],
+    });
+    const msg = buildAssistantMessage(response, MODEL_INFO);
+    expect(msg.content).toHaveLength(1);
+    expect(msg.content[0]).toMatchObject({
+      type: "toolCall",
+      name: "exec",
+      arguments: { command: "ls", path: "/tmp" },
+    });
+  });
+
+  it("preserves unsafe integers when parsing string tool call arguments", () => {
+    const response = makeOllamaResponse({
+      tool_calls: [
+        {
+          function: {
+            name: "send",
+            arguments: '{"target":9223372036854775807,"nested":{"thread":1234567890123456789}}',
+          },
+        },
+      ],
+    });
+    const msg = buildAssistantMessage(response, MODEL_INFO);
+    expect(msg.content[0]).toMatchObject({
+      type: "toolCall",
+      name: "send",
+      arguments: {
+        target: "9223372036854775807",
+        nested: { thread: "1234567890123456789" },
+      },
+    });
+  });
+
+  it("falls back to an empty object for malformed string tool arguments", () => {
+    const response = makeOllamaResponse({
+      tool_calls: [
+        {
+          function: {
+            name: "exec",
+            arguments: '{"command":"ls"',
+          },
+        },
+      ],
+    });
+    const msg = buildAssistantMessage(response, MODEL_INFO);
+    expect(msg.content[0]).toMatchObject({
+      type: "toolCall",
+      name: "exec",
+      arguments: {},
+    });
   });
 });
 

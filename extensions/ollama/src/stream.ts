@@ -336,8 +336,17 @@ interface OllamaTool {
 interface OllamaToolCall {
   function: {
     name: string;
-    arguments: Record<string, unknown>;
+    arguments: Record<string, unknown> | string;
   };
+}
+
+function parseOllamaToolCallArguments(
+  argumentsValue: Record<string, unknown> | string,
+): Record<string, unknown> {
+  if (typeof argumentsValue !== "string") {
+    return argumentsValue;
+  }
+  return parseJsonObjectPreservingUnsafeIntegers(argumentsValue) ?? {};
 }
 
 interface OllamaChatResponse {
@@ -540,7 +549,7 @@ export function buildAssistantMessage(
         type: "toolCall",
         id: `ollama_call_${randomUUID()}`,
         name: toolCall.function.name,
-        arguments: toolCall.function.arguments,
+        arguments: parseOllamaToolCallArguments(toolCall.function.arguments),
       });
     }
   }
