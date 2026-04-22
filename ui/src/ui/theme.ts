@@ -1,4 +1,4 @@
-export type ThemeName = "claw" | "knot" | "dash";
+export type ThemeName = "claw" | "knot" | "dash" | "matrix" | "cyberpunk";
 export type ThemeMode = "system" | "light" | "dark";
 export type ResolvedTheme =
   | "dark"
@@ -6,9 +6,11 @@ export type ResolvedTheme =
   | "openknot"
   | "openknot-light"
   | "dash"
-  | "dash-light";
+  | "dash-light"
+  | "matrix"
+  | "cyberpunk";
 
-export const VALID_THEME_NAMES = new Set<ThemeName>(["claw", "knot", "dash"]);
+export const VALID_THEME_NAMES = new Set<ThemeName>(["claw", "knot", "dash", "matrix", "cyberpunk"]);
 export const VALID_THEME_MODES = new Set<ThemeMode>(["system", "light", "dark"]);
 
 type ThemeSelection = { theme: ThemeName; mode: ThemeMode };
@@ -69,6 +71,14 @@ export function resolveTheme(theme: ThemeName, mode: ThemeMode): ResolvedTheme {
   }
   if (theme === "knot") {
     return resolvedMode === "light" ? "openknot-light" : "openknot";
+  }
+  // Matrix theme is intentionally dark-only (no light variant)
+  // Honors retro terminal aesthetic - always returns dark mode
+  if (theme === "matrix") {
+    return "matrix";
+  }
+  if (theme === "cyberpunk") {
+    return "cyberpunk";
   }
   return resolvedMode === "light" ? "dash-light" : "dash";
 }
