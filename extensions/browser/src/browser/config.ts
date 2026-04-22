@@ -143,9 +143,15 @@ function resolveBrowserSsrFPolicy(cfg: BrowserConfig | undefined): SsrFPolicy | 
     !allowedHostnames &&
     !hostnameAllowlist
   ) {
-    // Keep the default policy object present so CDP guards still enforce
-    // fail-closed private-network checks on unconfigured installs.
-    return {};
+    // Return undefined when no ssrfPolicy is configured so that:
+    // 1. assertCdpEndpointAllowed short-circuits (its guard is `if (!ssrfPolicy) return`)
+    //    rather than running an SSRF check with an empty policy that blocks private IPs
+    //    (e.g. WSL→Windows remote CDP on 172.29.x.x).
+    // 2. Navigation guards (redactBlockedTabUrls, assertExistingSessionPostInteractionNavigation)
+    //    also short-circuit, which is correct — they only enforce restrictions when
+    //    dangerouslyAllowPrivateNetwork:false or allowedHostnames is explicitly set.
+    //    An empty `{}` policy would have passed those checks anyway; undefined is equivalent.
+    return undefined;
   }
 
   return {
