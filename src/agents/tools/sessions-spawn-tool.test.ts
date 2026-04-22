@@ -367,6 +367,16 @@ describe("sessions_spawn tool", () => {
     expect(hoisted.spawnSubagentDirectMock).not.toHaveBeenCalled();
   });
 
+  it('documents runtime="acp" requirement in streamTo schema description', () => {
+    const tool = createSessionsSpawnTool();
+    const schema = tool.parameters as {
+      properties?: { streamTo?: { description?: string } };
+    };
+    const description = schema.properties?.streamTo?.description ?? "";
+    expect(description).toMatch(/runtime="acp"/);
+    expect(description).toMatch(/subagent/);
+  });
+
   it('rejects streamTo when runtime is not "acp"', async () => {
     const tool = createSessionsSpawnTool({
       agentSessionKey: "agent:main:main",
