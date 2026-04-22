@@ -186,4 +186,34 @@ describe("setupSkills", () => {
     const brewNote = notes.find((n) => n.title === "Homebrew recommended");
     expect(brewNote).toBeDefined();
   });
+
+  it("does not recommend Homebrew on non-macOS/Linux platforms (e.g. FreeBSD)", async () => {
+    mockMissingBrewStatus([
+      createBundledSkill({
+        name: "video-frames",
+        description: "ffmpeg",
+        bins: ["ffmpeg"],
+        installLabel: "Install ffmpeg (brew)",
+      }),
+    ]);
+
+    const { prompter, notes } = createPrompter({ multiselect: ["video-frames"] });
+
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", {
+      configurable: true,
+      value: "freebsd",
+    });
+    try {
+      await setupSkills({} as OpenClawConfig, "/tmp/ws", runtime, prompter);
+    } finally {
+      Object.defineProperty(process, "platform", {
+        configurable: true,
+        value: originalPlatform,
+      });
+    }
+
+    const brewNote = notes.find((n) => n.title === "Homebrew recommended");
+    expect(brewNote).toBeUndefined();
+  });
 });
