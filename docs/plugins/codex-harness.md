@@ -263,12 +263,12 @@ By default, the plugin starts Codex locally with:
 codex app-server --listen stdio://
 ```
 
-By default, OpenClaw starts local Codex harness sessions fully unchained:
-`approvalPolicy: "never"` and `sandbox: "danger-full-access"`. That matches the
-trusted local operator posture used by the Codex CLI and lets autonomous
-heartbeats use network and shell tools without waiting on an invisible native
-approval path. You can tighten that policy, for example by routing reviews
-through the guardian:
+By default, OpenClaw starts local Codex harness sessions with Codex's guardian
+auto-review path: `approvalPolicy: "on-request"`,
+`approvalsReviewer: "guardian_subagent"`, and `sandbox: "workspace-write"`.
+This lets native Codex approval prompts route to a reviewer subagent instead of
+blocking unattended heartbeats on an invisible local approval path. You can
+still loosen or tighten that policy explicitly:
 
 ```json5
 {
@@ -278,9 +278,9 @@ through the guardian:
         enabled: true,
         config: {
           appServer: {
-            approvalPolicy: "untrusted",
-            approvalsReviewer: "guardian_subagent",
-            sandbox: "workspace-write",
+            approvalPolicy: "never",
+            approvalsReviewer: "user",
+            sandbox: "danger-full-access",
             serviceTier: "priority",
           },
         },
@@ -314,19 +314,19 @@ For an already-running app-server, use WebSocket transport:
 
 Supported `appServer` fields:
 
-| Field               | Default                                  | Meaning                                                                  |
-| ------------------- | ---------------------------------------- | ------------------------------------------------------------------------ |
-| `transport`         | `"stdio"`                                | `"stdio"` spawns Codex; `"websocket"` connects to `url`.                 |
-| `command`           | `"codex"`                                | Executable for stdio transport.                                          |
-| `args`              | `["app-server", "--listen", "stdio://"]` | Arguments for stdio transport.                                           |
-| `url`               | unset                                    | WebSocket app-server URL.                                                |
-| `authToken`         | unset                                    | Bearer token for WebSocket transport.                                    |
-| `headers`           | `{}`                                     | Extra WebSocket headers.                                                 |
-| `requestTimeoutMs`  | `60000`                                  | Timeout for app-server control-plane calls.                              |
-| `approvalPolicy`    | `"never"`                                | Native Codex approval policy sent to thread start/resume/turn.           |
-| `sandbox`           | `"danger-full-access"`                   | Native Codex sandbox mode sent to thread start/resume.                   |
-| `approvalsReviewer` | `"user"`                                 | Use `"guardian_subagent"` to let Codex guardian review native approvals. |
-| `serviceTier`       | unset                                    | Optional Codex service tier, for example `"priority"`.                   |
+| Field               | Default                                  | Meaning                                                        |
+| ------------------- | ---------------------------------------- | -------------------------------------------------------------- |
+| `transport`         | `"stdio"`                                | `"stdio"` spawns Codex; `"websocket"` connects to `url`.       |
+| `command`           | `"codex"`                                | Executable for stdio transport.                                |
+| `args`              | `["app-server", "--listen", "stdio://"]` | Arguments for stdio transport.                                 |
+| `url`               | unset                                    | WebSocket app-server URL.                                      |
+| `authToken`         | unset                                    | Bearer token for WebSocket transport.                          |
+| `headers`           | `{}`                                     | Extra WebSocket headers.                                       |
+| `requestTimeoutMs`  | `60000`                                  | Timeout for app-server control-plane calls.                    |
+| `approvalPolicy`    | `"on-request"`                           | Native Codex approval policy sent to thread start/resume/turn. |
+| `sandbox`           | `"workspace-write"`                      | Native Codex sandbox mode sent to thread start/resume.         |
+| `approvalsReviewer` | `"guardian_subagent"`                    | Use `"user"` to surface native approvals to a person instead.  |
+| `serviceTier`       | unset                                    | Optional Codex service tier, for example `"priority"`.         |
 
 The older environment variables still work as fallbacks for local testing when
 the matching config field is unset:
@@ -335,7 +335,7 @@ the matching config field is unset:
 - `OPENCLAW_CODEX_APP_SERVER_ARGS`
 - `OPENCLAW_CODEX_APP_SERVER_APPROVAL_POLICY`
 - `OPENCLAW_CODEX_APP_SERVER_SANDBOX`
-- `OPENCLAW_CODEX_APP_SERVER_GUARDIAN=1`
+- `OPENCLAW_CODEX_APP_SERVER_GUARDIAN=0` to force manual user approval review
 
 Config is preferred for repeatable deployments.
 

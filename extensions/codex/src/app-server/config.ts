@@ -136,14 +136,14 @@ export function resolveCodexAppServerRuntimeOptions(
     approvalPolicy:
       resolveApprovalPolicy(config.approvalPolicy) ??
       resolveApprovalPolicy(env.OPENCLAW_CODEX_APP_SERVER_APPROVAL_POLICY) ??
-      "never",
+      "on-request",
     sandbox:
       resolveSandbox(config.sandbox) ??
       resolveSandbox(env.OPENCLAW_CODEX_APP_SERVER_SANDBOX) ??
-      "danger-full-access",
+      "workspace-write",
     approvalsReviewer:
       resolveApprovalsReviewer(config.approvalsReviewer) ??
-      (env.OPENCLAW_CODEX_APP_SERVER_GUARDIAN === "1" ? "guardian_subagent" : "user"),
+      (env.OPENCLAW_CODEX_APP_SERVER_GUARDIAN === "0" ? "user" : "guardian_subagent"),
     ...(readNonEmptyString(config.serviceTier)
       ? { serviceTier: readNonEmptyString(config.serviceTier) }
       : {}),

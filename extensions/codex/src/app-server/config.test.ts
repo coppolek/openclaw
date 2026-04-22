@@ -60,7 +60,7 @@ describe("Codex app-server config", () => {
     ).toThrow("appServer.url is required");
   });
 
-  it("defaults native Codex approvals to unchained local execution", () => {
+  it("defaults native Codex approvals to guardian-reviewed local execution", () => {
     const runtime = resolveCodexAppServerRuntimeOptions({
       pluginConfig: {},
       env: {},
@@ -68,11 +68,20 @@ describe("Codex app-server config", () => {
 
     expect(runtime).toEqual(
       expect.objectContaining({
-        approvalPolicy: "never",
-        sandbox: "danger-full-access",
-        approvalsReviewer: "user",
+        approvalPolicy: "on-request",
+        sandbox: "workspace-write",
+        approvalsReviewer: "guardian_subagent",
       }),
     );
+  });
+
+  it("allows environment fallback to opt out of guardian review", () => {
+    const runtime = resolveCodexAppServerRuntimeOptions({
+      pluginConfig: {},
+      env: { OPENCLAW_CODEX_APP_SERVER_GUARDIAN: "0" },
+    });
+
+    expect(runtime.approvalsReviewer).toBe("user");
   });
 
   it("keeps runtime config keys aligned with manifest schema and UI hints", async () => {
