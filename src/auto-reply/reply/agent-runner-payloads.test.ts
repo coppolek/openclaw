@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
 import { createTestRegistry } from "../../test-utils/channel-plugins.js";
 import { buildReplyPayloads } from "./agent-runner-payloads.js";
+import { ReplyMediaNormalizationError } from "./reply-media-paths.js";
 
 const baseParams = {
   isHeartbeat: false,
@@ -26,15 +27,33 @@ async function expectSameTargetRepliesSuppressed(params: { provider: string; to:
 }
 
 describe("buildReplyPayloads media filter integration", () => {
-  it("strips media URL from payload when in messagingToolSentMediaUrls", async () => {
+  it("strips media URL from payload when in messagingToolSentMediaUrls for the same target", async () => {
     const { replyPayloads } = await buildReplyPayloads({
       ...baseParams,
       payloads: [{ text: "hello", mediaUrl: "file:///tmp/photo.jpg" }],
+      messageProvider: "telegram",
+      originatingTo: "telegram:123",
       messagingToolSentMediaUrls: ["file:///tmp/photo.jpg"],
+      messagingToolSentTargets: [{ tool: "telegram", provider: "telegram", to: "telegram:123" }],
+    });
+
+    expect(replyPayloads).toHaveLength(0);
+  });
+
+  it("preserves MEDIA directive when sent media lacks same-target proof", async () => {
+    const { replyPayloads } = await buildReplyPayloads({
+      ...baseParams,
+      payloads: [{ text: "[[reply_to_current]] Here it is.\n\nMEDIA:/tmp/clip.mp4" }],
+      currentMessageId: "msg-123",
+      messagingToolSentMediaUrls: ["file:///tmp/clip.mp4"],
     });
 
     expect(replyPayloads).toHaveLength(1);
-    expect(replyPayloads[0].mediaUrl).toBeUndefined();
+    expect(replyPayloads[0]).toMatchObject({
+      text: "Here it is.",
+      mediaUrl: "/tmp/clip.mp4",
+      mediaUrls: ["/tmp/clip.mp4"],
+    });
   });
 
   it("preserves media URL when not in messagingToolSentMediaUrls", async () => {
@@ -48,7 +67,7 @@ describe("buildReplyPayloads media filter integration", () => {
     expect(replyPayloads[0].mediaUrl).toBe("file:///tmp/photo.jpg");
   });
 
-  it("normalizes sent media URLs before deduping normalized reply media", async () => {
+  it("normalizes sent media URLs before deduping normalized reply media for the same target", async () => {
     const normalizeMediaPaths = async (payload: { mediaUrl?: string; mediaUrls?: string[] }) => {
       const normalizeMedia = (value?: string) =>
         value === "./out/photo.jpg" ? "/tmp/workspace/out/photo.jpg" : value;
@@ -62,19 +81,51 @@ describe("buildReplyPayloads media filter integration", () => {
     const { replyPayloads } = await buildReplyPayloads({
       ...baseParams,
       payloads: [{ text: "hello", mediaUrl: "./out/photo.jpg" }],
+      messageProvider: "telegram",
+      originatingTo: "telegram:123",
       messagingToolSentMediaUrls: ["./out/photo.jpg"],
+      messagingToolSentTargets: [{ tool: "telegram", provider: "telegram", to: "telegram:123" }],
       normalizeMediaPaths,
     });
 
-    expect(replyPayloads).toHaveLength(1);
+    expect(replyPayloads).toHaveLength(0);
+  });
+
+  it("converts reply media normalization failures into visible error payloads", async () => {
+    const normalizeMediaPaths = async (payload: { mediaUrl?: string; replyToId?: string }) => {
+      if (payload.mediaUrl === "./bad.png") {
+        throw new ReplyMediaNormalizationError({
+          attemptedMedia: ["./bad.png"],
+          failedMedia: ["./bad.png"],
+          cause: new Error("Path escapes sandbox root"),
+        });
+      }
+      return payload;
+    };
+
+    const { replyPayloads } = await buildReplyPayloads({
+      ...baseParams,
+      payloads: [
+        { text: "keep text", mediaUrl: "./bad.png", audioAsVoice: true, replyToId: "msg-1" },
+        { text: "keep second" },
+      ],
+      normalizeMediaPaths,
+    });
+
+    expect(replyPayloads).toHaveLength(2);
     expect(replyPayloads[0]).toMatchObject({
-      text: "hello",
-      mediaUrl: undefined,
-      mediaUrls: undefined,
+      text: expect.stringContaining("I couldn't attach the requested media"),
+      isError: true,
+    });
+    expect(replyPayloads[0]?.mediaUrl).toBeUndefined();
+    expect(replyPayloads[0]?.mediaUrls).toBeUndefined();
+    expect(replyPayloads[0]?.audioAsVoice).toBeUndefined();
+    expect(replyPayloads[1]).toMatchObject({
+      text: "keep second",
     });
   });
 
-  it("drops only invalid media when reply media normalization fails", async () => {
+  it("still strips media for generic normalization failures", async () => {
     const normalizeMediaPaths = async (payload: { mediaUrl?: string }) => {
       if (payload.mediaUrl === "./bad.png") {
         throw new Error("Path escapes sandbox root");
@@ -84,34 +135,31 @@ describe("buildReplyPayloads media filter integration", () => {
 
     const { replyPayloads } = await buildReplyPayloads({
       ...baseParams,
-      payloads: [
-        { text: "keep text", mediaUrl: "./bad.png", audioAsVoice: true },
-        { text: "keep second" },
-      ],
+      payloads: [{ text: "keep text", mediaUrl: "./bad.png", audioAsVoice: true }],
       normalizeMediaPaths,
     });
 
-    expect(replyPayloads).toHaveLength(2);
+    expect(replyPayloads).toHaveLength(1);
     expect(replyPayloads[0]).toMatchObject({
       text: "keep text",
       mediaUrl: undefined,
       mediaUrls: undefined,
       audioAsVoice: false,
     });
-    expect(replyPayloads[1]).toMatchObject({
-      text: "keep second",
-    });
   });
 
-  it("applies media filter after text filter", async () => {
+  it("applies media filter after text filter for the same target", async () => {
     const { replyPayloads } = await buildReplyPayloads({
       ...baseParams,
       payloads: [{ text: "hello world!", mediaUrl: "file:///tmp/photo.jpg" }],
+      messageProvider: "telegram",
+      originatingTo: "telegram:123",
       messagingToolSentTexts: ["hello world!"],
       messagingToolSentMediaUrls: ["file:///tmp/photo.jpg"],
+      messagingToolSentTargets: [{ tool: "telegram", provider: "telegram", to: "telegram:123" }],
     });
 
-    // Text filter removes the payload entirely (text matched), so nothing remains.
+    // Same-target tool sends suppress the final reply entirely.
     expect(replyPayloads).toHaveLength(0);
   });
 

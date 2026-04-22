@@ -14,6 +14,10 @@ import {
   resolveOriginMessageTo,
 } from "./origin-routing.js";
 import { normalizeReplyPayloadDirectives } from "./reply-delivery.js";
+import {
+  buildReplyMediaNormalizationFailurePayload,
+  ReplyMediaNormalizationError,
+} from "./reply-media-paths.js";
 import { applyReplyThreading, isRenderablePayload } from "./reply-payloads-base.js";
 
 let replyPayloadsDedupeRuntimePromise: Promise<
@@ -37,6 +41,9 @@ async function normalizeReplyPayloadMedia(params: {
     return await params.normalizeMediaPaths(params.payload);
   } catch (err) {
     logVerbose(`reply payload media normalization failed: ${String(err)}`);
+    if (err instanceof ReplyMediaNormalizationError) {
+      return buildReplyMediaNormalizationFailurePayload(params.payload, err);
+    }
     return {
       ...params.payload,
       mediaUrl: undefined,
@@ -187,12 +194,10 @@ export async function buildReplyPayloads(params: {
         originatingAccountId: params.accountId,
       }),
     }) ?? false;
-  // Only dedupe against messaging tool sends for the same origin target.
-  // Cross-target sends (for example posting to another channel) must not
-  // suppress the current conversation's final reply.
-  // If target metadata is unavailable, keep legacy dedupe behavior.
-  const dedupeMessagingToolPayloads =
-    suppressMessagingToolReplies || messagingToolSentTargets.length === 0;
+  // Only dedupe against messaging tool sends when we can prove they targeted
+  // the current origin conversation. Missing target metadata is ambiguous and
+  // must not strip MEDIA directives from the assistant's final reply.
+  const dedupeMessagingToolPayloads = suppressMessagingToolReplies;
   const messagingToolSentMediaUrls = dedupeMessagingToolPayloads
     ? await normalizeSentMediaUrlsForDedupe({
         sentMediaUrls: params.messagingToolSentMediaUrls ?? [],
