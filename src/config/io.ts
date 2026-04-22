@@ -1731,6 +1731,12 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
 
       try {
         await deps.fs.promises.rename(tmp, configPath);
+        // Ensure restrictive permissions after rename: on Linux, rename() to an
+        // existing target preserves target's permissions, so if configPath
+        // previously had mode 0664 it stays 0664 after the atomic swap.
+        await deps.fs.promises.chmod(configPath, 0o600).catch(() => {
+          // best-effort; some filesystems don't support chmod
+        });
       } catch (err) {
         const code = (err as { code?: string }).code;
         // Windows doesn't reliably support atomic replace via rename when dest exists.
