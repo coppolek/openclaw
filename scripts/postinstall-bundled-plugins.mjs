@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Runs after install to keep packaged dist safe and compatible.
-// Bundled extension runtime dependencies are extension-owned. Do not install
-// every bundled extension dependency during core package install unless the
-// legacy eager-install escape hatch is explicitly enabled; `openclaw doctor
-// --fix` owns the repair path for extensions that are actually used.
+// Bundled extension runtime dependencies are extension-owned, but packaged
+// installs still need them available up front because bootstrap, status, and
+// onboarding can touch bundled entries before `openclaw doctor --fix` has a
+// chance to repair anything. Source checkouts still skip this eager install and
+// rely on the workspace graph instead.
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
@@ -24,6 +25,7 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import validRange from "semver/ranges/valid.js";
 import { resolveNpmRunner } from "./npm-runner.mjs";
 
 export const BUNDLED_PLUGIN_INSTALL_TARGETS = [];
@@ -338,6 +340,7 @@ function dependencySentinelPath(depName) {
   return join("node_modules", ...depName.split("/"), "package.json");
 }
 
+const DISABLED_EAGER_BUNDLED_PLUGIN_DEPS_VALUES = new Set(["0", "false", "off"]);
 const KNOWN_NATIVE_PLATFORMS = new Set([
   "aix",
   "android",
@@ -393,6 +396,23 @@ function collectRuntimeDeps(packageJson) {
   };
 }
 
+function isSafeBundledRuntimeDependencySpec(spec) {
+  if (typeof spec !== "string") {
+    return false;
+  }
+  const normalized = spec.trim();
+  if (!normalized) {
+    return false;
+  }
+  return validRange(normalized) !== null;
+}
+
+function assertSafeBundledRuntimeDependencySpec(depName, spec) {
+  if (!isSafeBundledRuntimeDependencySpec(spec)) {
+    throw new Error(`unsafe bundled runtime dependency spec for ${depName}: ${spec}`);
+  }
+}
+
 export function discoverBundledPluginRuntimeDeps(params = {}) {
   const extensionsDir = params.extensionsDir ?? DEFAULT_EXTENSIONS_DIR;
   const pathExists = params.existsSync ?? existsSync;
@@ -423,28 +443,36 @@ export function discoverBundledPluginRuntimeDeps(params = {}) {
     if (!pathExists(packageJsonPath)) {
       continue;
     }
+    let packageJson;
     try {
-      const packageJson = readJsonFile(packageJsonPath);
-      for (const [name, version] of Object.entries(collectRuntimeDeps(packageJson))) {
-        const existing = deps.get(name);
-        if (existing) {
-          if (existing.version !== version) {
-            continue;
-          }
-          if (!existing.pluginIds.includes(pluginId)) {
-            existing.pluginIds.push(pluginId);
-          }
+      packageJson = readJsonFile(packageJsonPath);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `[postinstall] invalid bundled plugin manifest at ${packageJsonPath}: ${detail}`,
+        {
+          cause: error,
+        },
+      );
+    }
+    for (const [name, version] of Object.entries(collectRuntimeDeps(packageJson))) {
+      assertSafeBundledRuntimeDependencySpec(name, version);
+      const existing = deps.get(name);
+      if (existing) {
+        if (existing.version !== version) {
           continue;
         }
-        deps.set(name, {
-          name,
-          version,
-          sentinelPath: dependencySentinelPath(name),
-          pluginIds: [pluginId],
-        });
+        if (!existing.pluginIds.includes(pluginId)) {
+          existing.pluginIds.push(pluginId);
+        }
+        continue;
       }
-    } catch {
-      // Ignore malformed plugin manifests; runtime will surface those separately.
+      deps.set(name, {
+        name,
+        version,
+        sentinelPath: dependencySentinelPath(name),
+        pluginIds: [pluginId],
+      });
     }
   }
 
@@ -479,7 +507,47 @@ export function createBundledRuntimeDependencyInstallArgs(missingSpecs) {
 }
 
 function shouldEagerInstallBundledPluginDeps(env = process.env) {
-  return env?.[EAGER_BUNDLED_PLUGIN_DEPS_ENV]?.trim() === "1";
+  const normalized = env?.[EAGER_BUNDLED_PLUGIN_DEPS_ENV]?.trim().toLowerCase();
+  return !normalized || !DISABLED_EAGER_BUNDLED_PLUGIN_DEPS_VALUES.has(normalized);
+}
+
+function installBundledPluginRuntimeDeps(params) {
+  const installEnv = createBundledRuntimeDependencyInstallEnv(params.env);
+  const npmRunner =
+    params.npmRunner ??
+    resolveNpmRunner({
+      env: installEnv,
+      execPath: params.execPath,
+      existsSync: params.existsSync,
+      platform: params.platform,
+      comSpec: params.comSpec,
+      npmArgs: createBundledRuntimeDependencyInstallArgs(params.missingSpecs),
+    });
+  try {
+    const result = params.spawnSync(npmRunner.command, npmRunner.args, {
+      cwd: params.packageRoot,
+      encoding: "utf8",
+      env: npmRunner.env ?? installEnv,
+      stdio: "pipe",
+      shell: npmRunner.shell,
+      windowsVerbatimArguments: npmRunner.windowsVerbatimArguments,
+    });
+    if (result.error) {
+      throw result.error;
+    }
+    if (result.status !== 0) {
+      throw new Error(`npm install failed (exit ${result.status ?? "unknown"})`);
+    }
+    params.log.log(
+      `[postinstall] installed bundled plugin deps: ${params.missingSpecs.join(", ")}`,
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `[postinstall] failed to install bundled plugin deps (${params.missingSpecs.join(", ")}): ${detail}`,
+      { cause: error },
+    );
+  }
 }
 
 export function applyBaileysEncryptedStreamFinishHotfix(params = {}) {
@@ -768,35 +836,18 @@ export function runBundledPluginPostinstall(params = {}) {
     return;
   }
 
-  try {
-    const installEnv = createBundledRuntimeDependencyInstallEnv(env);
-    const npmRunner =
-      params.npmRunner ??
-      resolveNpmRunner({
-        env: installEnv,
-        execPath: params.execPath,
-        existsSync: pathExists,
-        platform: params.platform,
-        comSpec: params.comSpec,
-        npmArgs: createBundledRuntimeDependencyInstallArgs(missingSpecs),
-      });
-    const result = spawn(npmRunner.command, npmRunner.args, {
-      cwd: packageRoot,
-      encoding: "utf8",
-      env: npmRunner.env ?? installEnv,
-      stdio: "pipe",
-      shell: npmRunner.shell,
-      windowsVerbatimArguments: npmRunner.windowsVerbatimArguments,
-    });
-    if (result.status !== 0) {
-      const output = [result.stderr, result.stdout].filter(Boolean).join("\n").trim();
-      throw new Error(output || "npm install failed");
-    }
-    log.log(`[postinstall] installed bundled plugin deps: ${missingSpecs.join(", ")}`);
-  } catch (e) {
-    // Non-fatal: gateway will surface the missing dep via doctor.
-    log.warn(`[postinstall] could not install bundled plugin deps: ${String(e)}`);
-  }
+  installBundledPluginRuntimeDeps({
+    env,
+    execPath: params.execPath,
+    existsSync: pathExists,
+    platform: params.platform,
+    comSpec: params.comSpec,
+    missingSpecs,
+    npmRunner: params.npmRunner,
+    packageRoot,
+    spawnSync: spawn,
+    log,
+  });
 
   applyBundledPluginRuntimeHotfixes({
     packageRoot,
