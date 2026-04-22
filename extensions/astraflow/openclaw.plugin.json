@@ -1,0 +1,51 @@
+{
+  "id": "astraflow",
+  "enabledByDefault": true,
+  "providers": ["astraflow", "astraflow-cn"],
+  "providerAuthEnvVars": {
+    "astraflow": ["ASTRAFLOW_API_KEY"],
+    "astraflow-cn": ["ASTRAFLOW_CN_API_KEY"]
+  },
+  "providerAuthAliases": {
+    "astra-flow": "astraflow",
+    "astra_flow": "astraflow",
+    "modelverse": "astraflow",
+    "astraflow-china": "astraflow-cn",
+    "astraflow_cn": "astraflow-cn"
+  },
+  "providerAuthChoices": [
+    {
+      "provider": "astraflow",
+      "method": "api-key",
+      "choiceId": "astraflow-api-key",
+      "choiceLabel": "UCloud AstraFlow API key (Global)",
+      "choiceHint": "Global endpoint - api-us-ca.umodelverse.ai",
+      "groupId": "astraflow",
+      "groupLabel": "UCloud AstraFlow",
+      "groupHint": "200+ curated models, pay-as-you-go",
+      "optionKey": "astraflowApiKey",
+      "cliFlag": "--astraflow-api-key",
+      "cliOption": "--astraflow-api-key <key>",
+      "cliDescription": "UCloud AstraFlow API key (Global)"
+    },
+    {
+      "provider": "astraflow-cn",
+      "method": "api-key",
+      "choiceId": "astraflow-cn-api-key",
+      "choiceLabel": "UCloud AstraFlow API key (China)",
+      "choiceHint": "China endpoint - api.modelverse.cn",
+      "groupId": "astraflow",
+      "groupLabel": "UCloud AstraFlow",
+      "groupHint": "200+ curated models, pay-as-you-go",
+      "optionKey": "astraflowCnApiKey",
+      "cliFlag": "--astraflow-cn-api-key",
+      "cliOption": "--astraflow-cn-api-key <key>",
+      "cliDescription": "UCloud AstraFlow API key (China)"
+    }
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

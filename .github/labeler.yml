@@ -265,6 +265,10 @@
   - changed-files:
       - any-glob-to-any-file:
           - "extensions/arcee/**"
+"extensions: astraflow":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "extensions/astraflow/**"
 "extensions: byteplus":
   - changed-files:
       - any-glob-to-any-file:
