@@ -777,7 +777,7 @@ export async function textToSpeech(params: {
   prefsPath?: string;
   channel?: string;
   overrides?: TtsDirectiveOverrides;
-  resolveText?: (provider: TtsProviderId) => string;
+  resolveText?: (provider: TtsProvider) => string;
   disableFallback?: boolean;
 }): Promise<TtsResult> {
   const synthesis = await synthesizeSpeech(params);
@@ -816,7 +816,7 @@ export async function synthesizeSpeech(params: {
   prefsPath?: string;
   channel?: string;
   overrides?: TtsDirectiveOverrides;
-  resolveText?: (provider: TtsProviderId) => string;
+  resolveText?: (provider: TtsProvider) => string;
   disableFallback?: boolean;
 }): Promise<TtsSynthesisResult> {
   const setup = resolveTtsRequestSetup({
@@ -1165,7 +1165,7 @@ export async function maybeApplyTtsToPayload(params: {
   }
 
   const maxLength = getTtsMaxLength(prefsPath);
-  let textForAudio = rawSpeechText.trim();
+  let textForAudio = initialTtsText.trim();
   let wasSummarized = false;
 
   if (textForAudio.length > maxLength) {
@@ -1199,8 +1199,18 @@ export async function maybeApplyTtsToPayload(params: {
     }
   }
 
-  const preparedExpressiveText = stripMarkdown(textForAudio).trim();
-  const preparedPlainText = stripEmotionTags(preparedExpressiveText).text.trim();
+  const preparedBaseText = stripMarkdown(textForAudio).trim();
+  const rawPreparedExpressiveText = stripMarkdown(rawSpeechText).trim();
+  const rawPreparedPlainText = stripEmotionTags(rawPreparedExpressiveText).text.trim();
+  const primaryPreservesExpressive = preservesExpressiveSpeechSource(effectiveProvider, params.cfg);
+  const canReuseRawExpressiveSource =
+    !primaryPreservesExpressive && !wasSummarized && preparedBaseText === rawPreparedPlainText;
+  const preparedExpressiveText = canReuseRawExpressiveSource
+    ? rawPreparedExpressiveText
+    : preparedBaseText;
+  const preparedPlainText = canReuseRawExpressiveSource
+    ? rawPreparedPlainText
+    : stripEmotionTags(preparedBaseText).text.trim();
   const effectiveTextForAudio = resolveSpeechTextForProvider({
     provider: effectiveProvider,
     cfg: params.cfg,
