@@ -1,5 +1,12 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HandleCommandsParams } from "./commands-types.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const exportHtmlDir = path.join(__dirname, "export-html");
 
 const hoisted = vi.hoisted(() => ({
   resolveDefaultSessionStorePathMock: vi.fn(() => "/tmp/target-store/sessions.json"),
@@ -191,5 +198,57 @@ describe("buildExportSessionReply", () => {
         }),
       }),
     );
+  });
+
+  it("inlines export scripts instead of leaving raw placeholder tokens", async () => {
+    const { buildExportSessionReply } = await import("./commands-export-session.js");
+    const actualFs = await vi.importActual<typeof import("node:fs")>("node:fs");
+    const templateHtml = actualFs.readFileSync(path.join(exportHtmlDir, "template.html"), "utf8");
+    const templateCss = actualFs.readFileSync(path.join(exportHtmlDir, "template.css"), "utf8");
+    const templateJs = actualFs.readFileSync(path.join(exportHtmlDir, "template.js"), "utf8");
+    const markedJs = actualFs.readFileSync(
+      path.join(exportHtmlDir, "vendor", "marked.min.js"),
+      "utf8",
+    );
+    const highlightJs = actualFs.readFileSync(
+      path.join(exportHtmlDir, "vendor", "highlight.min.js"),
+      "utf8",
+    );
+
+    const readFileSyncMock = vi.mocked(fs.readFileSync);
+    readFileSyncMock.mockImplementation((filePath: fs.PathOrFileDescriptor) => {
+      if (typeof filePath !== "string") {
+        return "" as never;
+      }
+      if (filePath.endsWith("template.html")) {
+        return templateHtml as never;
+      }
+      if (filePath.endsWith("template.css")) {
+        return templateCss as never;
+      }
+      if (filePath.endsWith("template.js")) {
+        return templateJs as never;
+      }
+      if (filePath.endsWith("marked.min.js")) {
+        return markedJs as never;
+      }
+      if (filePath.endsWith("highlight.min.js")) {
+        return highlightJs as never;
+      }
+      return "" as never;
+    });
+
+    await buildExportSessionReply(makeParams());
+
+    expect(hoisted.writeFileSyncMock).toHaveBeenCalled();
+    const [, html] = hoisted.writeFileSyncMock.mock.calls.at(-1) ?? [];
+    expect(typeof html).toBe("string");
+    expect(html).not.toContain("MARKED_JS;");
+    expect(html).not.toContain("<script>\n      {{MARKED_JS}}\n    </script>");
+    expect(html).not.toContain("HIGHLIGHT_JS;");
+    expect(html).not.toContain("<script>\n      {{HIGHLIGHT_JS}}\n    </script>");
+    expect(html).not.toContain("JS;");
+    expect(html).not.toContain("<script>\n      {{JS}}\n    </script>");
+    expect(html).toContain("safeMarkedParse");
   });
 });
