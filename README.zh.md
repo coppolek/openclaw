@@ -1,9 +1,8 @@
-<h4 align="center">
-  English | <a href="./README.zh.md">中文</a>
-</h4>
+<h4 align="center">English | <a href="./README.zh.md">中文</a></h4>
 
 <br />
 
+# 🦞 OpenClaw — 个人 AI 助手
 # 🦞 OpenClaw — Personal AI Assistant
 
 <p align="center">
