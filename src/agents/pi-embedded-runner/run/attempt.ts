@@ -1681,6 +1681,7 @@ export async function runEmbeddedAttempt(
           sessionKey: sandboxSessionKey,
           sessionId: params.sessionId,
           agentId: sessionAgentId,
+          messageProvider: params.messageChannel ?? params.messageProvider,
           builtinToolNames,
           internalEvents: params.internalEvents,
         }),

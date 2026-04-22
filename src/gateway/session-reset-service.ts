@@ -34,6 +34,7 @@ import {
   normalizeAgentId,
   parseAgentSessionKey,
 } from "../routing/session-key.js";
+import { inferHookMessageProviderFromSessionKey } from "../utils/hook-message-provider.js";
 import { ErrorCodes, errorShape } from "./protocol/index.js";
 import {
   archiveSessionTranscriptsDetailed,
@@ -451,6 +452,7 @@ function emitGatewayBeforeResetPluginHook(params: {
         sessionKey,
         sessionId,
         workspaceDir,
+        messageProvider: inferHookMessageProviderFromSessionKey(sessionKey),
       },
     )
     .catch((err) => {

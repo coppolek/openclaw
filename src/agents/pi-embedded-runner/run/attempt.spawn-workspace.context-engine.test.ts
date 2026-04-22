@@ -18,6 +18,7 @@ import {
 import {
   cleanupTempPaths,
   createContextEngineBootstrapAndAssemble,
+  createContextEngineAttemptRunner,
   expectCalledWithSessionKey,
   getHoisted,
   resetEmbeddedAttemptHarness,
@@ -478,6 +479,29 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
         previousCacheRead: 5000,
         cacheRead: 2000,
         changes: expect.arrayContaining([expect.objectContaining({ code: "systemPrompt" })]),
+      }),
+    );
+  });
+
+  it("prefers messageChannel when wiring the embedded subscription provider", async () => {
+    await createContextEngineAttemptRunner({
+      sessionKey,
+      tempPaths,
+      contextEngine: {
+        assemble: async ({ messages }) => ({
+          messages,
+          estimatedTokens: 1,
+        }),
+      },
+      attemptOverrides: {
+        messageChannel: "slack",
+        messageProvider: undefined,
+      },
+    });
+
+    expect(hoisted.subscribeEmbeddedPiSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageProvider: "slack",
       }),
     );
   });

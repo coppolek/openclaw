@@ -254,10 +254,12 @@ export async function incrementCompactionCount(params: {
       newSessionId,
     });
   }
-  // If tokensAfter is provided, update the cached token counts to reflect post-compaction state
-  if (tokensAfter != null && tokensAfter > 0) {
+  // If tokensAfter is provided, update the cached token counts to reflect post-compaction state,
+  // including transcript-empty compactions that legitimately collapse usage to zero.
+  if (tokensAfter != null && tokensAfter >= 0) {
     updates.totalTokens = tokensAfter;
     updates.totalTokensFresh = true;
+    updates.estimatedCostUsd = tokensAfter === 0 ? 0 : undefined;
     // Clear input/output breakdown since we only have the total estimate after compaction
     updates.inputTokens = undefined;
     updates.outputTokens = undefined;

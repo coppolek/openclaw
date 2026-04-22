@@ -1515,6 +1515,122 @@ describe("gateway server sessions", () => {
     ws.close();
   });
 
+  test("sessions.compact with maxLines clears stale cache and cost accounting", async () => {
+    const { dir, storePath } = await createSessionStoreDir();
+    await fs.writeFile(
+      path.join(dir, "sess-main.jsonl"),
+      [
+        JSON.stringify({ role: "user", content: "one" }),
+        JSON.stringify({ role: "assistant", content: "two" }),
+        JSON.stringify({ role: "user", content: "three" }),
+        JSON.stringify({ role: "assistant", content: "four" }),
+      ].join("\n") + "\n",
+      "utf-8",
+    );
+    await writeSessionStore({
+      entries: {
+        main: {
+          sessionId: "sess-main",
+          updatedAt: Date.now(),
+          totalTokens: 999,
+          totalTokensFresh: false,
+          estimatedCostUsd: 0.25,
+          cacheRead: 12,
+          cacheWrite: 8,
+        },
+      },
+    });
+
+    const { ws } = await openClient();
+    const compacted = await rpcReq<{ ok: true; compacted: boolean }>(ws, "sessions.compact", {
+      key: "main",
+      maxLines: 3,
+    });
+
+    expect(compacted.ok).toBe(true);
+    expect(compacted.payload?.compacted).toBe(true);
+    const store = JSON.parse(await fs.readFile(storePath, "utf-8")) as Record<
+      string,
+      {
+        totalTokens?: number;
+        totalTokensFresh?: boolean;
+        estimatedCostUsd?: number;
+        cacheRead?: number;
+        cacheWrite?: number;
+      }
+    >;
+    expect(store["agent:main:main"]?.totalTokens).toBeUndefined();
+    expect(store["agent:main:main"]?.totalTokensFresh).toBeUndefined();
+    expect(store["agent:main:main"]?.estimatedCostUsd).toBeUndefined();
+    expect(store["agent:main:main"]?.cacheRead).toBeUndefined();
+    expect(store["agent:main:main"]?.cacheWrite).toBeUndefined();
+
+    ws.close();
+  });
+
+  test("sessions.compact resets token accounting when manual compaction leaves zero tokens", async () => {
+    const { dir, storePath } = await createSessionStoreDir();
+    embeddedRunMock.compactEmbeddedPiSession.mockResolvedValueOnce({
+      ok: true,
+      compacted: true,
+      result: {
+        summary: "summary",
+        firstKeptEntryId: "entry-1",
+        tokensBefore: 120,
+        tokensAfter: 0,
+      },
+    });
+    await fs.writeFile(
+      path.join(dir, "sess-main.jsonl"),
+      `${JSON.stringify({ role: "user", content: "hello" })}\n`,
+      "utf-8",
+    );
+    await writeSessionStore({
+      entries: {
+        main: {
+          sessionId: "sess-main",
+          updatedAt: Date.now(),
+          totalTokens: 999,
+          totalTokensFresh: false,
+          estimatedCostUsd: 0.25,
+          cacheRead: 12,
+          cacheWrite: 8,
+        },
+      },
+    });
+
+    const { ws } = await openClient();
+    const compacted = await rpcReq<{
+      ok: true;
+      key: string;
+      compacted: boolean;
+      result?: { tokensAfter?: number };
+    }>(ws, "sessions.compact", {
+      key: "main",
+    });
+
+    expect(compacted.ok).toBe(true);
+    const store = JSON.parse(await fs.readFile(storePath, "utf-8")) as Record<
+      string,
+      {
+        compactionCount?: number;
+        totalTokens?: number;
+        totalTokensFresh?: boolean;
+        estimatedCostUsd?: number;
+        cacheRead?: number;
+        cacheWrite?: number;
+      }
+    >;
+    expect(store["agent:main:main"]?.compactionCount).toBe(1);
+    expect(store["agent:main:main"]?.totalTokens).toBe(0);
+    expect(store["agent:main:main"]?.totalTokensFresh).toBe(true);
+    expect(store["agent:main:main"]?.estimatedCostUsd).toBe(0);
+    expect(store["agent:main:main"]?.cacheRead).toBeUndefined();
+    expect(store["agent:main:main"]?.cacheWrite).toBeUndefined();
+
+    ws.close();
+  });
+
   test("sessions.patch preserves nested model ids under provider overrides", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-gw-sessions-nested-"));
     const storePath = path.join(dir, "sessions.json");
@@ -3017,6 +3133,106 @@ describe("gateway server sessions", () => {
       sessionKey: "agent:main:main",
       sessionId: "sess-main",
     });
+    ws.close();
+  });
+
+  test("sessions.reset infers messageProvider for channel-scoped session keys", async () => {
+    const { dir } = await createSessionStoreDir();
+    const transcriptPath = path.join(dir, "sess-feishu.jsonl");
+    await fs.writeFile(
+      transcriptPath,
+      `${JSON.stringify({
+        type: "message",
+        id: "m1",
+        message: { role: "user", content: "hello from feishu transcript" },
+      })}\n`,
+      "utf-8",
+    );
+
+    const sessionKey = "agent:main:feishu:default:direct:ou_testuser";
+    await writeSessionStore({
+      entries: {
+        [sessionKey]: {
+          sessionId: "sess-feishu",
+          sessionFile: transcriptPath,
+          updatedAt: Date.now(),
+        },
+      },
+    });
+
+    beforeResetHookState.hasBeforeResetHook = true;
+
+    const { ws } = await openClient();
+    const reset = await rpcReq<{ ok: true; key: string }>(ws, "sessions.reset", {
+      key: sessionKey,
+      reason: "new",
+    });
+    expect(reset.ok).toBe(true);
+    expect(beforeResetHookMocks.runBeforeReset).toHaveBeenCalledTimes(1);
+    const [event, context] = (
+      beforeResetHookMocks.runBeforeReset.mock.calls as unknown as Array<[unknown, unknown]>
+    )[0] ?? [undefined, undefined];
+    expect(event).toMatchObject({
+      sessionFile: transcriptPath,
+      reason: "new",
+      messages: [
+        {
+          role: "user",
+          content: "hello from feishu transcript",
+        },
+      ],
+    });
+    expect(context).toMatchObject({
+      agentId: "main",
+      sessionKey,
+      sessionId: "sess-feishu",
+      messageProvider: "feishu",
+    });
+    ws.close();
+  });
+
+  test("sessions.reset leaves messageProvider undefined for non-channel direct session keys", async () => {
+    const { dir } = await createSessionStoreDir();
+    const transcriptPath = path.join(dir, "sess-direct.jsonl");
+    await fs.writeFile(
+      transcriptPath,
+      `${JSON.stringify({
+        type: "message",
+        id: "m1",
+        message: { role: "user", content: "hello from direct transcript" },
+      })}\n`,
+      "utf-8",
+    );
+
+    const sessionKey = "agent:main:direct:peer_123";
+    await writeSessionStore({
+      entries: {
+        [sessionKey]: {
+          sessionId: "sess-direct",
+          sessionFile: transcriptPath,
+          updatedAt: Date.now(),
+        },
+      },
+    });
+
+    beforeResetHookState.hasBeforeResetHook = true;
+
+    const { ws } = await openClient();
+    const reset = await rpcReq<{ ok: true; key: string }>(ws, "sessions.reset", {
+      key: sessionKey,
+      reason: "new",
+    });
+    expect(reset.ok).toBe(true);
+    expect(beforeResetHookMocks.runBeforeReset).toHaveBeenCalledTimes(1);
+    const [, context] = (
+      beforeResetHookMocks.runBeforeReset.mock.calls as unknown as Array<[unknown, unknown]>
+    )[0] ?? [undefined, undefined];
+    expect(context).toMatchObject({
+      agentId: "main",
+      sessionKey,
+      sessionId: "sess-direct",
+    });
+    expect((context as { messageProvider?: string } | undefined)?.messageProvider).toBeUndefined();
     ws.close();
   });
 
