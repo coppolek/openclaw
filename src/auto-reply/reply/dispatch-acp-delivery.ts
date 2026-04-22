@@ -8,7 +8,7 @@ import {
   normalizeOptionalString,
 } from "../../shared/string-coerce.js";
 import { resolveStatusTtsSnapshot } from "../../tts/status-config.js";
-import { resolveConfiguredTtsMode } from "../../tts/tts-config.js";
+import { resolveConfiguredTtsMode, resolveRawTtsConfig } from "../../tts/tts-config.js";
 import type { FinalizedMsgContext } from "../templating.js";
 import type { ReplyPayload } from "../types.js";
 import type { ReplyDispatchKind, ReplyDispatcher } from "./reply-dispatcher.types.js";
@@ -93,6 +93,7 @@ async function maybeApplyAcpTts(params: {
   inboundAudio: boolean;
   ttsAuto?: TtsAutoMode;
   skipTts?: boolean;
+  agentId?: string;
 }): Promise<ReplyPayload> {
   if (params.skipTts) {
     return params.payload;
@@ -100,6 +101,7 @@ async function maybeApplyAcpTts(params: {
   const ttsStatus = resolveStatusTtsSnapshot({
     cfg: params.cfg,
     sessionAuto: params.ttsAuto,
+    agentId: params.agentId,
   });
   if (!ttsStatus) {
     return params.payload;
@@ -107,17 +109,20 @@ async function maybeApplyAcpTts(params: {
   if (ttsStatus.autoMode === "inbound" && !params.inboundAudio) {
     return params.payload;
   }
-  if (params.kind !== "final" && resolveConfiguredTtsMode(params.cfg) === "final") {
+  if (params.kind !== "final" && resolveConfiguredTtsMode(params.cfg, params.agentId) === "final") {
     return params.payload;
   }
   const { maybeApplyTtsToPayload } = await loadDispatchAcpTtsRuntime();
+  const rawConfigOverride = resolveRawTtsConfig(params.cfg, params.agentId);
   return await maybeApplyTtsToPayload({
     payload: params.payload,
     cfg: params.cfg,
+    agentId: params.agentId,
     channel: params.channel,
     kind: params.kind,
     inboundAudio: params.inboundAudio,
     ttsAuto: params.ttsAuto,
+    rawConfigOverride,
   });
 }
 
@@ -156,8 +161,9 @@ export function createAcpDispatchDeliveryCoordinator(params: {
   ctx: FinalizedMsgContext;
   dispatcher: ReplyDispatcher;
   inboundAudio: boolean;
-  sessionTtsAuto?: TtsAutoMode;
+  ttsAuto?: TtsAutoMode;
   ttsChannel?: string;
+  agentId?: string;
   suppressUserDelivery?: boolean;
   shouldRouteToOriginating: boolean;
   originatingChannel?: string;
@@ -295,8 +301,9 @@ export function createAcpDispatchDeliveryCoordinator(params: {
       channel: params.ttsChannel,
       kind,
       inboundAudio: params.inboundAudio,
-      ttsAuto: params.sessionTtsAuto,
+      ttsAuto: params.ttsAuto,
       skipTts: meta?.skipTts,
+      agentId: params.agentId,
     });
 
     if (params.shouldRouteToOriginating && params.originatingChannel && params.originatingTo) {

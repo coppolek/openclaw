@@ -14,6 +14,7 @@ import {
   ToolsLinksSchema,
   ToolsMediaSchema,
 } from "./zod-schema.core.js";
+import { TtsConfigSchema } from "./zod-schema.core.js";
 import { sensitive } from "./zod-schema.sensitive.js";
 
 export const HeartbeatSchema = z
@@ -859,6 +860,7 @@ export const AgentEntrySchema = z
     sandbox: AgentSandboxSchema,
     params: z.record(z.string(), z.unknown()).optional(),
     tools: AgentToolsSchema,
+    tts: TtsConfigSchema.optional(),
     runtime: AgentRuntimeSchema,
   })
   .strict();

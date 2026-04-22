@@ -49,6 +49,7 @@ import {
 import {
   normalizeTtsAutoMode,
   resolveConfiguredTtsMode,
+  resolveRawTtsConfig,
   shouldAttemptTtsPayload,
 } from "../../tts/tts-config.js";
 import { INTERNAL_MESSAGE_CHANNEL, normalizeMessageChannel } from "../../utils/message-channel.js";
@@ -107,12 +108,20 @@ function loadReplyMediaPathsRuntime() {
 
 async function maybeApplyTtsToReplyPayload(
   params: Parameters<Awaited<ReturnType<typeof loadTtsRuntime>>["maybeApplyTtsToPayload"]>[0],
+  agentId?: string,
 ) {
-  if (!shouldAttemptTtsPayload({ cfg: params.cfg, ttsAuto: params.ttsAuto })) {
+  if (
+    !shouldAttemptTtsPayload({
+      cfg: params.cfg,
+      ttsAuto: params.ttsAuto,
+      agentId,
+    })
+  ) {
     return params.payload;
   }
+  const rawConfigOverride = resolveRawTtsConfig(params.cfg, agentId);
   const { maybeApplyTtsToPayload } = await loadTtsRuntime();
-  return maybeApplyTtsToPayload(params);
+  return maybeApplyTtsToPayload({ ...params, agentId, rawConfigOverride });
 }
 
 const AUDIO_PLACEHOLDER_RE = /^<media:audio>(\s*\([^)]*\))?$/i;
@@ -638,14 +647,17 @@ export async function dispatchReplyFromConfig(
     const sendFinalPayload = async (
       payload: ReplyPayload,
     ): Promise<{ queuedFinal: boolean; routedFinalCount: number }> => {
-      const ttsPayload = await maybeApplyTtsToReplyPayload({
-        payload,
-        cfg,
-        channel: ttsChannel,
-        kind: "final",
-        inboundAudio,
-        ttsAuto: sessionTtsAuto,
-      });
+      const ttsPayload = await maybeApplyTtsToReplyPayload(
+        {
+          payload,
+          cfg,
+          channel: ttsChannel,
+          kind: "final",
+          inboundAudio,
+          ttsAuto: sessionTtsAuto,
+        },
+        sessionAgentId,
+      );
       const normalizedPayload = await normalizeReplyMediaPayload(ttsPayload);
       const result = await routeReplyToOriginating(normalizedPayload);
       if (result) {
@@ -904,14 +916,17 @@ export async function dispatchReplyFromConfig(
             if (suppressDelivery) {
               return;
             }
-            const ttsPayload = await maybeApplyTtsToReplyPayload({
-              payload,
-              cfg,
-              channel: ttsChannel,
-              kind: "tool",
-              inboundAudio,
-              ttsAuto: sessionTtsAuto,
-            });
+            const ttsPayload = await maybeApplyTtsToReplyPayload(
+              {
+                payload,
+                cfg,
+                channel: ttsChannel,
+                kind: "tool",
+                inboundAudio,
+                ttsAuto: sessionTtsAuto,
+              },
+              sessionAgentId,
+            );
             const normalizedPayload = await normalizeReplyMediaPayload(ttsPayload);
             const deliveryPayload = resolveToolDeliveryPayload(normalizedPayload);
             if (!deliveryPayload) {
@@ -1005,14 +1020,17 @@ export async function dispatchReplyFromConfig(
                   }
                 : context;
             await params.replyOptions?.onBlockReplyQueued?.(payload, queuedContext);
-            const ttsPayload = await maybeApplyTtsToReplyPayload({
-              payload,
-              cfg,
-              channel: ttsChannel,
-              kind: "block",
-              inboundAudio,
-              ttsAuto: sessionTtsAuto,
-            });
+            const ttsPayload = await maybeApplyTtsToReplyPayload(
+              {
+                payload,
+                cfg,
+                channel: ttsChannel,
+                kind: "block",
+                inboundAudio,
+                ttsAuto: sessionTtsAuto,
+              },
+              sessionAgentId,
+            );
             const normalizedPayload = await normalizeReplyMediaPayload(ttsPayload);
             if (shouldRouteToOriginating) {
               await sendPayloadAsync(normalizedPayload, context?.abortSignal, false);
@@ -1092,14 +1110,17 @@ export async function dispatchReplyFromConfig(
         accumulatedBlockText.trim()
       ) {
         try {
-          const ttsSyntheticReply = await maybeApplyTtsToReplyPayload({
-            payload: { text: accumulatedBlockText },
-            cfg,
-            channel: ttsChannel,
-            kind: "final",
-            inboundAudio,
-            ttsAuto: sessionTtsAuto,
-          });
+          const ttsSyntheticReply = await maybeApplyTtsToReplyPayload(
+            {
+              payload: { text: accumulatedBlockText },
+              cfg,
+              channel: ttsChannel,
+              kind: "final",
+              inboundAudio,
+              ttsAuto: sessionTtsAuto,
+            },
+            sessionAgentId,
+          );
           // Only send if TTS was actually applied (mediaUrl exists)
           if (ttsSyntheticReply.mediaUrl) {
             // Send TTS-only payload (no text, just audio) so it doesn't duplicate the block content

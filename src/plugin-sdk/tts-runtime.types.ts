@@ -1,5 +1,5 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import type { TtsAutoMode, TtsProvider } from "../config/types.tts.js";
+import type { TtsAutoMode, TtsConfig, TtsProvider } from "../config/types.tts.js";
 import type {
   SpeechProviderConfig,
   SpeechVoiceOption,
@@ -92,6 +92,8 @@ export type MaybeApplyTtsToPayloadParams = {
   kind?: "tool" | "block" | "final";
   inboundAudio?: boolean;
   ttsAuto?: string;
+  agentId?: string;
+  rawConfigOverride?: TtsConfig;
 };
 
 export type TtsTestFacade = {

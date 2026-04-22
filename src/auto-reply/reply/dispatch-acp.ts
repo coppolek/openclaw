@@ -20,7 +20,7 @@ import {
   normalizeOptionalString,
 } from "../../shared/string-coerce.js";
 import { resolveStatusTtsSnapshot } from "../../tts/status-config.js";
-import { resolveConfiguredTtsMode } from "../../tts/tts-config.js";
+import { resolveConfiguredTtsMode, resolveRawTtsConfig } from "../../tts/tts-config.js";
 import type { FinalizedMsgContext } from "../templating.js";
 import { createAcpReplyProjector } from "./acp-projector.js";
 import { loadDispatchAcpMediaRuntime, resolveAcpAttachments } from "./dispatch-acp-attachments.js";
@@ -178,16 +178,18 @@ async function finalizeAcpTurnOutput(params: {
   inboundAudio: boolean;
   sessionTtsAuto?: TtsAutoMode;
   ttsChannel?: string;
+  agentId?: string;
   shouldEmitResolvedIdentityNotice: boolean;
 }): Promise<boolean> {
   await params.delivery.settleVisibleText();
   let queuedFinal =
     params.delivery.hasDeliveredVisibleText() && !params.delivery.hasFailedVisibleTextDelivery();
-  const ttsMode = resolveConfiguredTtsMode(params.cfg);
+  const ttsMode = resolveConfiguredTtsMode(params.cfg, params.agentId);
   const accumulatedBlockText = params.delivery.getAccumulatedBlockText();
   const hasAccumulatedBlockText = accumulatedBlockText.trim().length > 0;
   const ttsStatus = resolveStatusTtsSnapshot({
     cfg: params.cfg,
+    agentId: params.agentId,
     sessionAuto: params.sessionTtsAuto,
   });
   const canAttemptFinalTts =
@@ -197,13 +199,16 @@ async function finalizeAcpTurnOutput(params: {
   if (ttsMode === "final" && hasAccumulatedBlockText && canAttemptFinalTts) {
     try {
       const { maybeApplyTtsToPayload } = await loadDispatchAcpTtsRuntime();
+      const rawConfigOverride = resolveRawTtsConfig(params.cfg, params.agentId);
       const ttsSyntheticReply = await maybeApplyTtsToPayload({
         payload: { text: accumulatedBlockText },
         cfg: params.cfg,
+        agentId: params.agentId,
         channel: params.ttsChannel,
         kind: "final",
         inboundAudio: params.inboundAudio,
         ttsAuto: params.sessionTtsAuto,
+        rawConfigOverride,
       });
       if (ttsSyntheticReply.mediaUrl) {
         const delivered = await params.delivery.deliver("final", {
@@ -269,6 +274,7 @@ export async function tryDispatchAcpReply(params: {
   inboundAudio: boolean;
   sessionTtsAuto?: TtsAutoMode;
   ttsChannel?: string;
+  agentId?: string;
   suppressUserDelivery?: boolean;
   shouldRouteToOriginating: boolean;
   originatingChannel?: string;
@@ -296,23 +302,31 @@ export async function tryDispatchAcpReply(params: {
   const canonicalSessionKey = acpResolution.sessionKey;
 
   let queuedFinal = false;
+  const resolvedAcpAgent =
+    acpResolution.kind === "ready"
+      ? (normalizeOptionalString(acpResolution.meta.agent) ??
+        normalizeOptionalString(params.cfg.acp?.defaultAgent) ??
+        resolveAgentIdFromSessionKey(canonicalSessionKey))
+      : resolveAgentIdFromSessionKey(canonicalSessionKey);
+
   const delivery = createAcpDispatchDeliveryCoordinator({
     cfg: params.cfg,
     ctx: params.ctx,
     dispatcher: params.dispatcher,
     inboundAudio: params.inboundAudio,
-    sessionTtsAuto: params.sessionTtsAuto,
+    ttsAuto: params.sessionTtsAuto,
     ttsChannel: params.ttsChannel,
     suppressUserDelivery: params.suppressUserDelivery,
     shouldRouteToOriginating: params.shouldRouteToOriginating,
     originatingChannel: params.originatingChannel,
     originatingTo: params.originatingTo,
     onReplyStart: params.onReplyStart,
+    agentId: resolvedAcpAgent,
   });
-
   const identityPendingBeforeTurn = isSessionIdentityPending(
     resolveSessionIdentityFromMeta(acpResolution.kind === "ready" ? acpResolution.meta : undefined),
   );
+
   const shouldEmitResolvedIdentityNotice =
     !params.suppressUserDelivery &&
     identityPendingBeforeTurn &&
@@ -327,12 +341,6 @@ export async function tryDispatchAcpReply(params: {
         accountIdRaw: params.ctx.AccountId,
       })));
 
-  const resolvedAcpAgent =
-    acpResolution.kind === "ready"
-      ? (normalizeOptionalString(acpResolution.meta.agent) ??
-        normalizeOptionalString(params.cfg.acp?.defaultAgent) ??
-        resolveAgentIdFromSessionKey(canonicalSessionKey))
-      : resolveAgentIdFromSessionKey(canonicalSessionKey);
   const normalizedDispatchChannel = normalizeOptionalLowercaseString(
     params.ctx.OriginatingChannel ?? params.ctx.Surface ?? params.ctx.Provider,
   );
@@ -437,6 +445,7 @@ export async function tryDispatchAcpReply(params: {
         inboundAudio: params.inboundAudio,
         sessionTtsAuto: params.sessionTtsAuto,
         ttsChannel: params.ttsChannel,
+        agentId: resolvedAcpAgent,
         shouldEmitResolvedIdentityNotice,
       })) || queuedFinal;
 

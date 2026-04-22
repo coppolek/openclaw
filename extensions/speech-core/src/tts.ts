@@ -310,8 +310,11 @@ export function getResolvedSpeechProviderConfig(
   return resolveLazyProviderConfig(config, canonical, cfg);
 }
 
-export function resolveTtsConfig(cfg: OpenClawConfig): ResolvedTtsConfig {
-  const raw: TtsConfig = cfg.messages?.tts ?? {};
+export function resolveTtsConfig(
+  cfg: OpenClawConfig,
+  rawConfigOverride?: TtsConfig,
+): ResolvedTtsConfig {
+  const raw: TtsConfig = rawConfigOverride ?? cfg.messages?.tts ?? {};
   const providerSource = raw.provider ? "config" : "default";
   const timeoutMs = raw.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const auto = resolveConfiguredTtsAutoMode(raw);
@@ -364,11 +367,15 @@ export function resolveTtsAutoMode(params: {
   return params.config.auto;
 }
 
-function resolveEffectiveTtsAutoState(params: { cfg: OpenClawConfig; sessionAuto?: string }): {
+function resolveEffectiveTtsAutoState(params: {
+  cfg: OpenClawConfig;
+  sessionAuto?: string;
+  rawConfigOverride?: TtsConfig;
+}): {
   autoMode: TtsAutoMode;
   prefsPath: string;
 } {
-  const raw: TtsConfig = params.cfg.messages?.tts ?? {};
+  const raw: TtsConfig = params.rawConfigOverride ?? params.cfg.messages?.tts ?? {};
   const prefsPath = resolveTtsPrefsPathValue(raw.prefsPath);
   const sessionAuto = normalizeTtsAutoMode(params.sessionAuto);
   if (sessionAuto) {
@@ -1034,6 +1041,8 @@ export async function maybeApplyTtsToPayload(params: {
   kind?: "tool" | "block" | "final";
   inboundAudio?: boolean;
   ttsAuto?: string;
+  agentId?: string;
+  rawConfigOverride?: TtsConfig;
 }): Promise<ReplyPayload> {
   if (params.payload.isCompactionNotice) {
     return params.payload;
@@ -1041,11 +1050,12 @@ export async function maybeApplyTtsToPayload(params: {
   const { autoMode, prefsPath } = resolveEffectiveTtsAutoState({
     cfg: params.cfg,
     sessionAuto: params.ttsAuto,
+    rawConfigOverride: params.rawConfigOverride,
   });
   if (autoMode === "off") {
     return params.payload;
   }
-  const config = resolveTtsConfig(params.cfg);
+  const config = resolveTtsConfig(params.cfg, params.rawConfigOverride);
   const activeProvider = getTtsProvider(config, prefsPath);
 
   const reply = resolveSendableOutboundReplyParts(params.payload);
