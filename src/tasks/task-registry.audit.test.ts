@@ -83,6 +83,82 @@ describe("task-registry audit", () => {
     });
   });
 
+  it("does not flag startedAt equal to createdAt as inconsistent", () => {
+    const now = Date.parse("2026-03-30T01:00:00.000Z");
+    const base = Date.parse("2026-03-30T00:00:00.000Z");
+    const findings = listTaskAuditFindings({
+      now,
+      tasks: [
+        createTask({
+          taskId: "same-ts",
+          status: "succeeded",
+          createdAt: base,
+          startedAt: base,
+          endedAt: base + 5000,
+          cleanupAfter: now + 60_000,
+        }),
+      ],
+    });
+    expect(findings.map((f) => f.code)).toEqual([]);
+  });
+
+  it("does not flag startedAt slightly before createdAt within jitter tolerance", () => {
+    const now = Date.parse("2026-03-30T01:00:00.000Z");
+    const base = Date.parse("2026-03-30T00:00:00.000Z");
+    const findings = listTaskAuditFindings({
+      now,
+      tasks: [
+        createTask({
+          taskId: "slight-jitter",
+          status: "succeeded",
+          createdAt: base + 500,
+          startedAt: base,
+          endedAt: base + 5000,
+          cleanupAfter: now + 60_000,
+        }),
+      ],
+    });
+    expect(findings.map((f) => f.code)).toEqual([]);
+  });
+
+  it("flags startedAt significantly before createdAt as inconsistent", () => {
+    const now = Date.parse("2026-03-30T01:00:00.000Z");
+    const base = Date.parse("2026-03-30T00:00:00.000Z");
+    const findings = listTaskAuditFindings({
+      now,
+      tasks: [
+        createTask({
+          taskId: "big-gap",
+          status: "succeeded",
+          createdAt: base + 2000,
+          startedAt: base,
+          endedAt: base + 5000,
+          cleanupAfter: now + 60_000,
+        }),
+      ],
+    });
+    expect(findings.map((f) => f.code)).toEqual(["inconsistent_timestamps"]);
+  });
+
+  it("does not flag endedAt slightly before startedAt within jitter tolerance", () => {
+    const now = Date.parse("2026-03-30T01:00:00.000Z");
+    const base = Date.parse("2026-03-30T00:00:00.000Z");
+    const findings = listTaskAuditFindings({
+      now,
+      tasks: [
+        createTask({
+          taskId: "end-jitter",
+          status: "failed",
+          createdAt: base,
+          startedAt: base + 500,
+          endedAt: base + 100,
+          cleanupAfter: now + 60_000,
+        }),
+      ],
+    });
+    expect(findings.map((f) => f.code)).toEqual([]);
+  });
+
   it("does not double-report lost tasks as missing cleanup", () => {
     const now = Date.parse("2026-03-30T01:00:00.000Z");
     const findings = listTaskAuditFindings({

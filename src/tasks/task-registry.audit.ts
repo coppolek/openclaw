@@ -46,8 +46,12 @@ function taskReferenceAt(task: TaskRecord): number {
   return task.lastEventAt ?? task.startedAt ?? task.createdAt;
 }
 
+// Timestamps are set via separate Date.now() calls that may have sub-ms jitter
+// or land in slightly different order, so allow a small tolerance before flagging.
+const TIMESTAMP_JITTER_MS = 1000;
+
 function findTimestampInconsistency(task: TaskRecord): TaskAuditFinding | null {
-  if (task.startedAt && task.startedAt < task.createdAt) {
+  if (task.startedAt && task.createdAt - task.startedAt > TIMESTAMP_JITTER_MS) {
     return createFinding({
       severity: "warn",
       code: "inconsistent_timestamps",
@@ -55,7 +59,7 @@ function findTimestampInconsistency(task: TaskRecord): TaskAuditFinding | null {
       detail: "startedAt is earlier than createdAt",
     });
   }
-  if (task.endedAt && task.startedAt && task.endedAt < task.startedAt) {
+  if (task.endedAt && task.startedAt && task.startedAt - task.endedAt > TIMESTAMP_JITTER_MS) {
     return createFinding({
       severity: "warn",
       code: "inconsistent_timestamps",
