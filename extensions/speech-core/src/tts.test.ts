@@ -74,7 +74,8 @@ vi.mock("../api.js", async () => {
   };
 });
 
-const { _test, maybeApplyTtsToPayload } = await import("./tts.js");
+const { _test, maybeApplyTtsToPayload, setSummarizationEnabled, setTtsMaxLength } =
+  await import("./tts.js");
 
 const nativeVoiceNoteChannels = ["discord", "feishu", "matrix", "telegram", "whatsapp"] as const;
 
@@ -330,6 +331,42 @@ describe("speech-core native voice-note routing", () => {
         expect.objectContaining({
           __providerId: "elevenlabs",
           text: "[warmly] Hello there, friend.",
+        }),
+      );
+      mediaDir = result.mediaUrl ? path.dirname(result.mediaUrl) : undefined;
+    } finally {
+      if (mediaDir) {
+        rmSync(mediaDir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it("bases max-length gating on provider-specific plain speech text", async () => {
+    const cfg = createTtsConfig("openclaw-speech-core-tts-length-gating-test", "mock");
+    setTtsMaxLength("/tmp/openclaw-speech-core-tts-length-gating-test.json", 25);
+    setSummarizationEnabled("/tmp/openclaw-speech-core-tts-length-gating-test.json", false);
+    const payload = setReplyPayloadMetadata(
+      {
+        text: "Hello there, friend.",
+      } satisfies ReplyPayload,
+      {
+        ttsSourceText: "[warmly] [softly] Hello there, friend.",
+      },
+    );
+
+    let mediaDir: string | undefined;
+    try {
+      const result = await maybeApplyTtsToPayload({
+        payload,
+        cfg,
+        channel: "slack",
+        kind: "final",
+      });
+
+      expect(synthesizeMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          __providerId: "mock",
+          text: "Hello there, friend.",
         }),
       );
       mediaDir = result.mediaUrl ? path.dirname(result.mediaUrl) : undefined;
