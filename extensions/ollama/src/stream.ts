@@ -333,7 +333,7 @@ interface OllamaTool {
 interface OllamaToolCall {
   function: {
     name: string;
-    arguments: Record<string, unknown>;
+    arguments: Record<string, unknown> | string;
   };
 }
 
@@ -537,7 +537,7 @@ export function buildAssistantMessage(
         type: "toolCall",
         id: `ollama_call_${randomUUID()}`,
         name: toolCall.function.name,
-        arguments: toolCall.function.arguments,
+        arguments: ensureArgsObject(toolCall.function.arguments),
       });
     }
   }
