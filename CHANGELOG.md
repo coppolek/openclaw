@@ -14,9 +14,12 @@ Docs: https://docs.openclaw.ai
 - Tokenjuice: add bundled native OpenClaw support for tokenjuice as an opt-in plugin that compacts noisy `exec` and `bash` tool results in Pi embedded runs. (#69946) Thanks @vincentkoc.
 - Providers/Tencent: add the bundled Tencent Cloud provider plugin with TokenHub and Token Plan onboarding, docs, `hy3-preview` model catalog entries, and tiered Hy3 pricing metadata. (#68460) Thanks @JuniperSling.
 - TUI: add local embedded mode for running terminal chats without a Gateway while keeping plugin approval gates enforced. (#66767) Thanks @fuller-stack-dev.
+- CLI/Claude: keep compatible `claude-cli` runs on a warm stdio session and resume from the stored Claude session after Gateway restarts or idle exits. (#69679) Thanks @obviyus.
 
 ### Fixes
 
+- Gateway/pairing webchat: render `/pair qr` replies as structured media instead of raw markdown text, preserve inline reply threading and silent-control handling on media replies, avoid persisting sensitive QR images into transcript history, and keep local webchat media embedding behind internal-only trust markers. (#70047) Thanks @BunsDev.
+- Codex harness: default app-server runs to unchained local execution, so OpenAI heartbeats can use network and shell tools without stalling behind native Codex approvals or the workspace-write sandbox.
 - OpenAI/Responses: keep embedded OpenAI Responses runs on HTTP when `models.providers.openai.baseUrl` points at a local mock or other non-public endpoint, so mocked/custom endpoints no longer drift onto the hardcoded public websocket transport. (#69815) Thanks @vincentkoc.
 - Channels/config: require resolved runtime config on channel send/action/client helpers and block runtime helper `loadConfig()` calls, so SecretRefs are resolved at startup/boundaries instead of being re-read during sends.
 - CLI/channels: preserve bundled setup promotion metadata when a loaded partial channel plugin omits it, so adding a non-default account still moves legacy single-account fields such as Telegram `streaming` into `accounts.default`.
