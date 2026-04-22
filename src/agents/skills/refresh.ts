@@ -28,6 +28,8 @@ type SkillsWatchState = {
   watcher: FSWatcher;
   pathsKey: string;
   debounceMs: number;
+  usePolling: boolean;
+  interval?: number;
   timer?: ReturnType<typeof setTimeout>;
   pendingPath?: string;
 };
@@ -149,7 +151,15 @@ export function ensureSkillsWatcher(params: { workspaceDir: string; config?: Ope
 
   const watchTargets = resolveWatchTargets(workspaceDir, params.config);
   const pathsKey = watchTargets.join("|");
-  if (existing && existing.pathsKey === pathsKey && existing.debounceMs === debounceMs) {
+  const usePolling = resolveSkillsWatchPollingEnabled();
+  const interval = usePolling ? resolveSkillsWatchPollIntervalMs() : undefined;
+  if (
+    existing &&
+    existing.pathsKey === pathsKey &&
+    existing.debounceMs === debounceMs &&
+    existing.usePolling === usePolling &&
+    existing.interval === interval
+  ) {
     return;
   }
   if (existing) {
@@ -159,9 +169,6 @@ export function ensureSkillsWatcher(params: { workspaceDir: string; config?: Ope
     }
     void existing.watcher.close().catch(() => {});
   }
-
-  const usePolling = resolveSkillsWatchPollingEnabled();
-  const interval = usePolling ? resolveSkillsWatchPollIntervalMs() : undefined;
 
   const watcher = chokidar.watch(watchTargets, {
     ignoreInitial: true,
@@ -176,7 +183,7 @@ export function ensureSkillsWatcher(params: { workspaceDir: string; config?: Ope
     ignored: DEFAULT_SKILLS_WATCH_IGNORED,
   });
 
-  const state: SkillsWatchState = { watcher, pathsKey, debounceMs };
+  const state: SkillsWatchState = { watcher, pathsKey, debounceMs, usePolling, interval };
 
   const schedule = (changedPath?: string) => {
     state.pendingPath = changedPath ?? state.pendingPath;

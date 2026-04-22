@@ -147,4 +147,31 @@ describe("ensureSkillsWatcher", () => {
     expect(opts.usePolling).toBe(true);
     expect(opts.interval).toBeUndefined();
   });
+
+  it("recreates the watcher when polling settings change", async () => {
+    refreshModule.ensureSkillsWatcher({ workspaceDir: "/tmp/workspace" });
+    expect(watchMock).toHaveBeenCalledTimes(1);
+
+    process.env.OPENCLAW_SKILLS_WATCH_POLLING = "1";
+    process.env.OPENCLAW_SKILLS_WATCH_POLL_INTERVAL_MS = "1200";
+
+    refreshModule.ensureSkillsWatcher({ workspaceDir: "/tmp/workspace" });
+
+    expect(watchMock).toHaveBeenCalledTimes(2);
+    const secondCall = (
+      watchMock.mock.calls as unknown as Array<
+        [
+          string[],
+          {
+            usePolling?: boolean;
+            interval?: number;
+          },
+        ]
+      >
+    )[1];
+    const opts = secondCall?.[1] ?? {};
+
+    expect(opts.usePolling).toBe(true);
+    expect(opts.interval).toBe(1200);
+  });
 });
