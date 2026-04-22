@@ -115,6 +115,7 @@ export type ChannelOutboundAdapter = {
     kind: "tool" | "block" | "final";
     text?: string;
   }) => boolean;
+  shouldPreferFinalAssistantVisibleText?: () => boolean;
   targetsMatchForReplySuppression?: (params: {
     originTarget: string;
     targetKey: string;

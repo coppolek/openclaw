@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { SkillSnapshot } from "../../agents/skills.js";
+import { setActivePluginRegistry } from "../../plugins/runtime.js";
+import { createOutboundTestPlugin, createTestRegistry } from "../../test-utils/channel-plugins.js";
 import type { CronDeliveryMode } from "../types.js";
 import type { MutableCronSession } from "./run-session-state.js";
 import {
@@ -31,6 +33,25 @@ function makeMessageToolPolicyJob(
     payload,
     delivery,
   } as never;
+}
+
+function parseTelegramTargetForTest(raw: string) {
+  const trimmed = raw
+    .trim()
+    .replace(/^telegram:/i, "")
+    .replace(/^tg:/i, "");
+  const topicMatch = /^([^:]+):topic:(\d+)$/i.exec(trimmed);
+  if (topicMatch) {
+    return {
+      to: topicMatch[1],
+      threadId: Number.parseInt(topicMatch[2], 10),
+      chatType: topicMatch[1].startsWith("-") ? ("group" as const) : ("direct" as const),
+    };
+  }
+  return {
+    to: trimmed,
+    chatType: trimmed.startsWith("-") ? ("group" as const) : undefined,
+  };
 }
 
 function makeParams() {
@@ -105,6 +126,30 @@ describe("runCronIsolatedAgentTurn message tool policy", () => {
   beforeEach(() => {
     previousFastTestEnv = clearFastTestEnv();
     resetRunCronIsolatedAgentTurnHarness();
+    setActivePluginRegistry(
+      createTestRegistry([
+        {
+          pluginId: "telegram",
+          source: "test",
+          plugin: createOutboundTestPlugin({
+            id: "telegram",
+            outbound: { deliveryMode: "direct" },
+            messaging: {
+              parseExplicitTarget: ({ raw }) => parseTelegramTargetForTest(raw),
+              resolveSessionTarget: ({ id, threadId }) => {
+                const normalizedThreadId =
+                  typeof threadId === "number"
+                    ? String(threadId)
+                    : typeof threadId === "string"
+                      ? threadId.trim()
+                      : "";
+                return normalizedThreadId ? `${id}:topic:${normalizedThreadId}` : id;
+              },
+            },
+          }),
+        },
+      ]),
+    );
     resolveDeliveryTargetMock.mockResolvedValue({
       ok: true,
       channel: "telegram",
@@ -157,6 +202,7 @@ describe("runCronIsolatedAgentTurn message tool policy", () => {
   }
 
   afterEach(() => {
+    setActivePluginRegistry(createTestRegistry());
     restoreFastTestEnv(previousFastTestEnv);
   });
 

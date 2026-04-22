@@ -2,6 +2,10 @@ import type { SkillSnapshot } from "../../agents/skills.js";
 import type { ThinkLevel, VerboseLevel } from "../../auto-reply/thinking.js";
 import type { AgentDefaultsConfig } from "../../config/types.agent-defaults.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import {
+  resolveOutboundCurrentChannelTarget,
+  shouldOutboundChannelPreferFinalAssistantVisibleText,
+} from "../../infra/outbound/channel-resolution.js";
 import type { CronJob } from "../types.js";
 import { resolveCronPayloadOutcome } from "./helpers.js";
 import {
@@ -32,20 +36,6 @@ type CronSubagentRegistryRuntime = typeof import("./run-subagent-registry.runtim
 
 let cronEmbeddedRuntimePromise: Promise<CronEmbeddedRuntime> | undefined;
 let cronSubagentRegistryRuntimePromise: Promise<CronSubagentRegistryRuntime> | undefined;
-
-function resolveCurrentChannelTarget(params: {
-  channel?: string;
-  to?: string;
-  threadId?: string | number;
-}): string | undefined {
-  if (!params.to) {
-    return undefined;
-  }
-  if (params.channel !== "telegram" || params.threadId == null) {
-    return params.to;
-  }
-  return params.to.includes(":topic:") ? params.to : `${params.to}:topic:${params.threadId}`;
-}
 
 async function loadCronEmbeddedRuntime() {
   cronEmbeddedRuntimePromise ??= import("./run-embedded.runtime.js");
@@ -171,10 +161,11 @@ export function createCronPromptExecutor(params: {
           agentAccountId: params.resolvedDelivery.accountId,
           messageTo: params.resolvedDelivery.to,
           messageThreadId: params.resolvedDelivery.threadId,
-          currentChannelId: resolveCurrentChannelTarget({
+          currentChannelId: resolveOutboundCurrentChannelTarget({
             channel: params.messageChannel,
             to: params.resolvedDelivery.to,
             threadId: params.resolvedDelivery.threadId,
+            cfg: params.cfg,
           }),
           sessionFile,
           agentDir: params.agentDir,
@@ -355,7 +346,10 @@ export async function executeCronRun(params: {
       payloads: interimPayloads,
       runLevelError: runResult.meta?.error,
       finalAssistantVisibleText: runResult.meta?.finalAssistantVisibleText,
-      preferFinalAssistantVisibleText: params.resolvedDelivery.channel === "telegram",
+      preferFinalAssistantVisibleText: shouldOutboundChannelPreferFinalAssistantVisibleText({
+        channel: params.resolvedDelivery.channel,
+        cfg: params.cfg,
+      }),
     });
     const interimText = interimOutputText?.trim() ?? "";
     const shouldRetryInterimAck =

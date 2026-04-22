@@ -5,6 +5,7 @@ import type { ThinkLevel } from "../../auto-reply/thinking.js";
 import type { CliDeps } from "../../cli/outbound-send-deps.js";
 import type { AgentDefaultsConfig } from "../../config/types.agent-defaults.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { shouldOutboundChannelPreferFinalAssistantVisibleText } from "../../infra/outbound/channel-resolution.js";
 import { resolveCronDeliveryPlan, type CronDeliveryPlan } from "../delivery-plan.js";
 import type {
   CronDeliveryTrace,
@@ -785,7 +786,10 @@ async function finalizeCronRun(params: {
     payloads,
     runLevelError: finalRunResult.meta?.error,
     finalAssistantVisibleText: finalRunResult.meta?.finalAssistantVisibleText,
-    preferFinalAssistantVisibleText: prepared.resolvedDelivery.channel === "telegram",
+    preferFinalAssistantVisibleText: shouldOutboundChannelPreferFinalAssistantVisibleText({
+      channel: prepared.resolvedDelivery.channel,
+      cfg: prepared.cfgWithAgentDefaults,
+    }),
   });
   const resolveRunOutcome = (result?: {
     delivered?: boolean;
