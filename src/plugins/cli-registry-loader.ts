@@ -1,6 +1,7 @@
 import { collectUniqueCommandDescriptors } from "../cli/program/command-descriptor-utils.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { resolveManifestActivationPluginIds } from "./activation-planner.js";
+import { normalizePluginsConfig } from "./config-state.js";
 import type { PluginLoadOptions } from "./loader.js";
 import { loadOpenClawPluginCliRegistry, loadOpenClawPlugins } from "./loader.js";
 import type { PluginRegistry } from "./registry.js";
@@ -67,7 +68,7 @@ function resolvePrimaryCommandPluginIds(
   if (!normalizedPrimary) {
     return [];
   }
-  return resolveManifestActivationPluginIds({
+  const plannedPluginIds = resolveManifestActivationPluginIds({
     trigger: {
       kind: "command",
       command: normalizedPrimary,
@@ -76,6 +77,31 @@ function resolvePrimaryCommandPluginIds(
     workspaceDir: context.workspaceDir,
     env: context.env,
   });
+  return withPrimaryMemorySlotPluginId(plannedPluginIds, context.activationSourceConfig);
+}
+
+function withPrimaryMemorySlotPluginId(
+  pluginIds: readonly string[],
+  config: OpenClawConfig,
+): string[] {
+  if (pluginIds.length === 0) {
+    return [];
+  }
+  const memorySlotPluginId = resolveConfiguredMemorySlotPluginId(config);
+  if (!memorySlotPluginId) {
+    return [...pluginIds];
+  }
+  return [...new Set([...pluginIds, memorySlotPluginId])].toSorted((left, right) =>
+    left.localeCompare(right),
+  );
+}
+
+function resolveConfiguredMemorySlotPluginId(config: OpenClawConfig): string | null {
+  const memorySlotPluginId = normalizePluginsConfig(config.plugins).slots.memory;
+  if (!memorySlotPluginId) {
+    return null;
+  }
+  return memorySlotPluginId;
 }
 
 export function resolvePluginCliLoadContext(params: {
