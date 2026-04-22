@@ -18,6 +18,18 @@ function parseJsonBody(call: number): Record<string, unknown> {
   return parseComfyJsonBody(fetchWithSsrFGuardMock, call);
 }
 
+function buildPluginComfyConfig(config: Record<string, unknown>): OpenClawConfig {
+  return {
+    plugins: {
+      entries: {
+        comfy: {
+          config,
+        },
+      },
+    },
+  } as unknown as OpenClawConfig;
+}
+
 describe("comfy image-generation provider", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -33,6 +45,20 @@ describe("comfy image-generation provider", () => {
     expect(
       provider.isConfigured?.({
         cfg: buildComfyConfig({
+          workflow: {
+            "6": { inputs: { text: "" } },
+          },
+          promptNodeId: "6",
+        }),
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts the bundled plugin config shape for local comfy workflows", () => {
+    const provider = buildComfyImageGenerationProvider();
+    expect(
+      provider.isConfigured?.({
+        cfg: buildPluginComfyConfig({
           workflow: {
             "6": { inputs: { text: "" } },
           },
