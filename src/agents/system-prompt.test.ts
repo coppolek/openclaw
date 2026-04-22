@@ -629,8 +629,8 @@ describe("buildAgentSystemPrompt", () => {
       ],
     });
 
-    expect(prompt).toContain("## Emotion Translation");
-    expect(prompt).toContain("rewrite it through the loaded `voice.md` translation library");
+    expect(prompt).toContain("## Speech Preparation Contract");
+    expect(prompt).toContain("rewrite it through the loaded `voice.md` speech-preparation library");
     expect(prompt).toContain("SOUL.md");
     expect(prompt).toContain("voice.md");
     expect(prompt.indexOf("SOUL.md")).toBeLessThan(prompt.indexOf("voice.md"));
@@ -644,7 +644,7 @@ describe("buildAgentSystemPrompt", () => {
       contextFiles: [{ path: "./voice.md", content: "Voice library" }],
     });
 
-    expect(prompt).not.toContain("## Emotion Translation");
+    expect(prompt).not.toContain("## Speech Preparation Contract");
   });
 
   it("omits project context when no context files are injected", () => {

@@ -160,7 +160,7 @@ function normalizeConfiguredSpeechProviderId(
   return normalized === "edge" ? "microsoft" : normalized;
 }
 
-function preservesExpressiveSpeechSource(provider: TtsProviderId, cfg: OpenClawConfig): boolean {
+function preservesExpressiveSpeechSource(provider: TtsProvider, cfg: OpenClawConfig): boolean {
   return (
     getSpeechProvider(provider, cfg)?.capabilities?.sourceTextHandling ===
     "preserve_expressive_tags"
@@ -168,7 +168,7 @@ function preservesExpressiveSpeechSource(provider: TtsProviderId, cfg: OpenClawC
 }
 
 function resolveSpeechTextForProvider(params: {
-  provider: TtsProviderId;
+  provider: TtsProvider;
   cfg: OpenClawConfig;
   expressiveText: string;
   plainText?: string;

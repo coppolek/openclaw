@@ -141,13 +141,14 @@ function buildEmotionTranslationSection(params: {
     return [];
   }
   return [
-    "## Emotion Translation Contract",
-    "Before delivering any user-facing final answer, rewrite it through the loaded `voice.md` translation library so it is speakable and emotionally expressive in the persona from `SOUL.md`.",
+    "## Speech Preparation Contract",
+    "Before delivering any user-facing final answer, rewrite it through the loaded `voice.md` speech-preparation library so it is speakable and expressive in the persona from `SOUL.md`.",
     "- Output only the translated final answer. Do not mention this translation pass unless the user explicitly asks.",
     "- Preserve all facts, code, commands, file paths, URLs, markdown structure, and safety constraints exactly.",
-    "- When `voice.md` defines bracketed delivery tags, include the raw tags directly in the final answer.",
+    "- Treat `SOUL.md` as the persona target and `voice.md` as the expressive translation library that helps the answer land in speech.",
+    "- When `voice.md` defines bracketed delivery tags, include the raw tags directly in the final answer when they materially improve speech performance or persona fit.",
     "- Keep tags sparse, local, and natural. Prefer 0-2 tags per sentence and none where clarity would suffer.",
-    "- Ensure the prose still reads naturally if those tags are hidden or stripped for display.",
+    "- The same answer may be sent to both tag-aware and plain-text TTS providers, so the prose must still read naturally if those tags are hidden or stripped for display.",
     "",
   ];
 }
