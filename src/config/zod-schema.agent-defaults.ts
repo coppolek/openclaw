@@ -17,24 +17,6 @@ import {
   TypingModeSchema,
 } from "./zod-schema.core.js";
 
-export const SilentReplyPolicySchema = z.union([z.literal("allow"), z.literal("disallow")]);
-
-export const SilentReplyPolicyConfigSchema = z
-  .object({
-    direct: SilentReplyPolicySchema.optional(),
-    group: SilentReplyPolicySchema.optional(),
-    internal: SilentReplyPolicySchema.optional(),
-  })
-  .strict();
-
-export const SilentReplyRewriteConfigSchema = z
-  .object({
-    direct: z.boolean().optional(),
-    group: z.boolean().optional(),
-    internal: z.boolean().optional(),
-  })
-  .strict();
-
 export const AgentDefaultsSchema = z
   .object({
     /** Global default provider params applied to all models before per-model and per-agent overrides. */
@@ -65,8 +47,6 @@ export const AgentDefaultsSchema = z
       .optional(),
     workspace: z.string().optional(),
     skills: z.array(z.string()).optional(),
-    silentReply: SilentReplyPolicyConfigSchema.optional(),
-    silentReplyRewrite: SilentReplyRewriteConfigSchema.optional(),
     repoRoot: z.string().optional(),
     systemPromptOverride: z.string().optional(),
     skipBootstrap: z.boolean().optional(),
@@ -195,7 +175,6 @@ export const AgentDefaultsSchema = z
           })
           .strict()
           .optional(),
-        truncateAfterCompaction: z.boolean().optional(),
         notifyUser: z.boolean().optional(),
       })
       .strict()
@@ -206,6 +185,54 @@ export const AgentDefaultsSchema = z
           .union([z.literal("trusted"), z.literal("sanitize"), z.literal("ignore")])
           .optional(),
         executionContract: z.union([z.literal("default"), z.literal("strict-agentic")]).optional(),
+        autoContinue: z
+          .object({
+            /** Enable auto-continuation for planning-only turns. Default: false. */
+            enabled: z.boolean().optional(),
+            /**
+             * Max auto-continue cycles before pausing for user review. Default: 3.
+             * Each cycle = 1 ACK injection + up to 3 planning retries = ~4 API calls.
+             * Total worst-case calls = 1 + (maxCycles × 4). Default 3 = ~13 calls max.
+             */
+            maxCycles: z.number().int().min(1).max(10).optional(),
+            /** Pause auto-continue when any attempt in the run produces mutating tool calls. Default: true. */
+            stopOnMutation: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
+        /**
+         * PR-9 Tier 1: outer-loop turn budget for the embedded Pi runner.
+         * When set, fully replaces the default (which scales with auth-profile
+         * count and is now floored at 500). Use this to give long research /
+         * build runs more headroom. Range [1, 100_000]. Subagents keep a
+         * separate lower cap and ignore this setting.
+         */
+        maxIterations: z.number().int().min(1).max(100_000).optional(),
+      })
+      .strict()
+      .optional(),
+    // PR-8: plan-mode integration. Default OFF — opt-in feature.
+    planMode: z
+      .object({
+        /** Master switch. Registers enter_plan_mode/exit_plan_mode tools and arms the runtime mutation gate. Default: false. */
+        enabled: z.boolean().optional(),
+        /**
+         * Optional model-id regex patterns. When a session's model matches AND the user hasn't toggled plan mode, the
+         * runtime auto-enters plan mode at session start. Default: empty (no auto-enable).
+         */
+        autoEnableFor: z.array(z.string()).optional(),
+        /** Seconds an unanswered approval stays pending. Default: 600 (10 min). */
+        approvalTimeoutSeconds: z.number().int().min(10).max(86_400).optional(),
+        /**
+         * Live-test iter-2 Bug D: opt-in plan-mode debug log toggle.
+         * When true, enables `[plan-mode/<kind>]` lifecycle lines in
+         * gateway.err.log at every state transition / gate decision /
+         * tool call / synthetic injection / approval event. Off by
+         * default. Equivalent to `OPENCLAW_DEBUG_PLAN_MODE=1` env var
+         * but persistent in config so it survives gateway restarts
+         * and works around macOS launchd env-propagation quirks.
+         */
+        debug: z.boolean().optional(),
       })
       .strict()
       .optional(),
@@ -218,7 +245,6 @@ export const AgentDefaultsSchema = z
         z.literal("high"),
         z.literal("xhigh"),
         z.literal("adaptive"),
-        z.literal("max"),
       ])
       .optional(),
     verboseDefault: z.union([z.literal("off"), z.literal("on"), z.literal("full")]).optional(),

@@ -64,15 +64,6 @@ export async function runGatewayClosePrelude(params: {
   await params.closeMcpServer?.().catch(() => {});
 }
 
-function isServerNotRunningError(err: unknown): boolean {
-  return Boolean(
-    err &&
-    typeof err === "object" &&
-    "code" in err &&
-    (err as { code?: unknown }).code === "ERR_SERVER_NOT_RUNNING",
-  );
-}
-
 export function createGatewayCloseHandler(params: {
   bonjourStop: (() => Promise<void>) | null;
   tailscaleCleanup: (() => Promise<void>) | null;
@@ -95,6 +86,7 @@ export function createGatewayCloseHandler(params: {
   heartbeatUnsub: (() => void) | null;
   transcriptUnsub: (() => void) | null;
   lifecycleUnsub: (() => void) | null;
+  planSnapshotUnsub: (() => void) | null;
   chatRunState: { clear: () => void };
   clients: Set<{ socket: { close: (code: number, reason: string) => void } }>;
   configReloader: { stop: () => Promise<void> };
@@ -196,6 +188,13 @@ export function createGatewayCloseHandler(params: {
           /* ignore */
         }
       }
+      if (params.planSnapshotUnsub) {
+        try {
+          params.planSnapshotUnsub();
+        } catch {
+          /* ignore */
+        }
+      }
       params.chatRunState.clear();
       for (const c of params.clients) {
         try {
@@ -249,13 +248,7 @@ export function createGatewayCloseHandler(params: {
           httpServer.closeIdleConnections();
         }
         const closePromise = new Promise<void>((resolve, reject) =>
-          httpServer.close((err) => {
-            if (!err || isServerNotRunningError(err)) {
-              resolve();
-              return;
-            }
-            reject(err);
-          }),
+          httpServer.close((err) => (err ? reject(err) : resolve())),
         );
         const httpGraceTimeout = createTimeoutRace(HTTP_CLOSE_GRACE_MS, () => false as const);
         const closedWithinGrace = await Promise.race([
