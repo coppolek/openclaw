@@ -102,6 +102,7 @@ USER.md
 .agent/*.json
 !.agent/workflows/
 /local/
+skills/*/credentials.json
 package-lock.json
 .claude/
 .agent/
