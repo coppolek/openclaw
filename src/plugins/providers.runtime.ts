@@ -4,6 +4,7 @@ import { resolveManifestActivationPluginIds } from "./activation-planner.js";
 import {
   isPluginRegistryLoadInFlight,
   loadOpenClawPlugins,
+  resolveCompatibleRuntimePluginRegistry,
   resolveRuntimePluginRegistry,
   type PluginLoadOptions,
 } from "./loader.js";
@@ -280,6 +281,30 @@ export function resolvePluginProviders(params: {
     );
   }
   const loadState = resolveRuntimeProviderPluginLoadState(params, base);
+
+  // Fast path: check if the active gateway registry is compatible with these
+  // load options (full cache-key check including config/env/workspace inputs).
+  // When compatible, reuse the already-loaded providers instead of triggering
+  // an expensive full loadOpenClawPlugins() call for each unique workspace dir.
+  // This eliminates per-turn plugin reloads in multi-agent setups (#62051).
+  const compatibleRegistry = resolveCompatibleRuntimePluginRegistry(loadState.loadOptions);
+  if (compatibleRegistry) {
+    const requestedIds = loadState.loadOptions.onlyPluginIds;
+    if (requestedIds && requestedIds.length > 0) {
+      const requestedSet = new Set(requestedIds);
+      return compatibleRegistry.providers
+        .filter((entry) => requestedSet.has(entry.pluginId))
+        .map((entry) => ({
+          ...entry.provider,
+          pluginId: entry.pluginId,
+        }));
+    }
+    return compatibleRegistry.providers.map((entry) => ({
+      ...entry.provider,
+      pluginId: entry.pluginId,
+    }));
+  }
+
   const registry = resolveRuntimePluginRegistry(loadState.loadOptions);
   if (!registry) {
     return [];
