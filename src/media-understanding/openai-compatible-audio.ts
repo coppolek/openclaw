@@ -77,6 +77,7 @@ export async function transcribeOpenAiCompatibleAudio(
     pinDns: false,
     allowPrivateNetwork,
     dispatcherPolicy,
+    pinDns: false,
   });
 
   try {
