@@ -1,8 +1,5 @@
-import {
-  extractInboundSenderLabel,
-  stripInboundMetadata,
-} from "../auto-reply/reply/strip-inbound-meta.js";
-import { stripEnvelope, stripMessageIdHints } from "../shared/chat-envelope.js";
+import { extractInboundSenderLabel, stripInboundMetadata } from "../auto-reply/reply/strip-inbound-meta.js";
+import { extractEnvelopeSender, stripEnvelope, stripMessageIdHints } from "../shared/chat-envelope.js";
 import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 
 export { stripEnvelope };
@@ -11,8 +8,13 @@ function extractMessageSenderLabel(entry: Record<string, unknown>): string | nul
   if (typeof entry.senderLabel === "string" && entry.senderLabel.trim()) {
     return entry.senderLabel.trim();
   }
+  // Get chatType from entry to limit envelope sender fallback to direct chats only
+  const chatType = typeof entry.chatType === "string" ? entry.chatType : undefined;
   if (typeof entry.content === "string") {
-    return extractInboundSenderLabel(entry.content);
+    return (
+      extractInboundSenderLabel(entry.content) ||
+      extractEnvelopeSender(entry.content, chatType as "direct" | "group" | "channel")
+    );
   }
   if (Array.isArray(entry.content)) {
     for (const item of entry.content) {
@@ -23,14 +25,19 @@ function extractMessageSenderLabel(entry: Record<string, unknown>): string | nul
       if (typeof text !== "string") {
         continue;
       }
-      const senderLabel = extractInboundSenderLabel(text);
+      const senderLabel =
+        extractInboundSenderLabel(text) ||
+        extractEnvelopeSender(text, chatType as "direct" | "group" | "channel");
       if (senderLabel) {
         return senderLabel;
       }
     }
   }
   if (typeof entry.text === "string") {
-    return extractInboundSenderLabel(entry.text);
+    return (
+      extractInboundSenderLabel(entry.text) ||
+      extractEnvelopeSender(entry.text, chatType as "direct" | "group" | "channel")
+    );
   }
   return null;
 }
