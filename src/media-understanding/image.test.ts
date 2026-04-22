@@ -188,6 +188,49 @@ describe("describeImageWithModel", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("falls back from a duplicated provider prefix before image model lookup", async () => {
+    const findMock = vi.fn((provider: string, modelId: string) => {
+      if (provider === "bailian" && modelId === "qwen3.5-plus") {
+        return {
+          provider: "bailian",
+          id: "qwen3.5-plus",
+          input: ["text", "image"],
+          baseUrl: "https://coding.dashscope.aliyuncs.com/v1",
+        };
+      }
+      return null;
+    });
+    discoverModelsMock.mockReturnValue({ find: findMock });
+    completeMock.mockResolvedValue({
+      role: "assistant",
+      api: "openai-completions",
+      provider: "bailian",
+      model: "qwen3.5-plus",
+      stopReason: "stop",
+      timestamp: Date.now(),
+      content: [{ type: "text", text: "bailian ok" }],
+    });
+
+    const result = await describeImageWithModel({
+      cfg: {},
+      agentDir: "/tmp/openclaw-agent",
+      provider: "bailian",
+      model: "bailian/qwen3.5-plus",
+      buffer: Buffer.from("png-bytes"),
+      fileName: "image.png",
+      mime: "image/png",
+      prompt: "Describe the image.",
+      timeoutMs: 1000,
+    });
+
+    expect(result).toEqual({
+      text: "bailian ok",
+      model: "qwen3.5-plus",
+    });
+    expect(findMock).toHaveBeenNthCalledWith(1, "bailian", "bailian/qwen3.5-plus");
+    expect(findMock).toHaveBeenNthCalledWith(2, "bailian", "qwen3.5-plus");
+  });
+
   it("passes image prompt as system instructions for codex image requests", async () => {
     discoverModelsMock.mockReturnValue({
       find: vi.fn(() => ({
