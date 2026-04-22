@@ -65,16 +65,46 @@ export async function executeNodeHostCommand(
     ask: params.ask,
     host: "node",
   });
-  if (params.boundNode && params.requestedNode && params.boundNode !== params.requestedNode) {
-    throw new Error(`exec node not allowed (bound to ${params.boundNode})`);
-  }
-  const nodeQuery = params.boundNode || params.requestedNode;
   const nodes = await listNodes({});
   if (nodes.length === 0) {
     throw new Error(
       "exec host=node requires a paired node (none available). This requires a companion app or node host.",
     );
   }
+  // Canonicalize boundNode and requestedNode (which may be display names, IPs,
+  // or partial ID prefixes) to full device IDs before comparing.
+  let resolvedBoundNodeId: string | undefined;
+  if (params.boundNode) {
+    try {
+      resolvedBoundNodeId = resolveNodeIdFromList(nodes, params.boundNode);
+    } catch {
+      // boundNode comes from config; if it cannot be resolved, fall through
+      // to the existing nodeQuery resolution which produces a clearer error.
+    }
+  }
+  let resolvedRequestedNodeId: string | undefined;
+  if (params.requestedNode) {
+    try {
+      resolvedRequestedNodeId = resolveNodeIdFromList(nodes, params.requestedNode);
+    } catch (err) {
+      throw new Error(
+        `requested node not found: ${params.requestedNode} (${err instanceof Error ? err.message : String(err)})`,
+        { cause: err },
+      );
+    }
+  }
+  const canonicalBound = resolvedBoundNodeId ?? params.boundNode;
+  const canonicalRequested = resolvedRequestedNodeId;
+  if (canonicalBound && canonicalRequested && canonicalBound !== canonicalRequested) {
+    throw new Error(
+      `exec node not allowed (bound to ${canonicalBound}, requested resolved to ${canonicalRequested})`,
+    );
+  }
+  // Prefer resolved IDs; fall back to raw params so stale/unresolvable
+  // boundNode values still reach resolveNodeIdFromList (which produces a
+  // clear "unknown node" error) instead of silently picking a default node.
+  const nodeQuery =
+    resolvedBoundNodeId || resolvedRequestedNodeId || params.boundNode || params.requestedNode;
   let nodeId: string;
   try {
     nodeId = resolveNodeIdFromList(nodes, nodeQuery, !nodeQuery);
