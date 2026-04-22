@@ -153,6 +153,14 @@ export function applyFinalEffectiveToolPolicy(
     params.bundledTools,
     params.senderIsOwner === true,
   );
+  // Warn if any bundled tools lack plugin metadata (degradation signal)
+  for (const tool of ownerFiltered) {
+    if (!getPluginToolMeta(tool)) {
+      params.warn(
+        `effective tool policy: bundled tool "${tool.name}" lacks plugin metadata; filtering may be incomplete`,
+      );
+    }
+  }
   // Suppress unavailable-core-tool warnings on every step of this pass.
   // `applyToolPolicyPipeline` infers `coreToolNames` from the `tools` array
   // it's filtering, and this pass only sees the bundled MCP/LSP subset.

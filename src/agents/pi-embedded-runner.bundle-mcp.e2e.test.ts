@@ -9,6 +9,7 @@ import {
   type EmbeddedPiRunnerTestWorkspace,
   immediateEnqueue,
 } from "./test-helpers/pi-embedded-runner-e2e-fixtures.js";
+import { setPluginToolMeta } from "../plugins/tools.js";
 
 const E2E_TIMEOUT_MS = 40_000;
 
@@ -52,24 +53,26 @@ vi.mock("./pi-bundle-mcp-tools.js", () => ({
     }),
     dispose: async () => {},
   }),
-  materializeBundleMcpToolsForRun: async () => ({
-    tools: [
-      {
-        name: "bundleProbe__bundle_probe",
-        label: "bundle_probe",
-        description: "Bundle MCP probe",
-        parameters: { type: "object", properties: {} },
-        execute: async () => ({
-          content: [{ type: "text", text: "FROM-BUNDLE" }],
-          details: {
-            mcpServer: "bundleProbe",
-            mcpTool: "bundle_probe",
-          },
-        }),
-      },
-    ],
-    dispose: async () => {},
-  }),
+  materializeBundleMcpToolsForRun: async () => {
+    const tool = {
+      name: "bundleProbe__bundle_probe",
+      label: "bundle_probe",
+      description: "Bundle MCP probe",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({
+        content: [{ type: "text", text: "FROM-BUNDLE" }],
+        details: {
+          mcpServer: "bundleProbe",
+          mcpTool: "bundle_probe",
+        },
+      }),
+    };
+    setPluginToolMeta(tool as any, { pluginId: "bundle-mcp", optional: false });
+    return {
+      tools: [tool],
+      dispose: async () => {},
+    };
+  },
 }));
 
 vi.mock("@mariozechner/pi-ai", async () => {
@@ -249,6 +252,67 @@ describe("runEmbeddedPiAgent bundle MCP e2e", () => {
           : [],
       );
       expect(toolResultText.some((text) => text.includes("FROM-BUNDLE"))).toBe(true);
+    },
+  );
+
+  it(
+    "includes bundle MCP tools in coding profile",
+    { timeout: E2E_TIMEOUT_MS },
+    async () => {
+      streamCallCount = 0;
+      observedContexts = [];
+
+      const sessionFile = path.join(workspaceDir, "session-bundle-mcp-coding-profile.jsonl");
+      const cfg = createEmbeddedPiRunnerOpenAiConfig(["mock-bundle-mcp"]);
+      cfg.tools = { profile: "coding" };
+
+      const result = await runEmbeddedPiAgent({
+        sessionId: "bundle-mcp-coding-profile",
+        sessionKey: "agent:test:bundle-mcp-coding-profile",
+        sessionFile,
+        workspaceDir,
+        config: cfg,
+        prompt: "Use the bundle MCP tool and report its result.",
+        provider: "openai",
+        model: "mock-bundle-mcp",
+        timeoutMs: 30_000,
+        agentDir,
+        runId: "run-bundle-mcp-coding-profile",
+        enqueue: immediateEnqueue,
+      });
+
+      expect(result.payloads?.[0]?.text).toContain("BUNDLE MCP OK FROM-BUNDLE");
+    },
+  );
+
+  it(
+    "excludes bundle MCP tools from minimal profile",
+    { timeout: E2E_TIMEOUT_MS },
+    async () => {
+      streamCallCount = 0;
+      observedContexts = [];
+
+      const sessionFile = path.join(workspaceDir, "session-bundle-mcp-minimal-profile.jsonl");
+      const cfg = createEmbeddedPiRunnerOpenAiConfig(["mock-bundle-mcp"]);
+      cfg.tools = { profile: "minimal" };
+
+      const result = await runEmbeddedPiAgent({
+        sessionId: "bundle-mcp-minimal-profile",
+        sessionKey: "agent:test:bundle-mcp-minimal-profile",
+        sessionFile,
+        workspaceDir,
+        config: cfg,
+        prompt: "Try to use the bundle MCP tool.",
+        provider: "openai",
+        model: "mock-bundle-mcp",
+        timeoutMs: 30_000,
+        agentDir,
+        runId: "run-bundle-mcp-minimal-profile",
+        enqueue: immediateEnqueue,
+      });
+
+      // In minimal profile, bundle MCP tools should not be available
+      expect(result.payloads?.[0]?.text).not.toContain("FROM-BUNDLE");
     },
   );
 });
