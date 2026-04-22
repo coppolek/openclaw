@@ -9,7 +9,6 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { filterHeartbeatPairs } from "../../../auto-reply/heartbeat-filter.js";
 import { resolveChannelCapabilities } from "../../../config/channel-capabilities.js";
-import { isEmbeddedMode } from "../../../infra/embedded-mode.js";
 import { formatErrorMessage } from "../../../infra/errors.js";
 import { resolveHeartbeatSummaryForAgent } from "../../../infra/heartbeat-summary.js";
 import { getMachineDisplayName } from "../../../infra/machine-name.js";
@@ -81,16 +80,15 @@ import {
 } from "../../pi-embedded-helpers.js";
 import { subscribeEmbeddedPiSession } from "../../pi-embedded-subscribe.js";
 import { createPreparedEmbeddedPiSettingsManager } from "../../pi-project-settings.js";
-import {
-  applyPiAutoCompactionGuard,
-  applyPiCompactionSettingsFromConfig,
-} from "../../pi-settings.js";
+import { applyPiAutoCompactionGuard } from "../../pi-settings.js";
 import {
   createClientToolNameConflictError,
   findClientToolNameConflicts,
   toClientToolDefinitions,
 } from "../../pi-tool-definition-adapter.js";
 import { createOpenClawCodingTools, resolveToolLoopDetectionConfig } from "../../pi-tools.js";
+import { PLAN_ARCHETYPE_PROMPT } from "../../plan-mode/plan-archetype-prompt.js";
+import { PLAN_MODE_REFERENCE_CARD } from "../../plan-mode/reference-card.js";
 import { wrapStreamFnTextTransforms } from "../../plugin-text-transforms.js";
 import { describeProviderRequestRoutingSummary } from "../../provider-attribution.js";
 import { registerProviderStreamForModel } from "../../provider-stream.js";
@@ -138,11 +136,7 @@ import {
   type PromptCacheChange,
 } from "../prompt-cache-observability.js";
 import { resolveCacheRetention } from "../prompt-cache-retention.js";
-import {
-  normalizeAssistantReplayContent,
-  sanitizeSessionHistory,
-  validateReplayTurns,
-} from "../replay-history.js";
+import { sanitizeSessionHistory, validateReplayTurns } from "../replay-history.js";
 import { observeReplayMetadata, replayMetadataFromState } from "../replay-state.js";
 import {
   clearActiveEmbeddedRun,
@@ -153,7 +147,7 @@ import {
 import { buildEmbeddedSandboxInfo } from "../sandbox-info.js";
 import { prewarmSessionFile, trackSessionManagerAccess } from "../session-manager-cache.js";
 import { prepareSessionManagerForRun } from "../session-manager-init.js";
-import { resolveEmbeddedRunSkillEntries } from "../skills-runtime.js";
+import { applySkillPlanTemplateSeed, resolveEmbeddedRunSkillEntries } from "../skills-runtime.js";
 import {
   describeEmbeddedAgentStreamStrategy,
   resetEmbeddedAgentBaseStreamFnCacheForTest,
@@ -167,7 +161,7 @@ import {
   createSystemPromptOverride,
 } from "../system-prompt.js";
 import { dropThinkingBlocks } from "../thinking.js";
-import { collectAllowedToolNames, toSessionToolAllowlist } from "../tool-name-allowlist.js";
+import { collectAllowedToolNames } from "../tool-name-allowlist.js";
 import {
   installContextEngineLoopHook,
   installToolResultContextGuard,
@@ -183,7 +177,6 @@ import {
 import { splitSdkTools } from "../tool-split.js";
 import { mapThinkingLevel } from "../utils.js";
 import { flushPendingToolResultsAfterIdle } from "../wait-for-idle-before-flush.js";
-import { createEmbeddedAgentSessionWithResourceLoader } from "./attempt-session.js";
 export { buildContextEnginePromptCacheInfo } from "./attempt.context-engine-helpers.js";
 import {
   resolveAttemptWorkspaceBootstrapRouting,
@@ -409,17 +402,6 @@ function summarizeSessionContext(messages: AgentMessage[]): {
   };
 }
 
-export function applyEmbeddedAttemptToolsAllow<T extends { name: string }>(
-  tools: T[],
-  toolsAllow?: string[],
-): T[] {
-  if (!toolsAllow || toolsAllow.length === 0) {
-    return tools;
-  }
-  const allowSet = new Set(toolsAllow);
-  return tools.filter((tool) => allowSet.has(tool.name));
-}
-
 export async function runEmbeddedAttempt(
   params: EmbeddedRunAttemptParams,
 ): Promise<EmbeddedRunAttemptResult> {
@@ -469,6 +451,34 @@ export async function runEmbeddedAttempt(
           config: params.config,
         });
 
+    // Seed the agent's plan from any loaded skill's `planTemplate` (if
+    // present) BEFORE the first LLM turn (#67541). The seed is a no-op
+    // ONLY when no skill carries a template OR when an existing plan
+    // would be clobbered. PR-E review fix (Copilot #3096524299): when
+    // more than one skill is tied, the implementation seeds from the
+    // alpha-first skill (deterministic winner) and emits a
+    // `skill_plan_template_collision` warning listing the rejected
+    // ones — it does NOT skip seeding. Idempotency against
+    // `AgentRunContext.lastPlanSteps` lands in #67514's follow-up.
+    //
+    // We pass both `entries` and `skillsSnapshot`: in the snapshot-backed
+    // run path `entries` is empty (resolveEmbeddedRunSkillEntries skips
+    // re-loading) and the seeder reads `resolvedPlanTemplates` from the
+    // snapshot instead. Without this fallback the seed would silently
+    // no-op in production sessions.
+    applySkillPlanTemplateSeed({
+      entries: skillEntries ?? [],
+      ...(params.skillsSnapshot ? { skillsSnapshot: params.skillsSnapshot } : {}),
+      runId: params.runId,
+      sessionKey: params.sessionKey,
+      config: params.config,
+      // Forward the run-scoped event callback so callback-only consumers
+      // (e.g. the auto-reply pipeline) see the seeded plan event the same
+      // way they see subsequent update_plan events. Codex P2 #67541
+      // r3096399082/r3096435183.
+      ...(params.onAgentEvent ? { onAgentEvent: params.onAgentEvent } : {}),
+    });
+
     const skillsPrompt = resolveSkillsPromptForRun({
       skillsSnapshot: params.skillsSnapshot,
       entries: shouldLoadSkillEntries ? skillEntries : undefined,
@@ -489,6 +499,82 @@ export async function runEmbeddedAttempt(
 
     const sessionLabel = params.sessionKey ?? params.sessionId;
     const contextInjectionMode = resolveContextInjectionMode(params.config);
+    // PR-8 follow-up: plan-mode awareness must reach the agent on EVERY
+    // attempt regardless of whether the agent has a systemPromptOverride
+    // in place (Eva, Black Panther, custom personas all set their own
+    // prompt and would otherwise never see the rules). Built once here
+    // and prepended to the final appendPrompt below so it lands no
+    // matter which branch produced the base prompt.
+    //
+    // Consolidation pass note: this is the pre-iter-1 version of the
+    // plan-mode prompt block. Later iter-1/2/3 commits replace it
+    // with the full PLAN_ARCHETYPE_PROMPT + PLAN_MODE_REFERENCE_CARD
+    // injection at the planMode-active branch below. Keeping this
+    // variable here so b5fb54f042's intent (always-inject regardless
+    // of override) survives, with the richer content layered on top
+    // by later commits.
+    const planModeFeatureEnabled = params.config?.agents?.defaults?.planMode?.enabled === true;
+    const planModeAppendPrompt =
+      params.planMode === "plan"
+        ? [
+            "═══ PLAN MODE ACTIVE ═══",
+            "",
+            "This session IS in plan mode RIGHT NOW. Every user message in this session is a plan-mode message. Your action selection on this turn must reflect that.",
+            "",
+            "ACTION CONTRACT — when the user says anything that requests a plan, iteration, revision, or 'try again' / 'iterate' / 'fresh' / 'next attempt':",
+            "1. Briefly acknowledge in one short sentence (optional).",
+            '2. CALL `exit_plan_mode(title="…", summary="…", plan=[...])` IN THE SAME TURN. `title` and `plan` are required; non-trivial plans should also include `analysis`, `assumptions`, `risks`, `verification`.',
+            "3. Stop after the tool call. Do NOT respond with any further chat text in that turn.",
+            "",
+            "If you skip step 2 — if you respond with chat-only acknowledgement — you have failed the plan-mode contract and the user has to re-prompt you, which they should not have to do. Treat acknowledgement-without-tool-call as a defect, not as 'staying conversational'.",
+            "",
+            "Investigation phase (when needed):",
+            "- Use read-only tools first (read, web_search, web_fetch, lcm_grep, lcm_describe, lcm_expand_query). Track investigation in update_plan.",
+            "- For LOGS: start at the END (tail), use grep + time-window filters. Reading the first 100/400 lines of a multi-MB rolling log is almost always wrong — start with `tail -n 100`, then narrow by marker (e.g. `grep '[plan-mode/'`) or timestamp. Only widen to full file if the recent slice is insufficient.",
+            "- Use `ask_user_question` ONLY for tradeoffs you can't resolve via local investigation.",
+            "- Then call exit_plan_mode with the proposed plan, then STOP (no chat text after the tool call).",
+            "",
+            "Hard rules:",
+            "- Mutating tools (write, edit, exec/bash with side-effects, apply_patch) are BLOCKED by the runtime — calling them wastes a turn.",
+            "- Do NOT write the plan as a markdown list in chat — it MUST go through exit_plan_mode so the user gets Accept/Edit/Reject buttons.",
+            "- Do NOT call enter_plan_mode (you're already in plan mode — it's a no-op).",
+            "- After `exit_plan_mode` in this turn: STOP. Do not emit any further chat text. The next turn (after user approval) delivers `[PLAN_DECISION]: approved` and you can resume execution then. Trailing chat poisons the approval card lifecycle.",
+            "",
+            "═════════════════════════",
+            "",
+            // PR-10: append the decision-complete plan archetype
+            // standard so the agent produces Opus-quality plans
+            // (analysis + assumptions + risks + verification) instead
+            // of bare step lists.
+            PLAN_ARCHETYPE_PROMPT,
+            "",
+            // Iter-3 D1: append the plan-mode reference card so the
+            // agent ALWAYS sees the state diagram + tool contract +
+            // [PLAN_*]: tag taxonomy + slash-command surface + common
+            // pitfalls + debugging tips on every in-mode turn.
+            // Eliminates the 2-turn learning curve on fresh installs.
+            // Companion artifact: extensions/plan-mode-101/SKILL.md
+            // (D7) carries the same content for normal-mode discovery.
+            PLAN_MODE_REFERENCE_CARD,
+          ].join("\n")
+        : planModeFeatureEnabled
+          ? [
+              "═══ PLAN MODE AVAILABLE ═══",
+              "",
+              "Plan mode is available on this session but not currently active. When the user asks for a NEW plan / debugging-plan / refactor-plan / 'next plan' / a plan-first workflow, call `enter_plan_mode` to start a fresh planning cycle. The runtime will arm the mutation gate and you should then:",
+              "",
+              "1. Investigate read-only (use update_plan for in-progress tracking).",
+              "2. Call `exit_plan_mode` with the proposed plan to surface Accept/Edit/Reject buttons to the user.",
+              "3. After approval, mutating tools unlock and you execute.",
+              "",
+              "If the user is already executing an approved plan and asks you to keep going, do NOT re-enter plan mode — just continue executing the work.",
+              "",
+              "If the user asks a simple question or for a quick non-planning answer, do NOT enter plan mode. Plan mode is for multi-step proposals that benefit from explicit user approval before mutations.",
+              "",
+              "═════════════════════════════",
+            ].join("\n")
+          : "";
+
     const agentDir = params.agentDir ?? resolveOpenClawAgentDir();
     const toolsRaw = params.disableTools
       ? []
@@ -519,6 +605,23 @@ export async function runEmbeddedAttempt(
             sessionKey: sandboxSessionKey,
             sessionId: params.sessionId,
             runId: params.runId,
+            // PR-8: thread plan-mode state through so the
+            // before-tool-call hook arms the mutation gate without
+            // re-loading the session store on every tool call.
+            ...(params.planMode ? { planMode: params.planMode } : {}),
+            // Bug 3+4 fix: also forward the live-read accessor so the
+            // hook can re-check after mid-turn approval transitions.
+            ...(params.getLatestPlanMode ? { getLatestPlanMode: params.getLatestPlanMode } : {}),
+            // Cherry-pick of b6b2783ba3 (acceptEdits gate): thread the
+            // live-read accessor for postApprovalPermissions.acceptEdits.
+            // The rest of the upstream commit's attempt.ts diff (~150
+            // lines: ollama-runtime imports + bootstrap refactor + dead-
+            // export removals) was unrelated WIP from the originating
+            // committer's working tree and was stripped during the
+            // cherry-pick. Only this 3-line threading is intended.
+            ...(params.getLatestAcceptEdits
+              ? { getLatestAcceptEdits: params.getLatestAcceptEdits }
+              : {}),
             agentDir,
             workspaceDir: effectiveWorkspace,
             // When sandboxing uses a copied workspace (`ro` or `none`), effectiveWorkspace points
@@ -544,7 +647,6 @@ export async function runEmbeddedAttempt(
             requireExplicitMessageTarget:
               params.requireExplicitMessageTarget ?? isSubagentSessionKey(params.sessionKey),
             disableMessageTool: params.disableMessageTool,
-            forceMessageTool: params.forceMessageTool,
             onYield: (message) => {
               yieldDetected = true;
               yieldMessage = message;
@@ -553,7 +655,11 @@ export async function runEmbeddedAttempt(
               abortSessionForYield?.();
             },
           });
-          return applyEmbeddedAttemptToolsAllow(allTools, params.toolsAllow);
+          if (params.toolsAllow && params.toolsAllow.length > 0) {
+            const allowSet = new Set(params.toolsAllow);
+            return allTools.filter((tool) => allowSet.has(tool.name));
+          }
+          return allTools;
         })();
     const toolsEnabled = supportsModelTools(params.model);
     const bootstrapHasFileAccess = toolsEnabled && toolsRaw.some((tool) => tool.name === "read");
@@ -624,19 +730,11 @@ export async function runEmbeddedAttempt(
       seenSignatures: params.bootstrapPromptWarningSignaturesSeen,
       previousSignature: params.bootstrapPromptWarningSignature,
     });
-    const workspaceNotes: string[] = [];
-    if (
-      hookAdjustedBootstrapFiles.some(
-        (file) => file.name === DEFAULT_BOOTSTRAP_FILENAME && !file.missing,
-      )
-    ) {
-      workspaceNotes.push("Reminder: commit your changes in this workspace after edits.");
-    }
-    if (isEmbeddedMode()) {
-      workspaceNotes.push(
-        "Running in local embedded mode (no gateway). Most tools work locally. Gateway-dependent tools (canvas, nodes, cron, message, sessions_send, sessions_spawn, gateway) are unavailable. Subagent kill/steer require a gateway. Do not attempt to read gateway-specific files such as sessions.json, gateway.log, or gateway.pid.",
-      );
-    }
+    const workspaceNotes = hookAdjustedBootstrapFiles.some(
+      (file) => file.name === DEFAULT_BOOTSTRAP_FILENAME && !file.missing,
+    )
+      ? ["Reminder: commit your changes in this workspace after edits."]
+      : undefined;
 
     const { defaultAgentId } = resolveSessionAgentIds({
       sessionKey: params.sessionKey,
@@ -889,7 +987,7 @@ export async function runEmbeddedAttempt(
         skillsPrompt: effectiveSkillsPrompt,
         docsPath: docsPath ?? undefined,
         ttsHint,
-        workspaceNotes: workspaceNotes?.length ? workspaceNotes : undefined,
+        workspaceNotes,
         reactionGuidance,
         promptMode: effectivePromptMode,
         acpEnabled: params.config?.acp?.enabled !== false,
@@ -906,6 +1004,14 @@ export async function runEmbeddedAttempt(
         memoryCitationsMode: params.config?.memory?.citations,
         promptContribution,
       });
+    // Prepend plan-mode rules so they reach the agent regardless of
+    // whether systemPromptOverride replaced the default prompt — without
+    // this Eva/Black Panther/etc. (custom personas) silently lose
+    // plan-mode awareness and write the plan as chat text instead of
+    // calling exit_plan_mode.
+    const promptWithPlanMode = planModeAppendPrompt
+      ? `${planModeAppendPrompt}\n\n${builtAppendPrompt}`
+      : builtAppendPrompt;
     const appendPrompt = transformProviderSystemPrompt({
       provider: params.provider,
       config: params.config,
@@ -920,7 +1026,7 @@ export async function runEmbeddedAttempt(
         runtimeChannel,
         runtimeCapabilities,
         agentId: sessionAgentId,
-        systemPrompt: builtAppendPrompt,
+        systemPrompt: promptWithPlanMode,
       },
     });
     const systemPromptReport = buildSystemPromptReport({
@@ -1044,20 +1150,18 @@ export async function runEmbeddedAttempt(
         modelId: params.modelId,
         model: params.model,
       });
-      const resourceLoader = new DefaultResourceLoader({
-        cwd: resolvedWorkspace,
-        agentDir,
-        settingsManager,
-        extensionFactories,
-      });
-      await resourceLoader.reload();
-      // DefaultResourceLoader.reload() rehydrates settings from disk and can drop OpenClaw
-      // compaction overrides applied in createPreparedEmbeddedPiSettingsManager.
-      applyPiCompactionSettingsFromConfig({
-        settingsManager,
-        cfg: params.config,
-        contextTokenBudget: params.contextTokenBudget,
-      });
+      // Only create an explicit resource loader when there are extension factories
+      // to register; otherwise let createAgentSession use its built-in default.
+      let resourceLoader: DefaultResourceLoader | undefined;
+      if (extensionFactories.length > 0) {
+        resourceLoader = new DefaultResourceLoader({
+          cwd: resolvedWorkspace,
+          agentDir,
+          settingsManager,
+          extensionFactories,
+        });
+        await resourceLoader.reload();
+      }
 
       // Get hook runner early so it's available when creating tools
       const hookRunner = getGlobalHookRunner();
@@ -1121,39 +1225,25 @@ export async function runEmbeddedAttempt(
         : [];
 
       const allCustomTools = [...customTools, ...clientToolDefs];
-      // Pi's `tools` option is a name allowlist, not the tool definitions.
-      // OpenClaw registers local tools through `customTools`, so passing the
-      // same names here keeps custom tools executable instead of silently
-      // filtering them out with an empty allowlist.
-      const sessionToolAllowlist = toSessionToolAllowlist(allowedToolNames);
 
-      ({ session } = await createEmbeddedAgentSessionWithResourceLoader({
-        createAgentSession: async (options) =>
-          await createAgentSession(options as Parameters<typeof createAgentSession>[0]),
-        options: {
-          cwd: resolvedWorkspace,
-          agentDir,
-          authStorage: params.authStorage,
-          modelRegistry: params.modelRegistry,
-          model: params.model,
-          thinkingLevel: mapThinkingLevel(params.thinkLevel),
-          tools: sessionToolAllowlist,
-          customTools: allCustomTools,
-          sessionManager,
-          settingsManager,
-          resourceLoader,
-        },
+      ({ session } = await createAgentSession({
+        cwd: resolvedWorkspace,
+        agentDir,
+        authStorage: params.authStorage,
+        modelRegistry: params.modelRegistry,
+        model: params.model,
+        thinkingLevel: mapThinkingLevel(params.thinkLevel),
+        tools: builtInTools,
+        customTools: allCustomTools,
+        sessionManager,
+        settingsManager,
+        resourceLoader,
       }));
       applySystemPromptOverrideToSession(session, systemPromptText);
       if (!session) {
         throw new Error("Embedded agent session missing");
       }
       const activeSession = session;
-      if (typeof activeSession.agent.convertToLlm === "function") {
-        const baseConvertToLlm = activeSession.agent.convertToLlm.bind(activeSession.agent);
-        activeSession.agent.convertToLlm = async (messages) =>
-          await baseConvertToLlm(normalizeAssistantReplayContent(messages));
-      }
       let prePromptMessageCount = activeSession.messages.length;
       abortSessionForYield = () => {
         yieldAbortSettled = Promise.resolve(activeSession.abort());
@@ -1237,7 +1327,6 @@ export async function runEmbeddedAttempt(
       const shouldUseWebSocketTransport = shouldUseOpenAIWebSocketTransport({
         provider: params.provider,
         modelApi: params.model.api,
-        modelBaseUrl: params.model.baseUrl,
       });
       const wsApiKey = shouldUseWebSocketTransport
         ? await resolveEmbeddedAgentApiKey({
@@ -2194,14 +2283,8 @@ export async function runEmbeddedAttempt(
           }
 
           if (!skipPromptSubmission) {
-            const normalizedReplayMessages = normalizeAssistantReplayContent(
-              activeSession.messages,
-            );
-            if (normalizedReplayMessages !== activeSession.messages) {
-              activeSession.agent.state.messages = normalizedReplayMessages;
-            }
             finalPromptText = effectivePrompt;
-            const btwSnapshotMessages = normalizedReplayMessages.slice(-MAX_BTW_SNAPSHOT_MESSAGES);
+            const btwSnapshotMessages = activeSession.messages.slice(-MAX_BTW_SNAPSHOT_MESSAGES);
             updateActiveEmbeddedRunSnapshot(params.sessionId, {
               transcriptLeafId,
               messages: btwSnapshotMessages,
