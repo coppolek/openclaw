@@ -359,6 +359,13 @@ By default, OpenClaw watches skill folders and bumps the skills snapshot when `S
 }
 ```
 
+If your filesystem sometimes misses native file events, you can force the skills
+watcher to use polling instead:
+
+```bash
+OPENCLAW_SKILLS_WATCH_POLLING=1 OPENCLAW_SKILLS_WATCH_POLL_INTERVAL_MS=1000 pnpm openclaw gateway
+```
+
 ## Token impact (skills list)
 
 When skills are eligible, OpenClaw injects a compact XML list of available skills into the system prompt (via `formatSkillsForPrompt` in `pi-coding-agent`). The cost is deterministic:

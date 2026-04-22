@@ -8,6 +8,8 @@ const watchMock = vi.fn(() => ({
 }));
 
 let refreshModule: typeof import("./refresh.js");
+let previousPollingEnv: string | undefined;
+let previousPollingIntervalEnv: string | undefined;
 
 vi.mock("chokidar", () => ({
   default: { watch: watchMock },
@@ -24,9 +26,23 @@ describe("ensureSkillsWatcher", () => {
 
   beforeEach(() => {
     watchMock.mockClear();
+    previousPollingEnv = process.env.OPENCLAW_SKILLS_WATCH_POLLING;
+    previousPollingIntervalEnv = process.env.OPENCLAW_SKILLS_WATCH_POLL_INTERVAL_MS;
+    delete process.env.OPENCLAW_SKILLS_WATCH_POLLING;
+    delete process.env.OPENCLAW_SKILLS_WATCH_POLL_INTERVAL_MS;
   });
 
   afterEach(async () => {
+    if (previousPollingEnv === undefined) {
+      delete process.env.OPENCLAW_SKILLS_WATCH_POLLING;
+    } else {
+      process.env.OPENCLAW_SKILLS_WATCH_POLLING = previousPollingEnv;
+    }
+    if (previousPollingIntervalEnv === undefined) {
+      delete process.env.OPENCLAW_SKILLS_WATCH_POLL_INTERVAL_MS;
+    } else {
+      process.env.OPENCLAW_SKILLS_WATCH_POLL_INTERVAL_MS = previousPollingIntervalEnv;
+    }
     await refreshModule.resetSkillsRefreshForTest();
   });
 
@@ -84,5 +100,51 @@ describe("ensureSkillsWatcher", () => {
     // Should NOT ignore normal skill files
     expect(ignored.some((re) => re.test("/tmp/.hidden/skills/index.md"))).toBe(false);
     expect(ignored.some((re) => re.test("/tmp/workspace/skills/my-skill/SKILL.md"))).toBe(false);
+  });
+
+  it("enables chokidar polling when requested by env", async () => {
+    process.env.OPENCLAW_SKILLS_WATCH_POLLING = "1";
+    process.env.OPENCLAW_SKILLS_WATCH_POLL_INTERVAL_MS = "1200";
+
+    refreshModule.ensureSkillsWatcher({ workspaceDir: "/tmp/workspace" });
+
+    const firstCall = (
+      watchMock.mock.calls as unknown as Array<
+        [
+          string[],
+          {
+            usePolling?: boolean;
+            interval?: number;
+          },
+        ]
+      >
+    )[0];
+    const opts = firstCall?.[1] ?? {};
+
+    expect(opts.usePolling).toBe(true);
+    expect(opts.interval).toBe(1200);
+  });
+
+  it("ignores invalid polling interval env values", async () => {
+    process.env.OPENCLAW_SKILLS_WATCH_POLLING = "1";
+    process.env.OPENCLAW_SKILLS_WATCH_POLL_INTERVAL_MS = "not-a-number";
+
+    refreshModule.ensureSkillsWatcher({ workspaceDir: "/tmp/workspace" });
+
+    const firstCall = (
+      watchMock.mock.calls as unknown as Array<
+        [
+          string[],
+          {
+            usePolling?: boolean;
+            interval?: number;
+          },
+        ]
+      >
+    )[0];
+    const opts = firstCall?.[1] ?? {};
+
+    expect(opts.usePolling).toBe(true);
+    expect(opts.interval).toBeUndefined();
   });
 });
