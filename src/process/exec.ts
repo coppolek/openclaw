@@ -2,7 +2,8 @@ import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { promisify } from "node:util";
+import { promisify, TextDecoder } from "node:util";
+import { decodeCapturedOutputBuffer, resolveWindowsConsoleEncoding } from "../node-host/invoke.js";
 import { danger, shouldLogVerbose } from "../globals.js";
 import { markOpenClawExecEnv } from "../infra/openclaw-exec-env.js";
 import { logDebug, logError } from "../logger.js";
@@ -135,20 +136,25 @@ export async function runExec(
 ): Promise<{ stdout: string; stderr: string }> {
   const options =
     typeof opts === "number"
-      ? { timeout: opts, encoding: "utf8" as const }
+      ? { timeout: opts, encoding: "buffer" as const }
       : {
           timeout: opts.timeoutMs,
           maxBuffer: opts.maxBuffer,
           cwd: opts.cwd,
-          encoding: "utf8" as const,
+          encoding: "buffer" as const,
         };
   try {
     const invocation = resolveChildProcessInvocation({ argv: [command, ...args] });
-    const { stdout, stderr } = await execFileAsync(invocation.command, invocation.args, {
+    const { stdout: stdoutBuffer, stderr: stderrBuffer } = await execFileAsync(invocation.command, invocation.args, {
       ...options,
       windowsHide: invocation.windowsHide,
       windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     });
+    
+    // Decode buffers using our improved Windows encoding function
+    const stdout = decodeCapturedOutputBuffer({ buffer: stdoutBuffer });
+    const stderr = decodeCapturedOutputBuffer({ buffer: stderrBuffer });
+    
     if (shouldLogVerbose()) {
       if (stdout.trim()) {
         logDebug(stdout.trim());
@@ -274,6 +280,10 @@ export async function runCommandWithTimeout(
   });
   // Spawn with inherited stdin (TTY) so tools like `pi` stay interactive when needed.
   return await new Promise((resolve, reject) => {
+    // Collect all output as buffers first, then decode using our improved decodeCapturedOutputBuffer
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -338,11 +348,11 @@ export async function runCommandWithTimeout(
     }
 
     child.stdout?.on("data", (d) => {
-      stdout += d.toString();
+      stdoutChunks.push(d as Buffer);
       armNoOutputTimer();
     });
     child.stderr?.on("data", (d) => {
-      stderr += d.toString();
+      stderrChunks.push(d as Buffer);
       armNoOutputTimer();
     });
     child.on("error", (err) => {
@@ -399,10 +409,17 @@ export async function runCommandWithTimeout(
             ? 124
             : resolvedCode
           : resolvedCode;
+      
+      // Decode buffers using our improved function
+      const stdoutBuffer = Buffer.concat(stdoutChunks);
+      const stderrBuffer = Buffer.concat(stderrChunks);
+      const decodedStdout = decodeCapturedOutputBuffer({ buffer: stdoutBuffer });
+      const decodedStderr = decodeCapturedOutputBuffer({ buffer: stderrBuffer });
+      
       resolve({
         pid: child.pid ?? undefined,
-        stdout,
-        stderr,
+        stdout: decodedStdout,
+        stderr: decodedStderr,
         code: normalizedCode,
         signal: resolvedSignal,
         killed: child.killed,

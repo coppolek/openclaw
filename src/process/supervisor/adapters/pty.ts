@@ -1,4 +1,5 @@
 import { killProcessTree } from "../../kill-tree.js";
+import { decodeCapturedOutputBuffer } from "../../../node-host/invoke.js";
 import type { ManagedRunStdin, SpawnProcessAdapter } from "../types.js";
 import { toStringEnv } from "./env.js";
 
@@ -133,7 +134,15 @@ export async function createPtyAdapter(params: {
   const onStdout = (listener: (chunk: string) => void) => {
     dataListener =
       pty.onData((chunk) => {
-        listener(chunk);
+        // chunk can be Buffer or string
+        if (Buffer.isBuffer(chunk)) {
+          // Use our improved decode with proper Windows encoding handling
+          const decoded = decodeCapturedOutputBuffer({ buffer: chunk });
+          listener(decoded);
+        } else {
+          // Already a string, pass through
+          listener(chunk);
+        }
       }) ?? null;
   };
 
