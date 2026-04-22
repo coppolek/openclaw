@@ -1,7 +1,16 @@
 import Foundation
-import JavaScriptCore
 
 enum ModelCatalogLoader {
+    private enum ContainerKind {
+        case object
+        case array
+    }
+
+    private struct ContainerState {
+        let kind: ContainerKind
+        var expectsObjectKey: Bool
+    }
+
     static var defaultPath: String {
         self.resolveDefaultPath()
     }
@@ -27,22 +36,7 @@ enum ModelCatalogLoader {
         }
         self.logger.debug("model catalog load start file=\(URL(fileURLWithPath: resolved.path).lastPathComponent)")
         let source = try String(contentsOfFile: resolved.path, encoding: .utf8)
-        let sanitized = self.sanitize(source: source)
-
-        let ctx = JSContext()
-        ctx?.exceptionHandler = { _, exception in
-            if let exception {
-                self.logger.warning("model catalog JS exception: \(exception)")
-            }
-        }
-        ctx?.evaluateScript(sanitized)
-        guard let rawModels = ctx?.objectForKeyedSubscript("MODELS")?.toDictionary() as? [String: Any] else {
-            self.logger.error("model catalog parse failed: MODELS missing")
-            throw NSError(
-                domain: "ModelCatalogLoader",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to parse models.generated.ts"])
-        }
+        let rawModels = try self.parseModels(source: source)
 
         var choices: [ModelChoice] = []
         for (provider, value) in rawModels {
@@ -138,22 +132,293 @@ enum ModelCatalogLoader {
         }
     }
 
-    private static func sanitize(source: String) -> String {
-        guard let exportRange = source.range(of: "export const MODELS"),
-              let firstBrace = source[exportRange.upperBound...].firstIndex(of: "{"),
-              let lastBrace = source.lastIndex(of: "}")
-        else {
-            return "var MODELS = {}"
+    private static func parseModels(source: String) throws -> [String: Any] {
+        guard let exportRange = self.modelsExportRange(in: source) else {
+            return [:]
         }
-        var body = String(source[firstBrace...lastBrace])
-        body = body.replacingOccurrences(
-            of: #"(?m)\bsatisfies\s+[^,}\n]+"#,
-            with: "",
-            options: .regularExpression)
-        body = body.replacingOccurrences(
-            of: #"(?m)\bas\s+[^;,\n]+"#,
-            with: "",
-            options: .regularExpression)
-        return "var MODELS = \(body);"
+        guard let objectLiteral = self.extractModelsObjectLiteral(from: source, exportRange: exportRange) else {
+            self.logger.error("model catalog parse failed: malformed MODELS export")
+            throw self.invalidCatalogError()
+        }
+        // Keep the loader data-only: normalize the known object-literal subset and let JSON parsing
+        // reject anything expression-like instead of executing user-controlled JavaScript.
+        let normalized = self.normalizeObjectLiteralForJSON(objectLiteral)
+        guard let data = normalized.data(using: .utf8) else {
+            self.logger.error("model catalog parse failed: unsupported syntax")
+            throw self.invalidCatalogError()
+        }
+        let object: Any
+        do {
+            object = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            self.logger.error("model catalog parse failed: unsupported syntax")
+            throw self.invalidCatalogError()
+        }
+        guard let root = object as? [String: Any] else {
+            self.logger.error("model catalog parse failed: MODELS root is not an object")
+            throw self.invalidCatalogError()
+        }
+        return root
+    }
+
+    private static func modelsExportRange(in source: String) -> Range<String.Index>? {
+        source.range(of: "export const MODELS")
+    }
+
+    private static func extractModelsObjectLiteral(
+        from source: String,
+        exportRange: Range<String.Index>) -> String?
+    {
+        guard let firstBrace = source[exportRange.upperBound...].firstIndex(of: "{"),
+              let lastBrace = self.findMatchingClosingBrace(in: source, openingBrace: firstBrace)
+        else {
+            return nil
+        }
+        return String(source[firstBrace...lastBrace])
+    }
+
+    private static func findMatchingClosingBrace(in source: String, openingBrace: String.Index) -> String.Index? {
+        var depth = 0
+        var activeQuote: Character?
+        var isEscaping = false
+        var index = openingBrace
+        while index < source.endIndex {
+            let ch = source[index]
+            if let quote = activeQuote {
+                if isEscaping {
+                    isEscaping = false
+                } else if ch == "\\" {
+                    isEscaping = true
+                } else if ch == quote {
+                    activeQuote = nil
+                }
+            } else {
+                if ch == "\"" || ch == "'" || ch == "`" {
+                    activeQuote = ch
+                } else if ch == "{" {
+                    depth += 1
+                } else if ch == "}" {
+                    depth -= 1
+                    if depth == 0 {
+                        return index
+                    }
+                }
+            }
+            index = source.index(after: index)
+        }
+        return nil
+    }
+
+    private static func normalizeObjectLiteralForJSON(_ objectLiteral: String) -> String {
+        var body = ""
+        var containers: [ContainerState] = []
+        var activeQuote: Character?
+        var isEscaping = false
+        var index = objectLiteral.startIndex
+
+        while index < objectLiteral.endIndex {
+            let ch = objectLiteral[index]
+            if let quote = activeQuote {
+                body.append(ch)
+                if isEscaping {
+                    isEscaping = false
+                } else if ch == "\\" {
+                    isEscaping = true
+                } else if ch == quote {
+                    activeQuote = nil
+                }
+                index = objectLiteral.index(after: index)
+                continue
+            }
+
+            if ch == "\"" || ch == "'" || ch == "`" {
+                activeQuote = ch
+                body.append(ch)
+                index = objectLiteral.index(after: index)
+                continue
+            }
+
+            if let assertionEnd = self.typeAssertionEnd(in: objectLiteral, at: index, containers: containers) {
+                index = assertionEnd
+                continue
+            }
+
+            if self.isNumericSeparator(in: objectLiteral, at: index) {
+                index = objectLiteral.index(after: index)
+                continue
+            }
+
+            if let bareKey = self.readBareObjectKey(in: objectLiteral, at: index, containers: containers) {
+                body.append("\"\(bareKey.identifier)\"")
+                index = bareKey.endIndex
+                continue
+            }
+
+            switch ch {
+            case "{":
+                containers.append(ContainerState(kind: .object, expectsObjectKey: true))
+                body.append(ch)
+            case "[":
+                containers.append(ContainerState(kind: .array, expectsObjectKey: false))
+                body.append(ch)
+            case "}":
+                if !containers.isEmpty {
+                    containers.removeLast()
+                }
+                body.append(ch)
+            case "]":
+                if !containers.isEmpty {
+                    containers.removeLast()
+                }
+                body.append(ch)
+            case ":":
+                if let lastIndex = containers.indices.last, containers[lastIndex].kind == .object {
+                    containers[lastIndex].expectsObjectKey = false
+                }
+                body.append(ch)
+            case ",":
+                if let next = self.nextNonWhitespaceIndex(in: objectLiteral, after: index),
+                   objectLiteral[next] == "}" || objectLiteral[next] == "]"
+                {
+                    index = objectLiteral.index(after: index)
+                    continue
+                }
+                if let lastIndex = containers.indices.last, containers[lastIndex].kind == .object {
+                    containers[lastIndex].expectsObjectKey = true
+                }
+                body.append(ch)
+            default:
+                body.append(ch)
+            }
+
+            index = objectLiteral.index(after: index)
+        }
+
+        return body
+    }
+
+    private static func nextNonWhitespaceIndex(in source: String, after index: String.Index) -> String.Index? {
+        var cursor = source.index(after: index)
+        while cursor < source.endIndex {
+            if !source[cursor].isWhitespace {
+                return cursor
+            }
+            cursor = source.index(after: cursor)
+        }
+        return nil
+    }
+
+    private static func previousNonWhitespaceIndex(in source: String, before index: String.Index) -> String.Index? {
+        guard index > source.startIndex else { return nil }
+        var cursor = source.index(before: index)
+        while true {
+            if !source[cursor].isWhitespace {
+                return cursor
+            }
+            guard cursor > source.startIndex else { return nil }
+            cursor = source.index(before: cursor)
+        }
+    }
+
+    private static func isIdentifierStart(_ ch: Character) -> Bool {
+        ch == "_" || ch.isLetter
+    }
+
+    private static func isIdentifierBody(_ ch: Character) -> Bool {
+        self.isIdentifierStart(ch) || ch.isNumber
+    }
+
+    private static func readBareObjectKey(
+        in source: String,
+        at index: String.Index,
+        containers: [ContainerState]) -> (identifier: String, endIndex: String.Index)?
+    {
+        guard let top = containers.last,
+              top.kind == .object,
+              top.expectsObjectKey,
+              self.isIdentifierStart(source[index])
+        else {
+            return nil
+        }
+
+        var end = source.index(after: index)
+        while end < source.endIndex, self.isIdentifierBody(source[end]) {
+            end = source.index(after: end)
+        }
+
+        var cursor = end
+        while cursor < source.endIndex, source[cursor].isWhitespace {
+            cursor = source.index(after: cursor)
+        }
+        guard cursor < source.endIndex, source[cursor] == ":" else { return nil }
+        return (String(source[index..<end]), end)
+    }
+
+    private static func typeAssertionEnd(
+        in source: String,
+        at index: String.Index,
+        containers: [ContainerState]) -> String.Index?
+    {
+        if let top = containers.last, top.kind == .object, top.expectsObjectKey {
+            return nil
+        }
+        guard let previous = self.previousNonWhitespaceIndex(in: source, before: index),
+              source[previous] != ":"
+        else {
+            return nil
+        }
+
+        let keywordLength: Int
+        if self.hasKeyword("as", in: source, at: index) {
+            keywordLength = 2
+        } else if self.hasKeyword("satisfies", in: source, at: index) {
+            keywordLength = 9
+        } else {
+            return nil
+        }
+
+        var cursor = source.index(index, offsetBy: keywordLength)
+        guard cursor < source.endIndex, source[cursor].isWhitespace else { return nil }
+        while cursor < source.endIndex {
+            let ch = source[cursor]
+            if ch == "," || ch == "}" || ch == "]" || ch.isNewline {
+                return cursor
+            }
+            cursor = source.index(after: cursor)
+        }
+        return cursor
+    }
+
+    private static func hasKeyword(_ keyword: String, in source: String, at index: String.Index) -> Bool {
+        guard source[index...].hasPrefix(keyword) else { return false }
+        let end = source.index(index, offsetBy: keyword.count)
+        let hasLeftBoundary: Bool
+        if index == source.startIndex {
+            hasLeftBoundary = true
+        } else {
+            let previous = source[source.index(before: index)]
+            hasLeftBoundary = !self.isIdentifierBody(previous)
+        }
+        let hasRightBoundary = end == source.endIndex || !self.isIdentifierBody(source[end])
+        return hasLeftBoundary && hasRightBoundary
+    }
+
+    private static func isNumericSeparator(in source: String, at index: String.Index) -> Bool {
+        guard source[index] == "_",
+              index > source.startIndex
+        else {
+            return false
+        }
+        let previous = source[source.index(before: index)]
+        let next = source.index(after: index)
+        guard next < source.endIndex else { return false }
+        return previous.isNumber && source[next].isNumber
+    }
+
+    private static func invalidCatalogError() -> NSError {
+        NSError(
+            domain: "ModelCatalogLoader",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Failed to parse models.generated.ts"])
     }
 }
