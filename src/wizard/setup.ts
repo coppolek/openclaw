@@ -507,6 +507,10 @@ export async function runSetupWizard(
     throw new WizardCancelledError("auth choice is required");
   }
 
+  if (authChoice === undefined) {
+    throw new Error("Auth choice is required for local setup.");
+  }
+
   if (authChoice === "custom-api-key") {
     const { promptCustomApiConfig } = await import("../commands/onboard-custom.js");
     const customResult = await promptCustomApiConfig({
