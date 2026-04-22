@@ -201,9 +201,12 @@ export async function getStatusSummary(
             model,
             // When the last run used a fallback model, ignore its stored
             // context window so utilization is computed against the displayed
-            // (primary/override) model's window. See #47705.
+            // (primary/override) model's window, but preserve any explicit
+            // agents.defaults.contextTokens cap. See #47705.
             contextTokensOverride:
-              entry && entry.modelIsFromFallback ? undefined : entry?.contextTokens,
+              entry && entry.modelIsFromFallback
+                ? (cfg.agents?.defaults?.contextTokens ?? undefined)
+                : entry?.contextTokens,
             fallbackContextTokens: configContextTokens ?? undefined,
             allowAsyncLoad: false,
           }) ?? null;
