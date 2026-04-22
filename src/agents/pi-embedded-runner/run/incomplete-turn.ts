@@ -240,7 +240,8 @@ export function isReasoningOnlyAssistantTurn(message: unknown): boolean {
   if (!message || typeof message !== "object") {
     return false;
   }
-  return assessLastAssistantMessage(message as AgentMessage) === "incomplete-text";
+  const assistant = message as AgentMessage;
+  return assessLastAssistantMessage(assistant) === "incomplete-text";
 }
 
 function isEmptyResponseAssistantTurn(params: {
@@ -303,7 +304,7 @@ export function resolveReasoningOnlyRetryInstruction(params: {
   }
 
   if (
-    !shouldApplyPlanningOnlyRetryGuard({
+    !shouldApplyIncompleteTurnRetryGuard({
       provider: params.provider,
       modelId: params.modelId,
     })
@@ -338,7 +339,7 @@ export function resolveEmptyResponseRetryInstruction(params: {
   }
 
   if (
-    !shouldApplyPlanningOnlyRetryGuard({
+    !shouldApplyIncompleteTurnRetryGuard({
       provider: params.provider,
       modelId: params.modelId,
     })
@@ -356,6 +357,19 @@ export function resolveEmptyResponseRetryInstruction(params: {
   }
 
   return EMPTY_RESPONSE_RETRY_INSTRUCTION;
+}
+
+function shouldApplyIncompleteTurnRetryGuard(params: {
+  provider?: string;
+  modelId?: string;
+}): boolean {
+  if (normalizeLowercaseStringOrEmpty(params.provider ?? "") === "ollama") {
+    return true;
+  }
+  return isStrictAgenticSupportedProviderModel({
+    provider: params.provider,
+    modelId: params.modelId,
+  });
 }
 
 function shouldApplyPlanningOnlyRetryGuard(params: {
