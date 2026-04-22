@@ -241,6 +241,70 @@ describe("task-registry", () => {
     hoisted.killSubagentRunAdminMock.mockReset();
   });
 
+  it("backdates createdAt to the earliest known lifecycle timestamp on create", async () => {
+    await withTaskRegistryTempDir(async (root) => {
+      process.env.OPENCLAW_STATE_DIR = root;
+      resetTaskRegistryForTests();
+
+      const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(1_005);
+      try {
+        const task = createTaskRecord({
+          runtime: "acp",
+          ownerKey: "agent:main:main",
+          scopeKind: "session",
+          childSessionKey: "agent:main:acp:child",
+          runId: "run-create-backdate",
+          task: "Backdated create",
+          status: "running",
+          deliveryStatus: "not_applicable",
+          startedAt: 1_000,
+        });
+
+        expect(task.createdAt).toBe(1_000);
+        expect(task.startedAt).toBe(1_000);
+        expect(getInspectableTaskAuditSummary().byCode.inconsistent_timestamps).toBe(0);
+      } finally {
+        dateNowSpy.mockRestore();
+      }
+    });
+  });
+
+  it("backdates createdAt when a startedAt arrives after the task record is created", async () => {
+    await withTaskRegistryTempDir(async (root) => {
+      process.env.OPENCLAW_STATE_DIR = root;
+      resetTaskRegistryForTests();
+
+      const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(2_000);
+      try {
+        const created = createTaskRecord({
+          runtime: "acp",
+          ownerKey: "agent:main:main",
+          scopeKind: "session",
+          childSessionKey: "agent:main:acp:child-2",
+          runId: "run-update-backdate",
+          task: "Backdated update",
+          status: "queued",
+          deliveryStatus: "not_applicable",
+        });
+
+        expect(created.createdAt).toBe(2_000);
+        markTaskRunningByRunId({
+          runId: "run-update-backdate",
+          runtime: "acp",
+          startedAt: 1_995,
+          lastEventAt: 2_001,
+        });
+
+        const updated = findTaskByRunId("run-update-backdate");
+        expect(updated?.createdAt).toBe(1_995);
+        expect(updated?.startedAt).toBe(1_995);
+        expect(getInspectableTaskAuditSummary().byCode.inconsistent_timestamps).toBe(0);
+      } finally {
+        dateNowSpy.mockRestore();
+      }
+    });
+  });
+
   it("updates task status from lifecycle events", async () => {
     await withTaskRegistryTempDir(async (root) => {
       process.env.OPENCLAW_STATE_DIR = root;

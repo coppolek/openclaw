@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { resolveGatewayAuthTokenForService } from "../commands/doctor-gateway-auth-token.js";
 import type { probeGatewayMemoryStatus } from "../commands/doctor-gateway-health.js";
 import type { DoctorOptions, DoctorPrompter } from "../commands/doctor-prompter.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -119,8 +120,14 @@ async function runGatewayAuthHealth(ctx: DoctorHealthFlowContext): Promise<void>
     value: ctx.cfg.gateway?.auth?.token,
     defaults: ctx.cfg.secrets?.defaults,
   }).ref;
+  const gatewayTokenResolution = gatewayTokenRef
+    ? await resolveGatewayAuthTokenForService(ctx.cfg, process.env)
+    : {};
   const auth = resolveGatewayAuth({
     authConfig: ctx.cfg.gateway?.auth,
+    ...(gatewayTokenResolution.token
+      ? { authOverride: { token: gatewayTokenResolution.token } }
+      : {}),
     tailscaleMode: ctx.cfg.gateway?.tailscale?.mode ?? "off",
   });
   const needsToken = auth.mode !== "password" && (auth.mode !== "token" || !auth.token);
@@ -130,7 +137,8 @@ async function runGatewayAuthHealth(ctx: DoctorHealthFlowContext): Promise<void>
   if (gatewayTokenRef) {
     note(
       [
-        "Gateway token is managed via SecretRef and is currently unavailable.",
+        gatewayTokenResolution.unavailableReason ??
+          "Gateway token is managed via SecretRef and is currently unavailable.",
         "Doctor will not overwrite gateway.auth.token with a plaintext value.",
         "Resolve/rotate the external secret source, then rerun doctor.",
       ].join("\n"),
