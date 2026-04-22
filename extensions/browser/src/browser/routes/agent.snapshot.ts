@@ -1,6 +1,7 @@
 import path from "node:path";
 import { ensureMediaDir, saveMediaBuffer } from "../../media/store.js";
 import { captureScreenshot, snapshotAria } from "../cdp.js";
+import { tryHyprlandViewportCapture } from "../hyprland-capture.js";
 import {
   evaluateChromeMcpScript,
   navigateChromeMcpPage,
@@ -269,7 +270,7 @@ export function registerBrowserAgentSnapshotRoutes(
       const fullPage = toBoolean(body.fullPage) ?? false;
       const ref = toStringOrEmpty(body.ref) || undefined;
       const element = toStringOrEmpty(body.element) || undefined;
-      const type = body.type === "jpeg" ? "jpeg" : "png";
+      let type: "jpeg" | "png" = body.type === "jpeg" ? "jpeg" : "png";
 
       if (fullPage && (ref || element)) {
         return jsonError(res, 400, "fullPage is not supported for element screenshots");
@@ -332,12 +333,28 @@ export function registerBrowserAgentSnapshotRoutes(
             });
             buffer = snap.buffer;
           } else {
-            buffer = await captureScreenshot({
-              wsUrl: tab.wsUrl ?? "",
-              fullPage,
-              format: type,
-              quality: type === "jpeg" ? 85 : undefined,
-            });
+            // On headed Hyprland/Wayland, normal viewport CDP screenshots can
+            // hang for 10s+. Use native grim capture when available.
+            const browserPid =
+              !fullPage && !ctx.state().resolved.headless
+                ? (ctx.state().profiles.get(profileCtx.profile.name)?.running?.pid ?? null)
+                : null;
+            const hyprlandPng =
+              browserPid && browserPid > 0
+                ? await tryHyprlandViewportCapture({ browserPid, timeoutMs: 3000 })
+                : null;
+            if (hyprlandPng) {
+              // grim always outputs PNG regardless of requested type
+              type = "png";
+              buffer = hyprlandPng;
+            } else {
+              buffer = await captureScreenshot({
+                wsUrl: tab.wsUrl ?? "",
+                fullPage,
+                format: type,
+                quality: type === "jpeg" ? 85 : undefined,
+              });
+            }
           }
 
           await saveNormalizedScreenshotResponse({
