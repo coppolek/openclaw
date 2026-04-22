@@ -96,6 +96,7 @@ const LOCAL_COMMANDS = new Set([
   "kill",
   "steer",
   "redirect",
+  "plan",
 ]);
 
 const UI_ONLY_COMMANDS: SlashCommandDef[] = [
@@ -117,6 +118,16 @@ const UI_ONLY_COMMANDS: SlashCommandDef[] = [
     category: "agents",
     executeLocal: true,
     tier: "power",
+  },
+  {
+    key: "plan",
+    name: "plan",
+    description: "Toggle plan mode (blocks write/edit/exec until approved)",
+    args: "<on|off|status|view|auto>",
+    icon: "book",
+    category: "session",
+    executeLocal: true,
+    argOptions: ["on", "off", "status", "view", "auto"],
   },
 ];
 
@@ -141,6 +152,7 @@ const CATEGORY_OVERRIDES: Partial<Record<string, SlashCommandCategory>> = {
   compact: "session",
   focus: "session",
   unfocus: "session",
+  plan: "session",
   model: "model",
   models: "model",
   think: "model",
@@ -332,9 +344,9 @@ function buildLocalSlashCommands(): SlashCommandDef[] {
   return [...builtins, ...UI_ONLY_COMMANDS];
 }
 
-function buildReservedLocalSlashNames(localCommands = buildLocalSlashCommands()): Set<string> {
+function buildReservedLocalSlashNames(): Set<string> {
   const reserved = new Set<string>();
-  for (const command of localCommands) {
+  for (const command of buildLocalSlashCommands()) {
     reserved.add(normalizeLowercaseStringOrEmpty(command.name));
     for (const alias of command.aliases ?? []) {
       const normalized = normalizeSlashIdentifier(alias);
@@ -392,7 +404,7 @@ function replaceSlashCommands(next: SlashCommandDef[]) {
 
 function buildSlashCommandsFromEntries(entries: CommandEntry[]): SlashCommandDef[] {
   const local = buildLocalSlashCommands();
-  const reservedLocalNames = buildReservedLocalSlashNames(local);
+  const reservedLocalNames = buildReservedLocalSlashNames();
   const mapped = entries
     .slice(0, MAX_REMOTE_COMMANDS)
     .map((entry) => normalizeCommandEntry(entry, reservedLocalNames))
