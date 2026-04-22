@@ -8,10 +8,14 @@ function resolveAutoDefault(
   kind: "native" | "nativeSkills",
 ): boolean {
   const id = normalizeChannelId(providerId);
-  if (!id) {
+  // Pass id ?? providerId to getChannelPlugin: when normalizeChannelId returns null
+  // (registry empty during startup), getChannelPlugin's getBundledChannelPlugin fallback
+  // can still resolve bundled channels by reading manifest metadata from disk.
+  const resolvedId = id ?? providerId;
+  if (!resolvedId) {
     return false;
   }
-  const plugin = getChannelPlugin(id);
+  const plugin = getChannelPlugin(resolvedId);
   if (!plugin) {
     return false;
   }
