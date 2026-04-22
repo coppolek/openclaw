@@ -162,9 +162,20 @@ describe("CronService persists delivered status", () => {
     expect(updated?.state.lastDeliveryError).toBeUndefined();
   });
 
-  it("persists lastDelivered=false when isolated job explicitly reports not delivered", async () => {
+  it("persists not-requested when delivery.mode=none and runner reports delivered=false", async () => {
     const updated = await runIsolatedJobAndReadState({
-      job: buildAnnounceIsolatedAgentTurnJob("delivered-false"),
+      job: buildIsolatedAgentTurnJob("delivered-false"),
+      delivered: false,
+    });
+    expectDeliveryNotRequested(updated);
+  });
+
+  it("persists not-delivered when delivery is requested but runner reports delivered=false", async () => {
+    const updated = await runIsolatedJobAndReadState({
+      job: {
+        ...buildIsolatedAgentTurnJob("delivery-failed"),
+        delivery: { mode: "announce", channel: "telegram", to: "123" },
+      },
       delivered: false,
     });
     expectSuccessfulCronRun(updated);
@@ -192,6 +203,20 @@ describe("CronService persists delivered status", () => {
     expect(updated?.state.lastDelivered).toBe(false);
     expect(updated?.state.lastDeliveryStatus).toBe("not-delivered");
     expect(updated?.state.lastDeliveryError).toBe("Message failed");
+  });
+
+  it("persists not-delivered when delivery.mode=webhook and runner reports delivered=false", async () => {
+    const updated = await runIsolatedJobAndReadState({
+      job: {
+        ...buildIsolatedAgentTurnJob("webhook-delivery-failed"),
+        delivery: { mode: "webhook", to: "https://example.com/hook" },
+      },
+      delivered: false,
+    });
+    expectSuccessfulCronRun(updated);
+    expect(updated?.state.lastDelivered).toBe(false);
+    expect(updated?.state.lastDeliveryStatus).toBe("not-delivered");
+    expect(updated?.state.lastDeliveryError).toBeUndefined();
   });
 
   it("persists not-requested delivery state when delivery is not configured", async () => {
