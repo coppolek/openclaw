@@ -543,6 +543,9 @@ export async function startGatewayServer(
     broadcastVoiceWakeChanged,
     hasMobileNodeConnected,
   } = createGatewayNodeSessionRuntime({ broadcast });
+  if (typeof cfgAtStart.gateway?.nodes?.invokeTimeoutMs === "number") {
+    nodeRegistry.defaultInvokeTimeoutMs = cfgAtStart.gateway.nodes.invokeTimeoutMs;
+  }
   applyGatewayLaneConcurrency(cfgAtStart);
 
   runtimeState = createGatewayServerLiveState({
