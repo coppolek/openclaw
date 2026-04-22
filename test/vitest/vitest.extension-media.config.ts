@@ -6,6 +6,7 @@ export default createScopedVitestConfig(
     "deepgram/**/*.test.ts",
     "elevenlabs/**/*.test.ts",
     "fal/**/*.test.ts",
+    "heygen/**/*.test.ts",
     "image-generation-core/**/*.test.ts",
     "runway/**/*.test.ts",
     "talk-voice/**/*.test.ts",
