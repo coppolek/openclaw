@@ -94,18 +94,67 @@ function loadSingleSkillDirectory(params: {
 }
 
 function listCandidateSkillDirs(dir: string): string[] {
+  const skillDirs: string[] = [];
+  const visited = new Set<string>();
+
+  let rootRealPath: string;
   try {
-    return fs
-      .readdirSync(dir, { withFileTypes: true })
-      .filter(
-        (entry) =>
-          entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules",
-      )
-      .map((entry) => path.join(dir, entry.name))
-      .sort((left, right) => left.localeCompare(right));
+    rootRealPath = fs.realpathSync(dir);
   } catch {
     return [];
   }
+
+  const walk = (currentDir: string) => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(currentDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (entry.name.startsWith(".") || entry.name === "node_modules") {
+        continue;
+      }
+
+      const fullPath = path.join(currentDir, entry.name);
+      let isDirectory = entry.isDirectory();
+      if (!isDirectory && entry.isSymbolicLink()) {
+        try {
+          isDirectory = fs.statSync(fullPath).isDirectory();
+        } catch {
+          continue;
+        }
+      }
+      if (!isDirectory) {
+        continue;
+      }
+
+      let realPath: string;
+      try {
+        realPath = fs.realpathSync(fullPath);
+      } catch {
+        continue;
+      }
+      if (visited.has(realPath)) {
+        continue;
+      }
+      if (!realPath.startsWith(rootRealPath + path.sep) && realPath !== rootRealPath) {
+        continue;
+      }
+      visited.add(realPath);
+
+      if (fs.existsSync(path.join(fullPath, "SKILL.md"))) {
+        skillDirs.push(fullPath);
+        continue;
+      }
+
+      walk(fullPath);
+    }
+  };
+
+  walk(dir);
+  return skillDirs.sort((left, right) => left.localeCompare(right));
 }
 
 export function loadSkillsFromDirSafe(params: { dir: string; source: string; maxBytes?: number }): {
