@@ -12,6 +12,7 @@ export type SessionDisplayRow = {
   thinkingLevel?: string;
   verboseLevel?: string;
   traceLevel?: string;
+  emotionMode?: string;
   reasoningLevel?: string;
   elevatedLevel?: string;
   responseUsage?: string;
@@ -45,6 +46,7 @@ export function toSessionDisplayRows(store: Record<string, SessionEntry>): Sessi
         thinkingLevel: entry?.thinkingLevel,
         verboseLevel: entry?.verboseLevel,
         traceLevel: entry?.traceLevel,
+        emotionMode: entry?.emotionMode,
         reasoningLevel: entry?.reasoningLevel,
         elevatedLevel: entry?.elevatedLevel,
         responseUsage: entry?.responseUsage,
@@ -93,6 +95,7 @@ export function formatSessionFlagsCell(
     | "thinkingLevel"
     | "verboseLevel"
     | "traceLevel"
+    | "emotionMode"
     | "reasoningLevel"
     | "elevatedLevel"
     | "responseUsage"
@@ -107,6 +110,7 @@ export function formatSessionFlagsCell(
     row.thinkingLevel ? `think:${row.thinkingLevel}` : null,
     row.verboseLevel ? `verbose:${row.verboseLevel}` : null,
     row.traceLevel ? `trace:${row.traceLevel}` : null,
+    row.emotionMode ? `emotions:${row.emotionMode}` : null,
     row.reasoningLevel ? `reasoning:${row.reasoningLevel}` : null,
     row.elevatedLevel ? `elev:${row.elevatedLevel}` : null,
     row.responseUsage ? `usage:${row.responseUsage}` : null,

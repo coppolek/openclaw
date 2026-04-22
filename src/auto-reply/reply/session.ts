@@ -318,6 +318,7 @@ export async function initSessionState(params: {
   let persistedVerbose: string | undefined;
   let persistedTrace: string | undefined;
   let persistedReasoning: string | undefined;
+  let persistedEmotionMode: SessionEntry["emotionMode"];
   let persistedTtsAuto: TtsAutoMode | undefined;
   let persistedModelOverride: string | undefined;
   let persistedProviderOverride: string | undefined;
@@ -494,6 +495,7 @@ export async function initSessionState(params: {
     persistedVerbose = entry.verboseLevel;
     persistedTrace = entry.traceLevel;
     persistedReasoning = entry.reasoningLevel;
+    persistedEmotionMode = entry.emotionMode;
     persistedTtsAuto = entry.ttsAuto;
     persistedModelOverride = entry.modelOverride;
     persistedProviderOverride = entry.providerOverride;
@@ -508,13 +510,14 @@ export async function initSessionState(params: {
     systemSent = false;
     abortedLastRun = false;
     // When a reset trigger (/new, /reset) starts a new session, carry over
-    // user-set behavior overrides (verbose, thinking, reasoning, ttsAuto)
+    // user-set behavior overrides (verbose, thinking, reasoning, emotions, ttsAuto)
     // so the user doesn't have to re-enable them every time.
     if (resetTriggered && entry) {
       persistedThinking = entry.thinkingLevel;
       persistedVerbose = entry.verboseLevel;
       persistedTrace = entry.traceLevel;
       persistedReasoning = entry.reasoningLevel;
+      persistedEmotionMode = entry.emotionMode;
       persistedTtsAuto = entry.ttsAuto;
       // Only carry over user-driven overrides on reset. Auto-created
       // fallback overrides (e.g. rate-limit auth rotation, model auto-pin)
@@ -620,6 +623,7 @@ export async function initSessionState(params: {
     verboseLevel: persistedVerbose ?? baseEntry?.verboseLevel,
     traceLevel: persistedTrace ?? baseEntry?.traceLevel,
     reasoningLevel: persistedReasoning ?? baseEntry?.reasoningLevel,
+    emotionMode: persistedEmotionMode ?? baseEntry?.emotionMode,
     ttsAuto: persistedTtsAuto ?? baseEntry?.ttsAuto,
     responseUsage: baseEntry?.responseUsage,
     modelOverride: persistedModelOverride ?? baseEntry?.modelOverride,

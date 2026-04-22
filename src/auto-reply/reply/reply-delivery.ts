@@ -1,6 +1,6 @@
 import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
 import { logVerbose } from "../../globals.js";
-import { getReplyPayloadMetadata, setReplyPayloadMetadata } from "../reply-payload.js";
+import { cloneReplyPayloadMetadata } from "../reply-payload.js";
 import { SILENT_REPLY_TOKEN } from "../tokens.js";
 import type { BlockReplyContext, ReplyPayload } from "../types.js";
 import type { BlockReplyPipeline } from "./block-reply-pipeline.js";
@@ -60,8 +60,7 @@ export function normalizeReplyPayloadDirectives(params: {
 }
 
 function carryReplyPayloadMetadata(source: ReplyPayload, target: ReplyPayload): ReplyPayload {
-  const metadata = getReplyPayloadMetadata(source);
-  return metadata ? setReplyPayloadMetadata(target, metadata) : target;
+  return cloneReplyPayloadMetadata(source, target);
 }
 
 async function sendDirectBlockReply(params: {

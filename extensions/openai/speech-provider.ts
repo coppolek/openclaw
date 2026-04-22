@@ -182,6 +182,9 @@ export function buildOpenAISpeechProvider(): SpeechProviderPlugin {
     id: "openai",
     label: "OpenAI",
     autoSelectOrder: 10,
+    capabilities: {
+      sourceTextHandling: "strip_expressive_tags",
+    },
     models: OPENAI_TTS_MODELS,
     voices: OPENAI_TTS_VOICES,
     resolveConfig: ({ rawConfig }) => normalizeOpenAIProviderConfig(rawConfig),

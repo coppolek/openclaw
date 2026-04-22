@@ -1,5 +1,6 @@
 import type { ReasoningLevel, ThinkLevel } from "../../auto-reply/thinking.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import type { EmotionMode } from "../../emotion-mode.js";
 import type { CommandQueueEnqueueFn } from "../../process/command-queue.types.js";
 import type { ExecElevatedDefaults } from "../bash-tools.exec-types.js";
 import type { SkillSnapshot } from "../skills.js";
@@ -40,6 +41,7 @@ export type CompactEmbeddedPiSessionParams = {
   provider?: string;
   model?: string;
   thinkLevel?: ThinkLevel;
+  emotionMode?: EmotionMode;
   reasoningLevel?: ReasoningLevel;
   bashElevated?: ExecElevatedDefaults;
   customInstructions?: string;

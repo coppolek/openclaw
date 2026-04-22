@@ -1410,6 +1410,7 @@ export function buildGatewaySessionRow(params: {
     fastMode: entry?.fastMode,
     verboseLevel: entry?.verboseLevel,
     traceLevel: entry?.traceLevel,
+    emotionMode: entry?.emotionMode,
     reasoningLevel: entry?.reasoningLevel,
     elevatedLevel: entry?.elevatedLevel,
     sendPolicy: entry?.sendPolicy,

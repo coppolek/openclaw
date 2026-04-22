@@ -78,6 +78,7 @@ export async function resolveDirectStatusReplyForSession(
   } = await resolveCurrentDirectiveLevels({
     sessionEntry: statusEntry,
     agentEntry,
+    globalAgentDefaults: statusCfg.agents?.defaults,
     agentCfg,
     resolveDefaultThinkingLevel: () => modelState.resolveDefaultThinkingLevel(),
   });

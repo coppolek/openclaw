@@ -136,4 +136,19 @@ describe("resolveCurrentDirectiveLevels", () => {
     // Agent explicitly setting "off" should be respected, not overridden by model default
     expect(result.currentReasoningLevel).toBe("off");
   });
+
+  it("falls back to the global emotion default when session and agent values are unset", async () => {
+    const resolveDefaultThinkingLevel = vi.fn().mockResolvedValue("off");
+
+    const result = await resolveCurrentDirectiveLevels({
+      sessionEntry: {},
+      agentEntry: {},
+      globalAgentDefaults: {
+        emotionDefault: "on",
+      },
+      resolveDefaultThinkingLevel,
+    });
+
+    expect(result.currentEmotionMode).toBe("on");
+  });
 });

@@ -12,6 +12,7 @@ import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.j
 import type { MsgContext } from "../../auto-reply/templating.js";
 import { extractCanvasFromText } from "../../chat/canvas-render.js";
 import { resolveSessionFilePath } from "../../config/sessions.js";
+import { normalizeEmotionMode } from "../../emotion-mode.js";
 import { jsonUtf8Bytes } from "../../infra/json-utf8-bytes.js";
 import { getAgentScopedMediaLocalRoots } from "../../media/local-roots.js";
 import { isAudioFileName } from "../../media/mime.js";
@@ -27,6 +28,7 @@ import {
   resolveAssistantMessagePhase,
 } from "../../shared/chat-message-content.js";
 import {
+  sanitizeDirectiveAndEmotionTagsForDisplay,
   stripInlineDirectiveTagsForDisplay,
   stripInlineDirectiveTagsFromMessageForDisplay,
 } from "../../utils/directive-tags.js";
@@ -175,6 +177,14 @@ export function resolveEffectiveChatHistoryMaxChars(
     return cfg.gateway.webchat.chatHistoryMaxChars;
   }
   return DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS;
+}
+
+function resolveChatSessionEmotionMode(sessionKey?: string): "off" | "on" | "full" {
+  return (
+    normalizeEmotionMode(
+      sessionKey ? loadSessionEntry(sessionKey).entry?.emotionMode : undefined,
+    ) ?? "off"
+  );
 }
 
 type ChatSendDeliveryEntry = {
@@ -633,7 +643,12 @@ function extractChatHistoryBlockText(message: unknown): string | undefined {
 
 function sanitizeChatHistoryContentBlock(
   block: unknown,
-  opts?: { preserveExactToolPayload?: boolean; maxChars?: number },
+  opts?: {
+    preserveExactToolPayload?: boolean;
+    maxChars?: number;
+    emotionMode?: "off" | "on" | "full";
+    stripEmotionTags?: boolean;
+  },
 ): { block: unknown; changed: boolean } {
   if (!block || typeof block !== "object") {
     return { block, changed: false };
@@ -644,7 +659,12 @@ function sanitizeChatHistoryContentBlock(
     opts?.preserveExactToolPayload === true || isToolHistoryBlockType(entry.type);
   const maxChars = opts?.maxChars ?? DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS;
   if (typeof entry.text === "string") {
-    const stripped = stripInlineDirectiveTagsForDisplay(entry.text);
+    const stripped =
+      opts?.stripEmotionTags === true
+        ? sanitizeDirectiveAndEmotionTagsForDisplay(entry.text, {
+            emotionMode: opts?.emotionMode,
+          })
+        : stripInlineDirectiveTagsForDisplay(entry.text);
     if (preserveExactToolPayload) {
       entry.text = stripped.text;
       changed ||= stripped.changed;
@@ -655,7 +675,12 @@ function sanitizeChatHistoryContentBlock(
     }
   }
   if (typeof entry.content === "string") {
-    const stripped = stripInlineDirectiveTagsForDisplay(entry.content);
+    const stripped =
+      opts?.stripEmotionTags === true
+        ? sanitizeDirectiveAndEmotionTagsForDisplay(entry.content, {
+            emotionMode: opts?.emotionMode,
+          })
+        : stripInlineDirectiveTagsForDisplay(entry.content);
     if (preserveExactToolPayload) {
       entry.content = stripped.text;
       changed ||= stripped.changed;
@@ -796,6 +821,7 @@ function sanitizeCost(raw: unknown): { total?: number } | undefined {
 function sanitizeChatHistoryMessage(
   message: unknown,
   maxChars: number = DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
+  emotionMode: "off" | "on" | "full" = "off",
 ): { message: unknown; changed: boolean } {
   if (!message || typeof message !== "object") {
     return { message, changed: false };
@@ -803,6 +829,7 @@ function sanitizeChatHistoryMessage(
   const entry = { ...(message as Record<string, unknown>) };
   let changed = false;
   const role = typeof entry.role === "string" ? entry.role.toLowerCase() : "";
+  const stripEmotionTags = role === "assistant";
   const preserveExactToolPayload =
     role === "toolresult" ||
     role === "tool_result" ||
@@ -852,7 +879,9 @@ function sanitizeChatHistoryMessage(
   }
 
   if (typeof entry.content === "string") {
-    const stripped = stripInlineDirectiveTagsForDisplay(entry.content);
+    const stripped = stripEmotionTags
+      ? sanitizeDirectiveAndEmotionTagsForDisplay(entry.content, { emotionMode })
+      : stripInlineDirectiveTagsForDisplay(entry.content);
     if (preserveExactToolPayload) {
       entry.content = stripped.text;
       changed ||= stripped.changed;
@@ -863,7 +892,12 @@ function sanitizeChatHistoryMessage(
     }
   } else if (Array.isArray(entry.content)) {
     const updated = entry.content.map((block) =>
-      sanitizeChatHistoryContentBlock(block, { preserveExactToolPayload, maxChars }),
+      sanitizeChatHistoryContentBlock(block, {
+        preserveExactToolPayload,
+        maxChars,
+        emotionMode,
+        stripEmotionTags,
+      }),
     );
     if (updated.some((item) => item.changed)) {
       entry.content = updated.map((item) => item.block);
@@ -879,7 +913,9 @@ function sanitizeChatHistoryMessage(
   }
 
   if (typeof entry.text === "string") {
-    const stripped = stripInlineDirectiveTagsForDisplay(entry.text);
+    const stripped = stripEmotionTags
+      ? sanitizeDirectiveAndEmotionTagsForDisplay(entry.text, { emotionMode })
+      : stripInlineDirectiveTagsForDisplay(entry.text);
     if (preserveExactToolPayload) {
       entry.text = stripped.text;
       changed ||= stripped.changed;
@@ -965,6 +1001,7 @@ function shouldDropAssistantHistoryMessage(message: unknown): boolean {
 export function sanitizeChatHistoryMessages(
   messages: unknown[],
   maxChars: number = DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
+  emotionMode: "off" | "on" | "full" = "off",
 ): unknown[] {
   if (messages.length === 0) {
     return messages;
@@ -976,7 +1013,7 @@ export function sanitizeChatHistoryMessages(
       changed = true;
       continue;
     }
-    const res = sanitizeChatHistoryMessage(message, maxChars);
+    const res = sanitizeChatHistoryMessage(message, maxChars, emotionMode);
     changed ||= res.changed;
     if (shouldDropAssistantHistoryMessage(res.message)) {
       changed = true;
@@ -1551,7 +1588,9 @@ function broadcastChatFinal(params: {
     sessionKey: params.sessionKey,
     seq,
     state: "final" as const,
-    message: stripInlineDirectiveTagsFromMessageForDisplay(strippedEnvelopeMessage),
+    message: stripInlineDirectiveTagsFromMessageForDisplay(strippedEnvelopeMessage, {
+      emotionMode: resolveChatSessionEmotionMode(params.sessionKey),
+    }),
   };
   params.context.broadcast("chat", payload);
   params.context.nodeSendToSession(params.sessionKey, "chat", payload);
@@ -1640,8 +1679,9 @@ export const chatHandlers: GatewayRequestHandlers = {
     const effectiveMaxChars = resolveEffectiveChatHistoryMaxChars(cfg, maxChars);
     const sliced = rawMessages.length > max ? rawMessages.slice(-max) : rawMessages;
     const sanitized = stripEnvelopeFromMessages(sliced);
+    const emotionMode = normalizeEmotionMode(entry?.emotionMode) ?? "off";
     const normalized = augmentChatHistoryWithCanvasBlocks(
-      sanitizeChatHistoryMessages(sanitized, effectiveMaxChars),
+      sanitizeChatHistoryMessages(sanitized, effectiveMaxChars, emotionMode),
     );
     const maxHistoryBytes = getMaxChatHistoryMessagesBytes();
     const perMessageHardCap = Math.min(CHAT_HISTORY_MAX_SINGLE_MESSAGE_BYTES, maxHistoryBytes);
@@ -2402,6 +2442,9 @@ export const chatHandlers: GatewayRequestHandlers = {
       state: "final" as const,
       message: stripInlineDirectiveTagsFromMessageForDisplay(
         stripEnvelopeFromMessage(appended.message) as Record<string, unknown>,
+        {
+          emotionMode: resolveChatSessionEmotionMode(sessionKey),
+        },
       ),
     };
     context.broadcast("chat", chatPayload);

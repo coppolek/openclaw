@@ -282,6 +282,9 @@ export type AgentDefaultsConfig = {
   memorySearch?: MemorySearchConfig;
   /** Default thinking level when no /think directive is present. */
   thinkingDefault?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "adaptive" | "max";
+  /** Default emotion mode when no /emotions directive is present. */
+  /** Default operational emotion mode for new runs; `full` remains an inspection-only session override. */
+  emotionDefault?: "off" | "on";
   /** Default verbose level when no /verbose directive is present. */
   verboseDefault?: "off" | "on" | "full";
   /** Default elevated level when no /elevated directive is present. */

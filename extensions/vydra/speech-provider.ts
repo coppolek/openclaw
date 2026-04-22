@@ -83,6 +83,9 @@ export function buildVydraSpeechProvider(): SpeechProviderPlugin {
   return {
     id: "vydra",
     label: "Vydra",
+    capabilities: {
+      sourceTextHandling: "strip_expressive_tags",
+    },
     models: [DEFAULT_VYDRA_SPEECH_MODEL],
     voices: VYDRA_SPEECH_VOICES.map((voice) => voice.id),
     resolveConfig: ({ rawConfig }) => normalizeVydraSpeechConfig(rawConfig),

@@ -51,6 +51,7 @@ import type { SecurityAuditFinding } from "../security/audit.types.js";
 import type {
   SpeechDirectiveTokenParseContext,
   SpeechDirectiveTokenParseResult,
+  SpeechProviderCapabilities,
   SpeechProviderConfiguredContext,
   SpeechProviderConfig,
   SpeechProviderResolveConfigContext,
@@ -1605,6 +1606,7 @@ export type SpeechProviderPlugin = {
   label: string;
   aliases?: string[];
   autoSelectOrder?: number;
+  capabilities?: SpeechProviderCapabilities;
   models?: readonly string[];
   voices?: readonly string[];
   resolveConfig?: (ctx: SpeechProviderResolveConfigContext) => SpeechProviderConfig;

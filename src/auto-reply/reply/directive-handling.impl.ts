@@ -4,6 +4,7 @@ import { resolveExecDefaults } from "../../agents/exec-defaults.js";
 import { resolveFastModeState } from "../../agents/fast-mode.js";
 import { resolveSandboxRuntimeStatus } from "../../agents/sandbox.js";
 import { updateSessionStore } from "../../config/sessions.js";
+import { normalizeEmotionMode } from "../../emotion-mode.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
 import { applyTraceOverride, applyVerboseOverride } from "../../sessions/level-overrides.js";
 import { applyModelOverrideToSessionEntry } from "../../sessions/model-overrides.js";
@@ -57,6 +58,7 @@ export async function handleDirectiveOnly(
     currentThinkLevel,
     currentFastMode,
     currentVerboseLevel,
+    currentEmotionMode,
     currentReasoningLevel,
     currentElevatedLevel,
   } = params;
@@ -160,6 +162,17 @@ export async function handleDirectiveOnly(
     }
     return {
       text: `Unrecognized verbose level "${directives.rawVerboseLevel}". Valid levels: off, on, full.`,
+    };
+  }
+  if (directives.hasEmotionsDirective && !directives.emotionMode) {
+    if (!directives.rawEmotionMode) {
+      const mode = currentEmotionMode ?? normalizeEmotionMode(sessionEntry.emotionMode) ?? "off";
+      return {
+        text: withOptions(`Current emotions mode: ${mode}.`, "on, off, full"),
+      };
+    }
+    return {
+      text: `Unrecognized emotions mode "${directives.rawEmotionMode}". Valid levels: off, on, full.`,
     };
   }
   if (directives.hasTraceDirective && !directives.traceLevel) {
@@ -329,6 +342,8 @@ export async function handleDirectiveOnly(
     (elevatedAllowed ? ("on" as ElevatedLevel) : ("off" as ElevatedLevel));
   const prevReasoningLevel =
     currentReasoningLevel ?? (sessionEntry.reasoningLevel as ReasoningLevel | undefined) ?? "off";
+  const prevEmotionMode =
+    currentEmotionMode ?? normalizeEmotionMode(sessionEntry.emotionMode) ?? "off";
   let elevatedChanged =
     directives.hasElevatedDirective &&
     directives.elevatedLevel !== undefined &&
@@ -341,6 +356,7 @@ export async function handleDirectiveOnly(
     (directives.hasVerboseDirective &&
       Boolean(directives.verboseLevel) &&
       allowInternalVerbosePersistence) ||
+    (directives.hasEmotionsDirective && Boolean(directives.emotionMode)) ||
     (directives.hasTraceDirective && Boolean(directives.traceLevel)) ||
     (directives.hasReasoningDirective && Boolean(directives.reasoningLevel)) ||
     (directives.hasElevatedDirective && Boolean(directives.elevatedLevel)) ||
@@ -354,6 +370,7 @@ export async function handleDirectiveOnly(
     directives.fastMode !== currentFastMode;
   let reasoningChanged =
     directives.hasReasoningDirective && directives.reasoningLevel !== undefined;
+  let emotionChanged = directives.hasEmotionsDirective && directives.emotionMode !== undefined;
   if (shouldPersistSessionEntry) {
     if (directives.hasThinkDirective && directives.thinkLevel && resolvedDirectiveThinkLevel) {
       sessionEntry.thinkingLevel = resolvedDirectiveThinkLevel;
@@ -370,6 +387,11 @@ export async function handleDirectiveOnly(
       allowInternalVerbosePersistence
     ) {
       applyVerboseOverride(sessionEntry, directives.verboseLevel);
+    }
+    if (directives.hasEmotionsDirective && directives.emotionMode) {
+      sessionEntry.emotionMode = directives.emotionMode;
+      emotionChanged =
+        directives.emotionMode !== prevEmotionMode && directives.emotionMode !== undefined;
     }
     if (directives.hasTraceDirective && directives.traceLevel) {
       applyTraceOverride(sessionEntry, directives.traceLevel);
@@ -503,6 +525,15 @@ export async function handleDirectiveOnly(
             : formatDirectiveAck("Verbose logging enabled."),
     );
   }
+  if (directives.hasEmotionsDirective && directives.emotionMode) {
+    parts.push(
+      directives.emotionMode === "off"
+        ? formatDirectiveAck("Emotions mode disabled.")
+        : directives.emotionMode === "full"
+          ? formatDirectiveAck("Emotions mode set to full (tags visible).")
+          : formatDirectiveAck("Emotions mode enabled (tags hidden from normal display)."),
+    );
+  }
   if (directives.hasTraceDirective && directives.traceLevel) {
     parts.push(
       directives.traceLevel === "off"
@@ -604,6 +635,12 @@ export async function handleDirectiveOnly(
     enqueueSystemEvent(`Fast mode ${sessionEntry.fastMode ? "enabled" : "disabled"}.`, {
       sessionKey,
       contextKey: `fast:${sessionEntry.fastMode ? "on" : "off"}`,
+    });
+  }
+  if (emotionChanged) {
+    enqueueSystemEvent(`Emotions mode ${sessionEntry.emotionMode ?? "off"}.`, {
+      sessionKey,
+      contextKey: `emotions:${sessionEntry.emotionMode ?? "off"}`,
     });
   }
   const ack = parts.join(" ").trim();

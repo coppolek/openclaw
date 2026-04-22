@@ -20,6 +20,7 @@ export type ResolvedAgentConfig = {
   systemPromptOverride?: AgentEntry["systemPromptOverride"];
   model?: AgentEntry["model"];
   thinkingDefault?: AgentEntry["thinkingDefault"];
+  emotionDefault?: AgentEntry["emotionDefault"];
   verboseDefault?: AgentDefaultsConfig["verboseDefault"];
   reasoningDefault?: AgentEntry["reasoningDefault"];
   fastModeDefault?: AgentEntry["fastModeDefault"];
@@ -114,6 +115,7 @@ export function resolveAgentConfig(
         ? entry.model
         : undefined,
     thinkingDefault: entry.thinkingDefault,
+    emotionDefault: entry.emotionDefault,
     verboseDefault: entry.verboseDefault ?? agentDefaults?.verboseDefault,
     reasoningDefault: entry.reasoningDefault,
     fastModeDefault: entry.fastModeDefault,

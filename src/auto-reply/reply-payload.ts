@@ -37,6 +37,7 @@ export type ReplyPayload = {
 
 export type ReplyPayloadMetadata = {
   assistantMessageIndex?: number;
+  ttsSourceText?: string;
 };
 
 const replyPayloadMetadata = new WeakMap<object, ReplyPayloadMetadata>();
@@ -52,4 +53,9 @@ export function setReplyPayloadMetadata<T extends object>(
 
 export function getReplyPayloadMetadata(payload: object): ReplyPayloadMetadata | undefined {
   return replyPayloadMetadata.get(payload);
+}
+
+export function cloneReplyPayloadMetadata<T extends object>(source: object, target: T): T {
+  const metadata = getReplyPayloadMetadata(source);
+  return metadata ? setReplyPayloadMetadata(target, metadata) : target;
 }

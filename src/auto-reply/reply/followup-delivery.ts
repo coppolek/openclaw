@@ -1,6 +1,7 @@
 import type { MessagingToolSend } from "../../agents/pi-embedded-messaging.types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { stripHeartbeatToken } from "../heartbeat.js";
+import { cloneReplyPayloadMetadata } from "../reply-payload.js";
 import type { OriginatingChannelType } from "../templating.js";
 import type { ReplyPayload } from "../types.js";
 import {
@@ -55,7 +56,7 @@ export function resolveFollowupDeliveryPayloads(params: {
     if (stripped.shouldSkip && !hasMedia) {
       return [];
     }
-    return [{ ...payload, text: stripped.text }];
+    return [cloneReplyPayloadMetadata(payload, { ...payload, text: stripped.text })];
   });
   const replyTaggedPayloads = applyReplyThreading({
     payloads: sanitizedPayloads,

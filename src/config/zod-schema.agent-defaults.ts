@@ -220,6 +220,10 @@ export const AgentDefaultsSchema = z
         z.literal("max"),
       ])
       .optional(),
+    // `full` is intentionally excluded here so default config stays on the
+    // end-user operational modes. The raw-tag inspection view remains a
+    // session-level override via `/emotions full`.
+    emotionDefault: z.union([z.literal("off"), z.literal("on")]).optional(),
     verboseDefault: z.union([z.literal("off"), z.literal("on"), z.literal("full")]).optional(),
     elevatedDefault: z
       .union([z.literal("off"), z.literal("on"), z.literal("ask"), z.literal("full")])

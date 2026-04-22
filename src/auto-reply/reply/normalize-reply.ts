@@ -2,6 +2,7 @@ import { sanitizeUserFacingText } from "../../agents/pi-embedded-helpers/sanitiz
 import { hasReplyPayloadContent } from "../../interactive/payload.js";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { stripHeartbeatToken } from "../heartbeat.js";
+import { cloneReplyPayloadMetadata } from "../reply-payload.js";
 import {
   HEARTBEAT_TOKEN,
   isSilentReplyPayloadText,
@@ -103,7 +104,7 @@ export function normalizeReplyPayload(
     return null;
   }
 
-  let enrichedPayload: ReplyPayload = { ...payload, text };
+  let enrichedPayload: ReplyPayload = cloneReplyPayloadMetadata(payload, { ...payload, text });
   if (applyChannelTransforms && opts.transformReplyPayload) {
     enrichedPayload = opts.transformReplyPayload(enrichedPayload) ?? enrichedPayload;
     text = enrichedPayload.text;

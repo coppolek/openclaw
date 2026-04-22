@@ -9,8 +9,39 @@ title: "Text-to-Speech"
 
 # Text-to-speech (TTS)
 
-OpenClaw can convert outbound replies into audio using ElevenLabs, Google Gemini, Microsoft, MiniMax, or OpenAI.
+OpenClaw can convert outbound replies into audio using ElevenLabs, Google Gemini, Microsoft, MiniMax, OpenAI, or third-party speech providers registered through the plugin SDK.
 It works anywhere OpenClaw can send audio.
+
+## Speech preparation and personality layer
+
+This TTS stack is provider-aware, not ElevenLabs-only.
+
+When `/emotions on|full` is active and a workspace includes `voice.md`, the model gets an additional speech-preparation library layered on top of `SOUL.md`:
+
+- `SOUL.md` defines the target persona.
+- `voice.md` gives the model the expressive tools to sound like that persona in speech.
+- `/emotions on` keeps those tags available to speech synthesis while hiding them from normal display.
+- `/emotions full` preserves the tags visibly.
+- `/emotions off` disables the expressive layer entirely.
+
+This is the difference between telling the model to "sound like an ogre" and giving it a translation library that helps it actually speak like one. The same mechanism also helps with storytellers, fantasy characters, noir voices, or user-defined speaking styles.
+
+## Provider source-text handling
+
+OpenClaw keeps `ttsSourceText` provider-agnostic. Each speech provider declares whether it can consume expressive source text directly or whether it should receive a sanitized plain-text version instead.
+
+| Provider class       | Behavior                                                                   |
+| -------------------- | -------------------------------------------------------------------------- |
+| Tag-aware providers  | Receive the speech-preparation source text with expressive tags preserved. |
+| Plain-text providers | Receive a sanitized speakable version with expressive tags stripped first. |
+
+Current bundled behavior:
+
+- **ElevenLabs** preserves expressive source text, including voice-library tags, for models such as `eleven_multilingual_v2` and `eleven_turbo_v2_5`.
+- **OpenAI**, **Google Gemini**, **Microsoft**, **MiniMax**, and **Vydra** receive sanitized plain text by default.
+- **Third-party/local providers** such as Kokoro-style plugins also receive sanitized plain text until they explicitly opt into expressive-source handling in the SDK.
+
+Even when a provider strips tags, it still benefits from the speech-preparation pass because the model already wrote the answer with speech delivery in mind.
 
 ## Supported services
 
@@ -44,7 +75,7 @@ If you want OpenAI, ElevenLabs, Google Gemini, or MiniMax:
 
 Microsoft speech does **not** require an API key.
 
-If multiple providers are configured, the selected provider is used first and the others are fallback options.
+If multiple providers are configured, the selected provider is used first and the others are fallback options. Fallback providers automatically receive the version of the source text that matches their declared capability.
 Auto-summary uses the configured `summaryModel` (or `agents.defaults.model.primary`),
 so that provider must also be authenticated if you enable summaries.
 
@@ -269,6 +300,7 @@ Then run:
 - `provider`: speech provider id such as `"elevenlabs"`, `"google"`, `"microsoft"`, `"minimax"`, or `"openai"` (fallback is automatic).
 - If `provider` is **unset**, OpenClaw uses the first configured speech provider in registry auto-select order.
 - Legacy `provider: "edge"` still works and is normalized to `microsoft`.
+- `/emotions on|off|full` is the compatibility-preserving control surface for the expressive speech layer; it does not rename or replace `/tts`.
 - `summaryModel`: optional cheap model for auto-summary; defaults to `agents.defaults.model.primary`.
   - Accepts `provider/model` or a configured model alias.
 - `modelOverrides`: allow the model to emit TTS directives (on by default).
@@ -318,8 +350,11 @@ When `messages.tts.auto` is `tagged`, these directives are required to trigger a
 
 When enabled, the model can emit `[[tts:...]]` directives to override the voice
 for a single reply, plus an optional `[[tts:text]]...[[/tts:text]]` block to
-provide expressive tags (laughter, singing cues, etc) that should only appear in
-the audio.
+provide speech-preparation text with expressive delivery tags (laughter,
+singing cues, pacing hints, and similar cues).
+
+Tag-aware providers receive that source text directly. Plain-text providers
+automatically receive a sanitized speakable version instead.
 
 `provider=...` directives are ignored unless `modelOverrides.allowProvider: true`.
 
@@ -421,17 +456,22 @@ is skipped and the normal text reply is sent.
 
 ## Flow diagram
 
-```
-Reply -> TTS enabled?
-  no  -> send text
-  yes -> has media / MEDIA: / short?
-          yes -> send text
-          no  -> length > limit?
-                   no  -> TTS -> attach audio
-                   yes -> summary enabled?
-                            no  -> send text
-                            yes -> summarize (summaryModel or agents.defaults.model.primary)
-                                      -> TTS -> attach audio
+```mermaid
+flowchart TD
+  A["Model reply"] --> B{"TTS enabled?"}
+  B -- "no" --> Z["Send text"]
+  B -- "yes" --> C{"Media / MEDIA: / too short?"}
+  C -- "yes" --> Z
+  C -- "no" --> D{"Need summarization?"}
+  D -- "yes" --> E["Summarize speech source"]
+  D -- "no" --> F["Prepare speech source"]
+  E --> F
+  F --> G{"Provider keeps expressive tags?"}
+  G -- "yes" --> H["Use tag-rich speech source"]
+  G -- "no" --> I["Strip expressive tags"]
+  H --> J["Synthesize audio"]
+  I --> J
+  J --> K["Attach audio / voice note"]
 ```
 
 ## Slash command usage

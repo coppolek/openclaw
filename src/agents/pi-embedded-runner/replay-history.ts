@@ -1,6 +1,7 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { SessionManager } from "@mariozechner/pi-coding-agent";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { normalizeEmotionMode } from "../../emotion-mode.js";
 import type { ProviderRuntimeModel } from "../../plugins/provider-runtime-model.types.js";
 import {
   sanitizeProviderReplayHistoryWithPlugin,
@@ -14,6 +15,7 @@ import {
   hasInterSessionUserProvenance,
   normalizeInputProvenance,
 } from "../../sessions/input-provenance.js";
+import { stripEmotionTags } from "../../shared/text/emotion-tags.js";
 import { resolveImageSanitizationLimits } from "../image-sanitization.js";
 import {
   downgradeOpenAIFunctionCallReasoningPairs,
@@ -62,6 +64,30 @@ type ProviderReplayHookParams = {
   model?: ProviderRuntimeModel;
   sessionId?: string;
 };
+
+function stripAssistantEmotionTags(messages: AgentMessage[]): AgentMessage[] {
+  return messages.map((message) => {
+    if (!message || message.role !== "assistant" || !Array.isArray(message.content)) {
+      return message;
+    }
+    let changed = false;
+    const content = message.content.map((block) => {
+      if (!block || typeof block !== "object" || !("type" in block)) {
+        return block;
+      }
+      if (block.type !== "text" || typeof block.text !== "string") {
+        return block;
+      }
+      const stripped = stripEmotionTags(block.text);
+      if (!stripped.changed) {
+        return block;
+      }
+      changed = true;
+      return { ...block, text: stripped.text };
+    });
+    return changed ? { ...message, content } : message;
+  });
+}
 
 function createProviderReplayPluginParams(params: ProviderReplayHookParams) {
   const context = {
@@ -438,6 +464,7 @@ export async function sanitizeSessionHistory(params: {
   model?: ProviderRuntimeModel;
   sessionManager: SessionManager;
   sessionId: string;
+  emotionMode?: string;
   policy?: TranscriptPolicy;
 }): Promise<AgentMessage[]> {
   // Keep docs/reference/transcript-hygiene.md in sync with any logic changes here.
@@ -453,6 +480,10 @@ export async function sanitizeSessionHistory(params: {
       model: params.model,
     });
   const withInterSessionMarkers = annotateInterSessionUserMessages(params.messages);
+  const replayMessages =
+    normalizeEmotionMode(params.emotionMode) === "off"
+      ? stripAssistantEmotionTags(withInterSessionMarkers)
+      : withInterSessionMarkers;
   const allowProviderOwnedThinkingReplay = shouldAllowProviderOwnedThinkingReplay({
     modelApi: params.modelApi,
     policy,
@@ -461,7 +492,7 @@ export async function sanitizeSessionHistory(params: {
     params.modelApi === "openai-responses" ||
     params.modelApi === "openai-codex-responses" ||
     params.modelApi === "azure-openai-responses";
-  const normalizedAssistantReplay = normalizeAssistantReplayContent(withInterSessionMarkers);
+  const normalizedAssistantReplay = normalizeAssistantReplayContent(replayMessages);
   const sanitizedImages = await sanitizeSessionMessagesImages(
     normalizedAssistantReplay,
     "session:history",

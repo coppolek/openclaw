@@ -1,3 +1,4 @@
+import type { EmotionMode } from "../../emotion-mode.js";
 import type { ElevatedLevel, ReasoningLevel, ThinkLevel, VerboseLevel } from "../thinking.js";
 
 export async function resolveCurrentDirectiveLevels(params: {
@@ -5,15 +6,21 @@ export async function resolveCurrentDirectiveLevels(params: {
     thinkingLevel?: unknown;
     fastMode?: unknown;
     verboseLevel?: unknown;
+    emotionMode?: unknown;
     reasoningLevel?: unknown;
     elevatedLevel?: unknown;
   };
   agentEntry?: {
+    emotionDefault?: unknown;
     fastModeDefault?: unknown;
     reasoningDefault?: unknown;
   };
+  globalAgentDefaults?: {
+    emotionDefault?: unknown;
+  };
   agentCfg?: {
     thinkingDefault?: unknown;
+    emotionDefault?: unknown;
     verboseDefault?: unknown;
     elevatedDefault?: unknown;
   };
@@ -22,6 +29,7 @@ export async function resolveCurrentDirectiveLevels(params: {
   currentThinkLevel: ThinkLevel | undefined;
   currentFastMode: boolean | undefined;
   currentVerboseLevel: VerboseLevel | undefined;
+  currentEmotionMode: EmotionMode;
   currentReasoningLevel: ReasoningLevel;
   currentElevatedLevel: ElevatedLevel | undefined;
 }> {
@@ -39,6 +47,12 @@ export async function resolveCurrentDirectiveLevels(params: {
   const currentVerboseLevel =
     (params.sessionEntry?.verboseLevel as VerboseLevel | undefined) ??
     (params.agentCfg?.verboseDefault as VerboseLevel | undefined);
+  const currentEmotionMode =
+    (params.sessionEntry?.emotionMode as EmotionMode | undefined) ??
+    (params.agentEntry?.emotionDefault as EmotionMode | undefined) ??
+    (params.agentCfg?.emotionDefault as EmotionMode | undefined) ??
+    (params.globalAgentDefaults?.emotionDefault as EmotionMode | undefined) ??
+    "off";
   const currentReasoningLevel =
     (params.sessionEntry?.reasoningLevel as ReasoningLevel | undefined) ??
     (params.agentEntry?.reasoningDefault as ReasoningLevel | undefined) ??
@@ -50,6 +64,7 @@ export async function resolveCurrentDirectiveLevels(params: {
     currentThinkLevel,
     currentFastMode,
     currentVerboseLevel,
+    currentEmotionMode,
     currentReasoningLevel,
     currentElevatedLevel,
   };

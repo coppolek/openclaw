@@ -299,6 +299,7 @@ export async function buildStatusText(params: BuildStatusTextParams): Promise<st
       },
       ...(typeof contextTokens === "number" && contextTokens > 0 ? { contextTokens } : {}),
       thinkingDefault: agentConfig?.thinkingDefault ?? agentDefaults.thinkingDefault,
+      emotionDefault: agentConfig?.emotionDefault ?? agentDefaults.emotionDefault,
       verboseDefault: agentDefaults.verboseDefault,
       elevatedDefault: agentDefaults.elevatedDefault,
     },

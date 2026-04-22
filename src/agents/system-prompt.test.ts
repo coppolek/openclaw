@@ -619,6 +619,34 @@ describe("buildAgentSystemPrompt", () => {
     );
   });
 
+  it("adds the emotion translation contract only when voice.md is present and emotions are enabled", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      emotionMode: "on",
+      contextFiles: [
+        { path: "./voice.md", content: "Voice library" },
+        { path: "./SOUL.md", content: "Persona" },
+      ],
+    });
+
+    expect(prompt).toContain("## Speech Preparation Contract");
+    expect(prompt).toContain("rewrite it through the loaded `voice.md` speech-preparation library");
+    expect(prompt).toContain("SOUL.md");
+    expect(prompt).toContain("voice.md");
+    expect(prompt.indexOf("SOUL.md")).toBeLessThan(prompt.indexOf("voice.md"));
+  });
+
+  it("omits the emotion translation contract for minimal prompts", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      promptMode: "minimal",
+      emotionMode: "full",
+      contextFiles: [{ path: "./voice.md", content: "Voice library" }],
+    });
+
+    expect(prompt).not.toContain("## Speech Preparation Contract");
+  });
+
   it("omits project context when no context files are injected", () => {
     const prompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",

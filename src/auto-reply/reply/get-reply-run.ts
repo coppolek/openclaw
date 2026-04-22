@@ -13,6 +13,7 @@ import {
 import { resolveSessionStoreEntry } from "../../config/sessions/store.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { normalizeEmotionMode } from "../../emotion-mode.js";
 import { logVerbose } from "../../globals.js";
 import { clearCommandLane, getQueueSize } from "../../process/command-queue.js";
 import {
@@ -242,6 +243,12 @@ export async function runPreparedReply(
     execOverrides,
     abortedLastRun,
   } = params;
+  const effectiveEmotionMode =
+    normalizeEmotionMode(sessionEntry?.emotionMode) ??
+    normalizeEmotionMode(cfg.agents?.list?.find((entry) => entry.id === agentId)?.emotionDefault) ??
+    normalizeEmotionMode(agentCfg?.emotionDefault) ??
+    normalizeEmotionMode(cfg.agents?.defaults?.emotionDefault) ??
+    "off";
   const useFastReplyRuntime = shouldUseReplyFastTestRuntime({
     cfg,
     isFastTestEnv: process.env.OPENCLAW_TEST_FAST === "1",
@@ -717,6 +724,7 @@ export async function runPreparedReply(
             sessionEntry: preparedSessionState.sessionEntry,
           }).enabled,
       verboseLevel: resolvedVerboseLevel,
+      emotionMode: effectiveEmotionMode,
       reasoningLevel: resolvedReasoningLevel,
       elevatedLevel: resolvedElevatedLevel,
       execOverrides,
