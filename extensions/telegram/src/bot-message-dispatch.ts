@@ -5,6 +5,7 @@ import {
   logTypingFailure,
   removeAckReactionAfterReply,
 } from "openclaw/plugin-sdk/channel-feedback";
+import { resolveHumanDelayConfig } from "openclaw/plugin-sdk/agent-runtime";
 import { createChannelReplyPipeline } from "openclaw/plugin-sdk/channel-reply-pipeline";
 import {
   resolveChannelStreamingBlockEnabled,
@@ -770,6 +771,7 @@ export const dispatchTelegramMessage = async ({
         cfg,
         dispatcherOptions: {
           ...replyPipeline,
+          humanDelay: resolveHumanDelayConfig(cfg, route.agentId),
           deliver: async (payload, info) => {
             if (isDispatchSuperseded()) {
               return;
