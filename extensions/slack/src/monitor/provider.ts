@@ -9,8 +9,8 @@ import {
 } from "openclaw/plugin-sdk/allow-from";
 import { CHANNEL_APPROVAL_NATIVE_RUNTIME_CONTEXT_CAPABILITY } from "openclaw/plugin-sdk/approval-handler-adapter-runtime";
 import { registerChannelRuntimeContext } from "openclaw/plugin-sdk/channel-runtime-context";
+import { createConnectedChannelStatusPatch } from "openclaw/plugin-sdk/channel-status";
 import type { SessionScope } from "openclaw/plugin-sdk/config-runtime";
-import { createConnectedChannelStatusPatch } from "openclaw/plugin-sdk/gateway-runtime";
 import { DEFAULT_GROUP_HISTORY_LIMIT } from "openclaw/plugin-sdk/reply-history";
 import { normalizeMainKey } from "openclaw/plugin-sdk/routing";
 import { warn } from "openclaw/plugin-sdk/runtime-env";
@@ -25,7 +25,6 @@ import { normalizeStringEntries } from "openclaw/plugin-sdk/text-runtime";
 import { installRequestBodyLimitGuard } from "openclaw/plugin-sdk/webhook-request-guards";
 import { resolveSlackAccount } from "../accounts.js";
 import { resolveSlackWebClientOptions } from "../client.js";
-import { isSlackExecApprovalClientEnabled } from "../exec-approvals.js";
 import { normalizeSlackWebhookPath, registerSlackHttpHandler } from "../http/index.js";
 import { SLACK_TEXT_LIMIT } from "../limits.js";
 import { resolveSlackChannelAllowlist, type SlackChannelResolution } from "../resolve-channels.js";
@@ -56,6 +55,8 @@ import type { MonitorSlackOpts } from "./types.js";
 
 type SlackAppConstructor = typeof import("@slack/bolt").App;
 type SlackHttpReceiverConstructor = typeof import("@slack/bolt").HTTPReceiver;
+type IsSlackExecApprovalClientEnabled =
+  typeof import("./exec-approvals-enabled.runtime.js").isSlackExecApprovalClientEnabled;
 type SlackBoltResolvedExports = {
   App: SlackAppConstructor;
   HTTPReceiver: SlackHttpReceiverConstructor;
@@ -128,6 +129,13 @@ function resolveSlackBoltInterop(params: {
 }
 
 let slackBoltInterop: SlackBoltResolvedExports | undefined;
+
+async function isSlackExecApprovalClientEnabledForAccount(
+  params: Parameters<IsSlackExecApprovalClientEnabled>[0],
+): Promise<boolean> {
+  const { isSlackExecApprovalClientEnabled } = await import("./exec-approvals-enabled.runtime.js");
+  return isSlackExecApprovalClientEnabled(params);
+}
 
 function getSlackBoltInterop(): SlackBoltResolvedExports {
   if (!slackBoltInterop) {
@@ -450,12 +458,15 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
     : undefined;
 
   const handleSlackMessage = createSlackMessageHandler({ ctx, account, trackEvent });
-  if (
-    isSlackExecApprovalClientEnabled({
-      cfg,
-      accountId: account.accountId,
-    })
-  ) {
+  // Register event handlers before any async runtime checks so tests and startup
+  // observers can see the Bolt wiring as soon as monitor initialization begins.
+  registerSlackMonitorEvents({ ctx, account, handleSlackMessage, trackEvent });
+
+  const execApprovalsEnabled = await isSlackExecApprovalClientEnabledForAccount({
+    cfg,
+    accountId: account.accountId,
+  });
+  if (execApprovalsEnabled) {
     registerChannelRuntimeContext({
       channelRuntime: opts.channelRuntime,
       channelId: "slack",
@@ -468,8 +479,6 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
       abortSignal: opts.abortSignal,
     });
   }
-
-  registerSlackMonitorEvents({ ctx, account, handleSlackMessage, trackEvent });
   await registerSlackMonitorSlashCommands({ ctx, account });
   if (slackMode === "http" && slackHttpHandler) {
     unregisterHttpHandler = registerSlackHttpHandler({
