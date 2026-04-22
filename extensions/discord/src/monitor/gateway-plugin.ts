@@ -274,6 +274,15 @@ function createGatewayPlugin(params: {
     override async registerClient(
       client: Parameters<carbonGateway.GatewayPlugin["registerClient"]>[0],
     ) {
+      // Assign `this.client` before awaiting, so Carbon's identify() always
+      // sees a client reference even when the lifecycle readiness-timeout
+      // handler triggers connect() while we are still fetching gateway
+      // metadata below. Carbon's Client constructor does not await
+      // registerClient(), so there is otherwise a window where an external
+      // connect() → identify() call silently drops the Identify payload and
+      // the gateway never reaches READY (openclaw/openclaw#52372).
+      this.client = client;
+
       if (!this.gatewayInfo || this.gatewayInfoUsedFallback) {
         const resolved = await fetchDiscordGatewayInfoWithTimeout({
           token: client.options.token,
@@ -290,6 +299,21 @@ function createGatewayPlugin(params: {
       }
       if (params.testing?.registerClient) {
         await params.testing.registerClient(this, client);
+        return;
+      }
+      // If an external caller (e.g. the lifecycle readiness-timeout handler)
+      // already invoked connect() while we were fetching gateway metadata,
+      // skip super.registerClient() to avoid tearing down the live WebSocket.
+      // `ws` and `isConnecting` are protected fields on Carbon's
+      // GatewayPlugin (see @buape/carbon GatewayPlugin.ts — `ws` declared at
+      // the `ws?: WebSocket` field, `isConnecting` at the connect() entry).
+      // The cast is intentional: if Carbon ever renames these fields the
+      // guard silently degrades to a no-op and super.registerClient() runs,
+      // which may cause a brief reconnect but not a permanent hang (the
+      // early `this.client = client` assignment above still guarantees
+      // identify() cannot see an undefined client).
+      const gatewayState = this as unknown as { ws?: unknown; isConnecting?: boolean };
+      if (gatewayState.ws || gatewayState.isConnecting) {
         return;
       }
       return super.registerClient(client);

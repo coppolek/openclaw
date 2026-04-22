@@ -42,9 +42,15 @@ const {
   class GatewayPlugin {
     options: unknown;
     gatewayInfo: unknown;
+    client: unknown;
+    ws: unknown;
+    isConnecting: boolean;
     constructor(options?: unknown, gatewayInfo?: unknown) {
       this.options = options;
       this.gatewayInfo = gatewayInfo;
+      this.client = undefined;
+      this.ws = undefined;
+      this.isConnecting = false;
     }
     async registerClient(client: unknown) {
       baseRegisterClientSpy(client);
@@ -443,6 +449,88 @@ describe("createDiscordGatewayPlugin", () => {
     expect(runtime.log).toHaveBeenCalledWith(
       expect.stringContaining("discord: gateway metadata lookup failed transiently"),
     );
+  });
+
+  it("sets client reference before the async gateway-info fetch resolves (regression for #52372)", async () => {
+    vi.useFakeTimers();
+    const runtime = createRuntime();
+    let fetchResolve: ((v: Response) => void) | undefined;
+    globalFetchMock.mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          fetchResolve = resolve;
+        }),
+    );
+    const plugin = createDiscordGatewayPlugin({
+      discordConfig: {},
+      runtime,
+    });
+
+    const clientArg = {
+      options: { token: "token-race" },
+      registerListener: baseRegisterClientSpy,
+      unregisterListener: vi.fn(),
+    };
+    const registerPromise = (
+      plugin as unknown as {
+        registerClient: (c: typeof clientArg) => Promise<void>;
+      }
+    ).registerClient(clientArg);
+
+    // Before the metadata fetch resolves, this.client should already be set so
+    // that a concurrent identify() cannot observe an undefined client.
+    expect((plugin as unknown as { client: unknown }).client).toBe(clientArg);
+
+    fetchResolve?.({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ url: "wss://gateway.discord.gg" }),
+    } as Response);
+    await registerPromise;
+
+    expect(baseRegisterClientSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips super.registerClient when an external connect() sets ws during the metadata fetch (regression for #52372)", async () => {
+    vi.useFakeTimers();
+    const runtime = createRuntime();
+    let fetchResolve: ((v: Response) => void) | undefined;
+    globalFetchMock.mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          fetchResolve = resolve;
+        }),
+    );
+    const plugin = createDiscordGatewayPlugin({
+      discordConfig: {},
+      runtime,
+    });
+
+    const clientArg = {
+      options: { token: "token-race" },
+      registerListener: baseRegisterClientSpy,
+      unregisterListener: vi.fn(),
+    };
+    const registerPromise = (
+      plugin as unknown as {
+        registerClient: (c: typeof clientArg) => Promise<void>;
+      }
+    ).registerClient(clientArg);
+
+    // Simulate the lifecycle readiness-timeout handler invoking connect()
+    // externally, which sets ws on the gateway plugin mid-fetch.
+    (plugin as unknown as { ws: unknown }).ws = { readyState: 1 };
+
+    fetchResolve?.({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ url: "wss://gateway.discord.gg" }),
+    } as Response);
+    await registerPromise;
+
+    // super.registerClient must NOT run, otherwise Carbon would tear down the
+    // live WebSocket that the external connect() just opened.
+    expect(baseRegisterClientSpy).not.toHaveBeenCalled();
   });
 
   it("refreshes fallback gateway metadata on the next register attempt", async () => {
