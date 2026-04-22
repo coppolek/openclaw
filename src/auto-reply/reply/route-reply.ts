@@ -172,7 +172,8 @@ export async function routeReply(params: RouteReplyParams): Promise<RouteReplyRe
       {
         hasChannelData,
       },
-    )
+    ) &&
+    !externalPayload.droppedMedia?.length
   ) {
     return { ok: true };
   }
