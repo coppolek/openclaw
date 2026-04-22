@@ -221,6 +221,8 @@ export async function waitForWhatsAppLoginResult(params: {
   }
 }
 
+const RECONNECT_SAFETY_TIMEOUT_MS = 90_000;
+
 export class WhatsAppConnectionController {
   readonly accountId: string;
   readonly authDir: string;
@@ -240,6 +242,7 @@ export class WhatsAppConnectionController {
 
   private current: WhatsAppLiveConnection | null = null;
   private reconnectAttempts = 0;
+  private reconnectSafetyTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(params: {
     accountId: string;
@@ -367,6 +370,9 @@ export class WhatsAppConnectionController {
       const listener = await params.createListener({ sock, connection });
       connection.listener = listener;
       this.current = connection;
+      // Clear the reconnect safety timer — listener was successfully
+      // re-established, so the reconnect is not stuck.
+      this.clearReconnectSafetyTimer();
       registerWhatsAppConnectionController(this.accountId, this);
       this.startTimers(connection, {
         onHeartbeat: params.onHeartbeat,
@@ -509,6 +515,16 @@ export class WhatsAppConnectionController {
     }
     this.current = null;
 
+    // Start a safety timer to detect stuck reconnects. If a new connection
+    // isn't opened within 90s, something is likely stuck.
+    this.clearReconnectSafetyTimer();
+    this.reconnectSafetyTimer = setTimeout(() => {
+      console.warn(
+        `WA listener guard: ${RECONNECT_SAFETY_TIMEOUT_MS / 1000}s since connection closed ` +
+          `(account=${this.accountId}), reconnect may be stuck`,
+      );
+    }, RECONNECT_SAFETY_TIMEOUT_MS);
+
     if (this.socketRef.current === connection.sock) {
       this.socketRef.current = null;
     }
@@ -538,6 +554,7 @@ export class WhatsAppConnectionController {
   async shutdown(): Promise<void> {
     this.stopDisconnectRetries();
     await this.closeCurrentConnection();
+    this.clearReconnectSafetyTimer();
     unregisterWhatsAppConnectionController(this.accountId, this);
   }
 
@@ -577,6 +594,13 @@ export class WhatsAppConnectionController {
         error: "watchdog-timeout",
       });
     }, this.watchdogCheckMs);
+  }
+
+  private clearReconnectSafetyTimer(): void {
+    if (this.reconnectSafetyTimer) {
+      clearTimeout(this.reconnectSafetyTimer);
+      this.reconnectSafetyTimer = null;
+    }
   }
 
   private stopDisconnectRetries(): void {
