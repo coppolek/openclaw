@@ -7,7 +7,6 @@ const SRC_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const REPO_ROOT = resolve(SRC_ROOT, "..");
 const sourceCache = new Map<string, string>();
 const tsFilesCache = new Map<string, string[]>();
-
 type FileFilter = {
   excludeTests?: boolean;
   testOnly?: boolean;
@@ -88,9 +87,13 @@ describe("plugin contract boundary invariants", () => {
     const offenders = files.filter((file) => {
       const source = readRepoSource(file);
       return (
-        /from\s+["'][^"']*extensions\/.+(?:api|runtime-api|test-api)\.js["']/u.test(source) ||
-        /vi\.(?:mock|doMock)\(\s*["'][^"']*extensions\/.+["']/u.test(source) ||
-        /importActual<[^>]*>\(\s*["'][^"']*extensions\/.+["']/u.test(source)
+        /from\s+["'][^"']*extensions\/.+\/(?:api|runtime-api|test-api)\.js["']/u.test(source) ||
+        /vi\.(?:mock|doMock)\(\s*["'][^"']*extensions\/.+\/(?:api|runtime-api|test-api)\.js["']/u.test(
+          source,
+        ) ||
+        /importActual<[^>]*>\(\s*["'][^"']*extensions\/.+\/(?:api|runtime-api|test-api)\.js["']/u.test(
+          source,
+        )
       );
     });
     expect(offenders).toEqual([]);

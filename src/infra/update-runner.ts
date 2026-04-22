@@ -48,16 +48,24 @@ export type UpdateStepResult = {
   stderrTail?: string | null;
 };
 
-export type UpdateRunResult = {
-  status: "ok" | "error" | "skipped";
+type UpdateRunResultBase = {
   mode: "git" | "pnpm" | "bun" | "npm" | "unknown";
-  root?: string;
   reason?: string;
   before?: { sha?: string | null; version?: string | null };
   after?: { sha?: string | null; version?: string | null };
   steps: UpdateStepResult[];
   durationMs: number;
 };
+
+export type UpdateRunResult =
+  | (UpdateRunResultBase & {
+      status: "ok";
+      root: string;
+    })
+  | (UpdateRunResultBase & {
+      status: "error" | "skipped";
+      root?: string;
+    });
 
 type CommandRunner = (
   argv: string[],

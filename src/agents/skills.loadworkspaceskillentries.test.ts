@@ -44,6 +44,7 @@ vi.mock("../plugins/manifest-registry.js", async () => {
 let fakeHome = "";
 let envSnapshot: SkillsHomeEnvSnapshot;
 let tempRoot = "";
+const tempDirs: string[] = [];
 let workspaceCaseIndex = 0;
 
 async function createTempWorkspaceDir() {
@@ -86,6 +87,12 @@ afterEach(async () => {
   setLoggerOverride(null);
   loggingState.rawConsole = null;
   resetLogger();
+  if (envSnapshot.previousOpenClawHome === undefined) {
+    delete process.env.OPENCLAW_HOME;
+  } else {
+    process.env.OPENCLAW_HOME = envSnapshot.previousOpenClawHome;
+  }
+  await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
 afterAll(async () => {
@@ -218,6 +225,33 @@ describe("loadWorkspaceSkillEntries", () => {
     });
 
     expect(replacementEntries.map((entry) => entry.skill.name)).toEqual(["docs-search"]);
+  });
+
+  it("loads personal skills from the OS home even when OPENCLAW_HOME is set", async () => {
+    const workspaceDir = await createTempWorkspaceDir();
+    const openclawHome = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-config-home-"));
+    tempDirs.push(openclawHome);
+    process.env.OPENCLAW_HOME = openclawHome;
+
+    await writeSkill({
+      dir: path.join(fakeHome, ".agents", "skills", "personal-skill"),
+      name: "personal-skill",
+      description: "OS home skill",
+    });
+    await writeSkill({
+      dir: path.join(openclawHome, ".agents", "skills", "personal-skill"),
+      name: "personal-skill",
+      description: "OPENCLAW_HOME skill",
+    });
+
+    const entries = loadWorkspaceSkillEntries(workspaceDir, {
+      managedSkillsDir: path.join(workspaceDir, ".managed"),
+      bundledSkillsDir: path.join(workspaceDir, ".bundled"),
+    });
+
+    const personal = entries.find((entry) => entry.skill.name === "personal-skill");
+    expect(personal?.skill.description).toBe("OS home skill");
+    expect(personal?.skill.filePath).toContain(path.join(fakeHome, ".agents", "skills"));
   });
 
   it("keeps remote-eligible skills when agent filtering is active", async () => {

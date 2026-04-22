@@ -7,6 +7,7 @@ import type { PinnedDispatcherPolicy, SsrFPolicy } from "../infra/net/ssrf.js";
 import { resolveUserPath } from "../utils.js";
 import { maxBytesForKind, type MediaKind } from "./constants.js";
 import { fetchRemoteMedia } from "./fetch.js";
+import { runFfprobe } from "./ffmpeg-exec.js";
 import {
   convertHeicToJpeg,
   hasAlphaChannel,
@@ -190,10 +191,11 @@ function formatCapReduce(label: string, cap: number, size: number): string {
 }
 
 function isHeicSource(opts: { contentType?: string; fileName?: string }): boolean {
-  if (opts.contentType && HEIC_MIME_RE.test(opts.contentType.trim())) {
+  const normalizedContentType = normalizeMimeType(opts.contentType);
+  if (normalizedContentType && HEIC_MIME_RE.test(normalizedContentType)) {
     return true;
   }
-  if (opts.fileName && HEIC_EXT_RE.test(opts.fileName.trim())) {
+  if (opts.fileName?.trim() && HEIC_EXT_RE.test(opts.fileName.trim())) {
     return true;
   }
   return false;
@@ -269,6 +271,66 @@ function assertHostReadMediaAllowed(params: {
   );
 }
 
+function isRemoteUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function shouldConvertHeicBuffer(opts: { contentType?: string; fileName?: string }): boolean {
+  if (!isHeicSource(opts)) {
+    return false;
+  }
+  const normalizedContentType = normalizeMimeType(opts.contentType);
+  if (!normalizedContentType) {
+    return true;
+  }
+  if (HEIC_MIME_RE.test(normalizedContentType)) {
+    return true;
+  }
+  return HEIC_EXT_RE.test(opts.fileName?.trim() ?? "");
+}
+
+async function normalizeAudioOnlyWebmMime(
+  filePath: string,
+  contentType?: string,
+): Promise<string | undefined> {
+  if (contentType !== "video/webm" || getFileExtension(filePath) !== ".webm") {
+    return contentType;
+  }
+  if (isRemoteUrl(filePath)) {
+    return contentType;
+  }
+
+  try {
+    const stdout = await runFfprobe([
+      "-v",
+      "error",
+      "-show_entries",
+      "stream=codec_type",
+      "-of",
+      "default=noprint_wrappers=1:nokey=1",
+      filePath,
+    ]);
+    const streamKinds = new Set(
+      stdout
+        .split(/\r?\n/)
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean),
+    );
+    if (streamKinds.has("audio") && !streamKinds.has("video")) {
+      return "audio/webm";
+    }
+  } catch {
+    // Keep the original type when ffprobe is unavailable or the file cannot be probed.
+  }
+
+  return contentType;
+}
+
 function toJpegFileName(fileName?: string): string | undefined {
   if (!fileName) {
     return undefined;
@@ -317,7 +379,10 @@ async function optimizeImageWithFallback(params: {
   meta?: { contentType?: string; fileName?: string };
 }): Promise<OptimizedImage> {
   const { buffer, cap, meta } = params;
-  const isPng = meta?.contentType === "image/png" || meta?.fileName?.toLowerCase().endsWith(".png");
+  const sourceLooksHeic = isHeicSource(meta ?? {});
+  const isPng =
+    !sourceLooksHeic &&
+    (meta?.contentType === "image/png" || meta?.fileName?.toLowerCase().endsWith(".png"));
   const hasAlpha = isPng && (await hasAlphaChannel(buffer));
 
   if (hasAlpha) {
@@ -522,8 +587,9 @@ async function loadWebMediaInternal(
       throw err;
     }
   }
-  const sniffedMime = await detectMime({ buffer: data });
-  const mime = await detectMime({ buffer: data, filePath: mediaUrl });
+  const detectedMime = await detectMime({ buffer: data, filePath: mediaUrl });
+  const mime = await normalizeAudioOnlyWebmMime(mediaUrl, detectedMime);
+  const sniffedMime = hostReadCapability ? await detectMime({ buffer: data }) : undefined;
   const kind = kindFromMime(mime);
   if (hostReadCapability) {
     assertHostReadMediaAllowed({
@@ -583,7 +649,7 @@ export async function optimizeImageToJpeg(
 }> {
   // Try a grid of sizes/qualities until under the limit.
   let source = buffer;
-  if (isHeicSource(opts)) {
+  if (shouldConvertHeicBuffer(opts)) {
     try {
       source = await convertHeicToJpeg(buffer);
     } catch (err) {
@@ -598,6 +664,7 @@ export async function optimizeImageToJpeg(
     resizeSide: number;
     quality: number;
   } | null = null;
+  let lastError: unknown;
 
   for (const side of sides) {
     for (const quality of qualities) {
@@ -620,7 +687,11 @@ export async function optimizeImageToJpeg(
             quality,
           };
         }
-      } catch {
+      } catch (err) {
+        lastError = err;
+        if (err instanceof Error && /pixel input limit/i.test(err.message)) {
+          throw err;
+        }
         // Continue trying other size/quality combinations
       }
     }
@@ -635,6 +706,9 @@ export async function optimizeImageToJpeg(
     };
   }
 
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
   throw new Error("Failed to optimize image");
 }
 

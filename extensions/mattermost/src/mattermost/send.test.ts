@@ -34,86 +34,108 @@ const mockState = vi.hoisted(() => ({
   uploadMattermostFile: vi.fn(),
 }));
 
-vi.mock("../../runtime-api.js", () => ({
-  loadOutboundMediaFromUrl: mockState.loadOutboundMediaFromUrl,
-}));
+vi.mock("../../runtime-api.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../runtime-api.js")>();
+  return {
+    ...actual,
+    loadOutboundMediaFromUrl: mockState.loadOutboundMediaFromUrl,
+  };
+});
 
-vi.mock("openclaw/plugin-sdk/config-runtime", () => ({
-  requireRuntimeConfig: (cfg: unknown) => {
-    if (cfg) {
-      return cfg;
-    }
-    throw new Error("Mattermost send requires a resolved runtime config");
-  },
-  resolveMarkdownTableMode: vi.fn(() => "off"),
-}));
+vi.mock("openclaw/plugin-sdk/config-runtime", async () => {
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/config-runtime")>(
+    "openclaw/plugin-sdk/config-runtime",
+  );
+  return {
+    ...actual,
+    resolveMarkdownTableMode: vi.fn(() => "off"),
+  };
+});
 
-vi.mock("openclaw/plugin-sdk/text-runtime", () => ({
-  convertMarkdownTables: vi.fn((text: string) => text),
-  normalizeLowercaseStringOrEmpty: vi.fn((value: string | null | undefined) => {
-    if (typeof value !== "string") {
-      return "";
-    }
-    return value.trim().toLowerCase();
-  }),
-  normalizeOptionalString: vi.fn((value: string | null | undefined) => {
-    if (typeof value !== "string") {
-      return undefined;
-    }
-    const normalized = value.trim();
-    return normalized.length > 0 ? normalized : undefined;
-  }),
-  normalizeStringifiedOptionalString: vi.fn((value: unknown) => {
-    if (typeof value === "string") {
+vi.mock("openclaw/plugin-sdk/text-runtime", async () => {
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/text-runtime")>(
+    "openclaw/plugin-sdk/text-runtime",
+  );
+  return {
+    ...actual,
+    convertMarkdownTables: vi.fn((text: string) => text),
+    normalizeOptionalString: vi.fn((value: string | null | undefined) => {
+      if (typeof value !== "string") {
+        return undefined;
+      }
       const normalized = value.trim();
       return normalized.length > 0 ? normalized : undefined;
-    }
-    if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
-      const normalized = String(value).trim();
-      return normalized.length > 0 ? normalized : undefined;
-    }
-    return undefined;
-  }),
-}));
+    }),
+    normalizeLowercaseStringOrEmpty: vi.fn((value: string | null | undefined) => {
+      if (typeof value !== "string") {
+        return "";
+      }
+      return value.trim().toLowerCase();
+    }),
+    normalizeStringifiedOptionalString: vi.fn((value: unknown) => {
+      if (typeof value === "string") {
+        const normalized = value.trim();
+        return normalized.length > 0 ? normalized : undefined;
+      }
+      if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+        const normalized = String(value).trim();
+        return normalized.length > 0 ? normalized : undefined;
+      }
+      return undefined;
+    }),
+  };
+});
 
-vi.mock("./accounts.js", () => ({
-  resolveMattermostAccount: mockState.resolveMattermostAccount,
-}));
+vi.mock("./accounts.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./accounts.js")>();
+  return {
+    ...actual,
+    resolveMattermostAccount: mockState.resolveMattermostAccount,
+  };
+});
 
-vi.mock("./client.js", () => ({
-  createMattermostClient: mockState.createMattermostClient,
-  createMattermostDirectChannel: mockState.createMattermostDirectChannel,
-  createMattermostDirectChannelWithRetry: mockState.createMattermostDirectChannelWithRetry,
-  createMattermostPost: mockState.createMattermostPost,
-  fetchMattermostChannelByName: mockState.fetchMattermostChannelByName,
-  fetchMattermostMe: mockState.fetchMattermostMe,
-  fetchMattermostUser: mockState.fetchMattermostUser,
-  fetchMattermostUserTeams: mockState.fetchMattermostUserTeams,
-  fetchMattermostUserByUsername: mockState.fetchMattermostUserByUsername,
-  normalizeMattermostBaseUrl: mockState.normalizeMattermostBaseUrl,
-  uploadMattermostFile: mockState.uploadMattermostFile,
-}));
+vi.mock("./client.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./client.js")>();
+  return {
+    ...actual,
+    createMattermostClient: mockState.createMattermostClient,
+    createMattermostDirectChannel: mockState.createMattermostDirectChannel,
+    createMattermostDirectChannelWithRetry: mockState.createMattermostDirectChannelWithRetry,
+    createMattermostPost: mockState.createMattermostPost,
+    fetchMattermostChannelByName: mockState.fetchMattermostChannelByName,
+    fetchMattermostMe: mockState.fetchMattermostMe,
+    fetchMattermostUser: mockState.fetchMattermostUser,
+    fetchMattermostUserTeams: mockState.fetchMattermostUserTeams,
+    fetchMattermostUserByUsername: mockState.fetchMattermostUserByUsername,
+    normalizeMattermostBaseUrl: mockState.normalizeMattermostBaseUrl,
+    uploadMattermostFile: mockState.uploadMattermostFile,
+  };
+});
 
-vi.mock("../runtime.js", () => ({
-  getMattermostRuntime: () => ({
-    config: {
-      loadConfig: mockState.loadConfig,
-    },
-    logging: {
-      shouldLogVerbose: () => false,
-      getChildLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-    },
-    channel: {
-      text: {
-        resolveMarkdownTableMode: () => "off",
-        convertMarkdownTables: (text: string) => text,
+vi.mock("../runtime.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../runtime.js")>();
+  return {
+    ...actual,
+    getMattermostRuntime: () => ({
+      config: {
+        loadConfig: mockState.loadConfig,
       },
-      activity: {
-        record: mockState.recordActivity,
+      logging: {
+        shouldLogVerbose: () => false,
+        getChildLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
       },
-    },
-  }),
-}));
+      channel: {
+        text: {
+          resolveMarkdownTableMode: () => "off",
+          convertMarkdownTables: (text: string) => text,
+        },
+        activity: {
+          record: mockState.recordActivity,
+        },
+      },
+    }),
+  };
+});
 
 describe("sendMessageMattermost", () => {
   beforeEach(async () => {

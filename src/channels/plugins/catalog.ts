@@ -2,9 +2,16 @@ import fs from "node:fs";
 import path from "node:path";
 import { MANIFEST_KEY } from "../../compat/legacy-names.js";
 import { resolveOpenClawPackageRootSync } from "../../infra/openclaw-root.js";
+import { resolveBundledPluginsDir } from "../../plugins/bundled-dir.js";
 import { listChannelCatalogEntries } from "../../plugins/channel-catalog-registry.js";
-import type { OpenClawPackageManifest } from "../../plugins/manifest.js";
-import type { PluginPackageChannel, PluginPackageInstall } from "../../plugins/manifest.js";
+import {
+  getPackageManifestMetadata,
+  loadPluginManifest,
+  type OpenClawPackageManifest,
+  type PackageManifest,
+  type PluginPackageChannel,
+  type PluginPackageInstall,
+} from "../../plugins/manifest.js";
 import type { PluginOrigin } from "../../plugins/plugin-origin.types.js";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { isRecord, resolveConfigDir, resolveUserPath } from "../../utils.js";
@@ -268,6 +275,99 @@ function buildExternalCatalogEntry(entry: ExternalCatalogEntry): ChannelPluginCa
   });
 }
 
+function readBundledPackageManifest(pluginDir: string): PackageManifest | null {
+  const packagePath = path.join(pluginDir, "package.json");
+  if (!fs.existsSync(packagePath)) {
+    return null;
+  }
+  try {
+    return JSON.parse(fs.readFileSync(packagePath, "utf8")) as PackageManifest;
+  } catch {
+    return null;
+  }
+}
+
+function tryRealpathSync(input: string): string {
+  try {
+    return fs.realpathSync(input);
+  } catch {
+    return path.resolve(input);
+  }
+}
+
+function isSourceCheckoutBundledMetadataDir(bundledDir: string): boolean {
+  const resolvedBundledDir = tryRealpathSync(bundledDir);
+  if (path.basename(resolvedBundledDir) !== "extensions") {
+    return false;
+  }
+  const packageRoot = path.dirname(resolvedBundledDir);
+  if (
+    !fs.existsSync(path.join(packageRoot, ".git")) ||
+    !fs.existsSync(path.join(packageRoot, "src")) ||
+    !fs.existsSync(path.join(packageRoot, "extensions"))
+  ) {
+    return false;
+  }
+  return tryRealpathSync(path.join(packageRoot, "extensions")) === resolvedBundledDir;
+}
+
+function resolveExcludedSourceCheckoutBundledDir(options: CatalogOptions): string | undefined {
+  if (!options.excludeWorkspace) {
+    return undefined;
+  }
+  const bundledDir = resolveBundledPluginsDir(options.env ?? process.env);
+  if (!bundledDir || !isSourceCheckoutBundledMetadataDir(bundledDir)) {
+    return undefined;
+  }
+  return tryRealpathSync(bundledDir);
+}
+
+function isPathInsideDir(candidatePath: string, parentDir: string): boolean {
+  const relative = path.relative(parentDir, tryRealpathSync(candidatePath));
+  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+function listBundledMetadataChannelCatalogEntries(
+  options: CatalogOptions,
+): ChannelPluginCatalogEntry[] {
+  const bundledDir = resolveBundledPluginsDir(options.env ?? process.env);
+  if (!bundledDir || !fs.existsSync(bundledDir)) {
+    return [];
+  }
+  if (resolveExcludedSourceCheckoutBundledDir(options)) {
+    return [];
+  }
+
+  const entries: ChannelPluginCatalogEntry[] = [];
+  for (const dirent of fs.readdirSync(bundledDir, { withFileTypes: true })) {
+    if (!dirent.isDirectory()) {
+      continue;
+    }
+    const pluginDir = path.join(bundledDir, dirent.name);
+    const packageJson = readBundledPackageManifest(pluginDir) ?? undefined;
+    const packageManifest = getPackageManifestMetadata(packageJson);
+    if (!packageManifest?.channel?.id) {
+      continue;
+    }
+    const manifest = loadPluginManifest(pluginDir, false);
+    if (!manifest.ok) {
+      continue;
+    }
+    const entry = buildCatalogEntryFromManifest({
+      pluginId: manifest.manifest.id,
+      packageName: packageJson?.name,
+      packageDir: pluginDir,
+      origin: "bundled",
+      channel: packageManifest.channel,
+      install: packageManifest.install,
+    });
+    if (entry) {
+      entries.push(entry);
+    }
+  }
+  return entries;
+}
+
 export function buildChannelUiCatalog(
   plugins: Array<{ id: string; meta: ChannelMeta }>,
 ): ChannelUiCatalog {
@@ -303,10 +403,18 @@ export function listChannelPluginCatalogEntries(
     workspaceDir: options.workspaceDir,
     env: options.env,
   });
+  const excludedSourceCheckoutBundledDir = resolveExcludedSourceCheckoutBundledDir(options);
   const resolved = new Map<string, { entry: ChannelPluginCatalogEntry; priority: number }>();
 
   for (const candidate of manifestEntries) {
     if (options.excludeWorkspace && candidate.origin === "workspace") {
+      continue;
+    }
+    if (
+      candidate.origin === "bundled" &&
+      excludedSourceCheckoutBundledDir &&
+      isPathInsideDir(candidate.rootDir, excludedSourceCheckoutBundledDir)
+    ) {
       continue;
     }
     const entry = buildCatalogEntryFromManifest({
@@ -324,6 +432,18 @@ export function listChannelPluginCatalogEntries(
     const priority = ORIGIN_PRIORITY[candidate.origin] ?? 99;
     const existing = resolved.get(entry.id);
     if (!existing || priority < existing.priority) {
+      resolved.set(entry.id, { entry, priority });
+    }
+  }
+
+  for (const entry of listBundledMetadataChannelCatalogEntries(options)) {
+    const priority = ORIGIN_PRIORITY.bundled;
+    const existing = resolved.get(entry.id);
+    if (
+      !existing ||
+      priority < existing.priority ||
+      (priority === existing.priority && !existing.entry.pluginId && entry.pluginId)
+    ) {
       resolved.set(entry.id, { entry, priority });
     }
   }

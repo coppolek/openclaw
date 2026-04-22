@@ -1129,6 +1129,10 @@ export async function updateCommand(opts: UpdateCommandOptions): Promise<void> {
     return;
   }
 
+  if (result.status !== "ok") {
+    return;
+  }
+
   let postUpdateConfigSnapshot = configSnapshot;
   if (requestedChannel && configSnapshot.valid && requestedChannel !== storedChannel) {
     if (switchToGit) {

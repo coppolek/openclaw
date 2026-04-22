@@ -13,6 +13,7 @@ import {
   resolveOutboundMediaUrls,
   resolveSendableOutboundReplyParts,
   resolveTextChunksWithFallback,
+  resolveToolDeliveryPayload,
   sendMediaWithLeadingCaption,
   sendPayloadWithChunkedTextAndMedia,
 } from "./reply-payload.js";
@@ -289,6 +290,69 @@ describe("resolveSendableOutboundReplyParts", () => {
       hasMedia: false,
       hasContent: true,
     });
+  });
+});
+
+describe("resolveToolDeliveryPayload", () => {
+  it("returns media-only payloads for MEDIA directives", () => {
+    expect(resolveToolDeliveryPayload({ text: "MEDIA:/tmp/out.mp3" })).toEqual({
+      text: undefined,
+      mediaUrls: ["/tmp/out.mp3"],
+      mediaUrl: "/tmp/out.mp3",
+    });
+  });
+
+  it("preserves audioAsVoice from directive media tokens", () => {
+    expect(
+      resolveToolDeliveryPayload({
+        text: "MEDIA:`/tmp/out.mp3`\n[[audio_as_voice]]",
+      }),
+    ).toEqual({
+      text: undefined,
+      mediaUrls: ["/tmp/out.mp3"],
+      mediaUrl: "/tmp/out.mp3",
+      audioAsVoice: true,
+    });
+  });
+
+  it("does not override explicit audioAsVoice false with directive hint", () => {
+    expect(
+      resolveToolDeliveryPayload({
+        text: "MEDIA:`/tmp/out.mp3`\n[[audio_as_voice]]",
+        audioAsVoice: false,
+      }),
+    ).toEqual({
+      text: undefined,
+      mediaUrls: ["/tmp/out.mp3"],
+      mediaUrl: "/tmp/out.mp3",
+      audioAsVoice: false,
+    });
+  });
+
+  it("trims and deduplicates media URLs from payload fields", () => {
+    expect(
+      resolveToolDeliveryPayload({
+        text: "No direct text",
+        mediaUrl: "   https://example.com/voice.ogg  ",
+        mediaUrls: [
+          "https://example.com/voice.ogg",
+          "  https://example.com/voice.ogg  ",
+          "https://example.com/image.png ",
+        ],
+      }),
+    ).toEqual({
+      text: undefined,
+      mediaUrls: ["https://example.com/voice.ogg", "https://example.com/image.png"],
+      mediaUrl: "https://example.com/voice.ogg",
+    });
+  });
+
+  it("returns null for payloads with no media and no allowed text", () => {
+    expect(resolveToolDeliveryPayload({ text: "   " })).toBeNull();
+  });
+
+  it("returns null for whitespace-only media URLs", () => {
+    expect(resolveToolDeliveryPayload({ text: "", mediaUrl: "   " })).toBeNull();
   });
 });
 

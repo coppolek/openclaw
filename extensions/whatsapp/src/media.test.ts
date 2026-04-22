@@ -4,17 +4,19 @@ import path from "node:path";
 import { optimizeImageToPng } from "openclaw/plugin-sdk/media-runtime";
 import { resolveStateDir } from "openclaw/plugin-sdk/state-paths";
 import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
-import { captureEnv } from "openclaw/plugin-sdk/testing";
-import { mockPinnedHostnameResolution } from "openclaw/plugin-sdk/testing";
+import { captureEnv, mockPinnedHostnameResolution } from "openclaw/plugin-sdk/testing";
 import sharp from "sharp";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { sendVoiceMessageDiscord } from "../../discord/src/send.js";
-import {
-  LocalMediaAccessError,
-  loadWebMedia,
-  loadWebMediaRaw,
-  optimizeImageToJpeg,
-} from "./media.js";
+
+let LocalMediaAccessError: typeof import("./media.js").LocalMediaAccessError;
+let loadWebMedia: typeof import("./media.js").loadWebMedia;
+let loadWebMediaRaw: typeof import("./media.js").loadWebMediaRaw;
+let optimizeImageToJpeg: typeof import("./media.js").optimizeImageToJpeg;
+let sendVoiceMessageDiscord: typeof import("../../discord/src/send.js").sendVoiceMessageDiscord;
+
+({ LocalMediaAccessError, loadWebMedia, loadWebMediaRaw, optimizeImageToJpeg } =
+  await import("./media.js"));
+({ sendVoiceMessageDiscord } = await import("../../discord/src/send.js"));
 
 let fixtureRoot = "";
 let fixtureFileCount = 0;

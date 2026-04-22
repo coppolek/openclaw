@@ -68,6 +68,7 @@ import type {
   DispatchFromConfigResult,
 } from "./dispatch-from-config.types.js";
 import { claimInboundDedupe, commitInboundDedupe, releaseInboundDedupe } from "./inbound-dedupe.js";
+import { resolveToolDeliveryPayload as resolveDefaultToolDeliveryPayload } from "./reply-payloads.js";
 import { resolveReplyRoutingDecision } from "./routing-policy.js";
 import { resolveRunTypingPolicy } from "./typing-policy.js";
 
@@ -859,22 +860,7 @@ export async function dispatchReplyFromConfig(
       if (shouldSendToolSummaries) {
         return payload;
       }
-      const execApproval =
-        payload.channelData &&
-        typeof payload.channelData === "object" &&
-        !Array.isArray(payload.channelData)
-          ? payload.channelData.execApproval
-          : undefined;
-      if (execApproval && typeof execApproval === "object" && !Array.isArray(execApproval)) {
-        return payload;
-      }
-      // Group/native flows intentionally suppress tool summary text, but media-only
-      // tool results (for example TTS audio) must still be delivered.
-      const hasMedia = resolveSendableOutboundReplyParts(payload).hasMedia;
-      if (!hasMedia) {
-        return null;
-      }
-      return { ...payload, text: undefined };
+      return resolveDefaultToolDeliveryPayload(payload);
     };
     const typing = resolveRunTypingPolicy({
       requestedPolicy: params.replyOptions?.typingPolicy,

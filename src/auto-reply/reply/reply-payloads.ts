@@ -10,3 +10,4 @@ export {
   filterMessagingToolMediaDuplicates,
   shouldSuppressMessagingToolReplies,
 } from "./reply-payloads-dedupe.js";
+export { resolveToolDeliveryPayload } from "../../plugin-sdk/reply-payload-tool-delivery.js";

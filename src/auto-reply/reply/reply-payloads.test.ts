@@ -4,6 +4,7 @@ import { createOutboundTestPlugin, createTestRegistry } from "../../test-utils/c
 import {
   filterMessagingToolMediaDuplicates,
   shouldSuppressMessagingToolReplies,
+  resolveToolDeliveryPayload,
 } from "./reply-payloads.js";
 
 function targetsMatchTelegramReplySuppression(params: {
@@ -31,7 +32,19 @@ vi.mock("../../channels/plugins/bundled.js", () => ({
             targetsMatchForReplySuppression: targetsMatchTelegramReplySuppression,
           },
         }
-      : undefined,
+      : channel === "bundled-demo"
+        ? {
+            outbound: {
+              targetsMatchForReplySuppression: ({
+                originTarget,
+                targetKey,
+              }: {
+                originTarget: string;
+                targetKey: string;
+              }) => originTarget === targetKey,
+            },
+          }
+        : undefined,
 }));
 
 describe("filterMessagingToolMediaDuplicates", () => {
@@ -218,5 +231,100 @@ describe("shouldSuppressMessagingToolReplies", () => {
         ],
       }),
     ).toBe(true);
+  });
+
+  it("uses bundled channel suppression matchers even when the plugin is not loaded", () => {
+    resetPluginRuntimeStateForTest();
+    setActivePluginRegistry(createTestRegistry([]));
+
+    expect(
+      shouldSuppressMessagingToolReplies({
+        messageProvider: "bundled-demo",
+        originatingTo: "room-a",
+        messagingToolSentTargets: [{ tool: "message", provider: "bundled-demo", to: "room-a" }],
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("resolveToolDeliveryPayload", () => {
+  it("returns media-only payloads for MEDIA directives", () => {
+    const payload = resolveToolDeliveryPayload({ text: "MEDIA:https://example.com/tts.opus" });
+    expect(payload).toEqual({
+      text: undefined,
+      mediaUrls: ["https://example.com/tts.opus"],
+      mediaUrl: "https://example.com/tts.opus",
+    });
+  });
+
+  it("preserves audioAsVoice from MEDIA directive", () => {
+    expect(
+      resolveToolDeliveryPayload({
+        text: "MEDIA:`https://example.com/tts.opus`\n[[audio_as_voice]]",
+      }),
+    ).toEqual({
+      text: undefined,
+      mediaUrls: ["https://example.com/tts.opus"],
+      mediaUrl: "https://example.com/tts.opus",
+      audioAsVoice: true,
+    });
+  });
+
+  it("does not override explicit audioAsVoice false with MEDIA directive hint", () => {
+    expect(
+      resolveToolDeliveryPayload({
+        text: "MEDIA:`https://example.com/tts.opus`\n[[audio_as_voice]]",
+        audioAsVoice: false,
+      }),
+    ).toEqual({
+      text: undefined,
+      mediaUrl: "https://example.com/tts.opus",
+      mediaUrls: ["https://example.com/tts.opus"],
+      audioAsVoice: false,
+    });
+  });
+
+  it("returns null for text-only payloads when text is not allowed", () => {
+    const payload = resolveToolDeliveryPayload({ text: "No media here" });
+    expect(payload).toBeNull();
+  });
+
+  it("trims and deduplicates media URLs from payload fields", () => {
+    const payload = resolveToolDeliveryPayload({
+      text: "No direct media",
+      mediaUrl: "  file:///tmp/screenshot.png  ",
+      mediaUrls: [
+        "file:///tmp/screenshot.png",
+        "  file:///tmp/screenshot.png  ",
+        "https://example.com/legacy.png ",
+      ],
+    });
+    expect(payload).toEqual({
+      text: undefined,
+      mediaUrl: "file:///tmp/screenshot.png",
+      mediaUrls: ["file:///tmp/screenshot.png", "https://example.com/legacy.png"],
+    });
+  });
+
+  it("keeps existing media payloads and drops text", () => {
+    const payload = resolveToolDeliveryPayload({
+      text: "Tool result",
+      mediaUrl: "file:///tmp/screenshot.png",
+      mediaUrls: ["https://example.com/legacy.png"],
+    });
+    expect(payload).toEqual({
+      text: undefined,
+      mediaUrl: "https://example.com/legacy.png",
+      mediaUrls: ["https://example.com/legacy.png", "file:///tmp/screenshot.png"],
+    });
+  });
+
+  it("returns null for whitespace-only media URLs", () => {
+    expect(resolveToolDeliveryPayload({ text: "", mediaUrl: "   " })).toBeNull();
+  });
+
+  it("respects allowText when text is allowed", () => {
+    const payload = resolveToolDeliveryPayload({ text: "Some text" }, { allowText: true });
+    expect(payload).toEqual({ text: "Some text" });
   });
 });
