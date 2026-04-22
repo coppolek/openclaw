@@ -17,6 +17,13 @@ export type McpServerConfig = {
   headers?: Record<string, string | number | boolean>;
   /** Optional connection timeout in milliseconds. */
   connectionTimeoutMs?: number;
+  /** Per-server tool filter applied after MCP discovery, before materialization. */
+  tools?: {
+    /** Whitelist of bare tool names to expose. If set, only these tools pass. Must be non-empty. */
+    allow?: [string, ...string[]];
+    /** Blacklist of bare tool names to hide. Applied after allow (deny wins on overlap). Must be non-empty. */
+    deny?: [string, ...string[]];
+  };
   [key: string]: unknown;
 };
 

@@ -3,6 +3,7 @@ import {
   createBundleMcpToolRuntime,
   materializeBundleMcpToolsForRun,
 } from "./pi-bundle-mcp-materialize.js";
+import { makeTempDir, startSseProbeServer } from "./pi-bundle-mcp-test-harness.js";
 import type { McpCatalogTool } from "./pi-bundle-mcp-types.js";
 import type { SessionMcpRuntime } from "./pi-bundle-mcp-types.js";
 
@@ -168,5 +169,39 @@ describe("createBundleMcpToolRuntime", () => {
       "multi__mu",
       "multi__zeta",
     ]);
+  });
+
+  it("applies tools.allow at discovery time so only whitelisted tools reach the catalog", async () => {
+    const sseServer = await startSseProbeServer({
+      extraToolNames: ["extra_tool_a", "extra_tool_b"],
+    });
+
+    try {
+      const workspaceDir = await makeTempDir("openclaw-bundle-mcp-sse-");
+      const runtime = await createBundleMcpToolRuntime({
+        workspaceDir,
+        cfg: {
+          mcp: {
+            servers: {
+              sseProbe: {
+                url: `http://127.0.0.1:${sseServer.port}/sse`,
+                transport: "sse",
+                tools: {
+                  allow: ["sse_probe"],
+                },
+              },
+            },
+          },
+        },
+      });
+
+      try {
+        expect(runtime.tools.map((tool) => tool.name)).toEqual(["sseProbe__sse_probe"]);
+      } finally {
+        await runtime.dispose();
+      }
+    } finally {
+      await sseServer.close();
+    }
   });
 });
