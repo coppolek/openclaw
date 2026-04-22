@@ -90,6 +90,11 @@ const packageManifestContractTests: PackageManifestContractParams[] = [
     mirroredRootRuntimeDeps: ["ws"],
   },
   {
+    pluginId: "qqbot",
+    mirroredRootRuntimeDeps: ["mpg123-decoder", "silk-wasm", "ws"],
+    minHostVersionBaseline: "2026.3.22",
+  },
+  {
     pluginId: "slack",
     pluginLocalRuntimeDeps: ["@slack/bolt", "@slack/web-api"],
     mirroredRootRuntimeDeps: ["https-proxy-agent"],
