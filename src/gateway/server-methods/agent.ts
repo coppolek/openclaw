@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { listAgentIds, resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
+import {
+  listAgentIds,
+  resolveAgentDir,
+  resolveAgentWorkspaceDir,
+  resolveDefaultAgentId,
+  resolveSessionAgentId,
+} from "../../agents/agent-scope.js";
 import type { AgentInternalEvent } from "../../agents/internal-events.js";
 import {
   normalizeSpawnedRunMetadata,
@@ -57,8 +63,13 @@ import {
   isGatewayMessageChannel,
   normalizeMessageChannel,
 } from "../../utils/message-channel.js";
+import { deleteMediaBuffer } from "../../media/store.js";
 import { resolveAssistantIdentity } from "../assistant-identity.js";
-import { MediaOffloadError, parseMessageWithAttachments } from "../chat-attachments.js";
+import {
+  MediaOffloadError,
+  parseMessageWithAttachments,
+  describeOffloadedImagesForTextOnlyModel,
+} from "../chat-attachments.js";
 import { resolveAssistantAvatarUrl } from "../control-ui-shared.js";
 import { ADMIN_SCOPE } from "../method-scopes.js";
 import { GATEWAY_CLIENT_CAPS, hasGatewayClientCap } from "../protocol/client-info.js";
@@ -394,59 +405,62 @@ export const agentHandlers: GatewayRequestHandlers = {
     const requestedBestEffortDeliver =
       typeof request.bestEffortDeliver === "boolean" ? request.bestEffortDeliver : undefined;
 
-    let message = (request.message ?? "").trim();
-    let images: Array<{ type: "image"; data: string; mimeType: string }> = [];
-    let imageOrder: PromptImageOrderEntry[] = [];
-    if (normalizedAttachments.length > 0) {
-      const requestedSessionKeyRaw =
-        typeof request.sessionKey === "string" && request.sessionKey.trim()
-          ? request.sessionKey.trim()
-          : undefined;
-
-      let baseProvider: string | undefined;
-      let baseModel: string | undefined;
-      if (requestedSessionKeyRaw) {
-        const { cfg: sessCfg, entry: sessEntry } = loadSessionEntry(requestedSessionKeyRaw);
-        const modelRef = resolveSessionModelRef(sessCfg, sessEntry, undefined);
-        baseProvider = modelRef.provider;
-        baseModel = modelRef.model;
-      }
-      const effectiveProvider = providerOverride || baseProvider;
-      const effectiveModel = modelOverride || baseModel;
-      const supportsImages = await resolveGatewayModelSupportsImages({
-        loadGatewayModelCatalog: context.loadGatewayModelCatalog,
-        provider: effectiveProvider,
-        model: effectiveModel,
-      });
-
-      try {
-        const parsed = await parseMessageWithAttachments(message, normalizedAttachments, {
-          maxBytes: 5_000_000,
-          log: context.logGateway,
-          supportsImages,
-        });
-        message = parsed.message.trim();
-        images = parsed.images;
-        imageOrder = parsed.imageOrder;
-        // offloadedRefs are appended as text markers to `message`; the agent
-        // runner will resolve them via detectAndLoadPromptImages.
-      } catch (err) {
-        // MediaOffloadError indicates a server-side storage fault (ENOSPC, EPERM,
-        // etc.). Map it to UNAVAILABLE so clients can retry without treating it as
-        // a bad request. All other errors are input-validation failures → 4xx.
-        const isServerFault = err instanceof MediaOffloadError;
+    // Validate agentId and sessionKey early so that paid image-description
+    // model calls are never triggered for invalid request params.
+    const validatedAgentIdRaw = normalizeOptionalString(request.agentId) ?? "";
+    const validatedAgentId = validatedAgentIdRaw
+      ? normalizeAgentId(validatedAgentIdRaw)
+      : undefined;
+    if (validatedAgentId) {
+      const knownAgents = listAgentIds(cfg);
+      if (!knownAgents.includes(validatedAgentId)) {
         respond(
           false,
           undefined,
           errorShape(
-            isServerFault ? ErrorCodes.UNAVAILABLE : ErrorCodes.INVALID_REQUEST,
-            String(err),
+            ErrorCodes.INVALID_REQUEST,
+            `invalid agent params: unknown agent id "${request.agentId}"`,
+          ),
+        );
+        return;
+      }
+    }
+    const validatedSessionKeyRaw =
+      typeof request.sessionKey === "string" && request.sessionKey.trim()
+        ? request.sessionKey.trim()
+        : undefined;
+    if (
+      validatedSessionKeyRaw &&
+      classifySessionKeyShape(validatedSessionKeyRaw) === "malformed_agent"
+    ) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          `invalid agent params: malformed session key "${validatedSessionKeyRaw}"`,
+        ),
+      );
+      return;
+    }
+    if (validatedAgentId && validatedSessionKeyRaw) {
+      const sessionAgentId = resolveAgentIdFromSessionKey(validatedSessionKeyRaw);
+      if (sessionAgentId !== validatedAgentId) {
+        respond(
+          false,
+          undefined,
+          errorShape(
+            ErrorCodes.INVALID_REQUEST,
+            `invalid agent params: session key agent (${sessionAgentId}) does not match agentId (${validatedAgentId})`,
           ),
         );
         return;
       }
     }
 
+    // Validate channel hints before any attachment processing or paid
+    // image-description calls, so that requests with invalid channels are
+    // rejected early without triggering unnecessary API costs or disk I/O.
     const isKnownGatewayChannel = (value: string): boolean => isGatewayMessageChannel(value);
     const channelHints = [request.channel, request.replyChannel]
       .filter((value): value is string => typeof value === "string")
@@ -467,58 +481,101 @@ export const agentHandlers: GatewayRequestHandlers = {
       }
     }
 
-    const agentIdRaw = normalizeOptionalString(request.agentId) ?? "";
-    const agentId = agentIdRaw ? normalizeAgentId(agentIdRaw) : undefined;
-    if (agentId) {
-      const knownAgents = listAgentIds(cfg);
-      if (!knownAgents.includes(agentId)) {
+    let message = (request.message ?? "").trim();
+    let images: Array<{ type: "image"; data: string; mimeType: string }> = [];
+    let imageOrder: PromptImageOrderEntry[] = [];
+    if (normalizedAttachments.length > 0) {
+      let baseProvider: string | undefined;
+      let baseModel: string | undefined;
+      if (validatedSessionKeyRaw) {
+        const { cfg: sessCfg, entry: sessEntry } = loadSessionEntry(validatedSessionKeyRaw);
+        const modelRef = resolveSessionModelRef(sessCfg, sessEntry, undefined);
+        baseProvider = modelRef.provider;
+        baseModel = modelRef.model;
+      }
+      const effectiveProvider = providerOverride || baseProvider;
+      const effectiveModel = modelOverride || baseModel;
+      const supportsImages = await resolveGatewayModelSupportsImages({
+        loadGatewayModelCatalog: context.loadGatewayModelCatalog,
+        provider: effectiveProvider,
+        model: effectiveModel,
+      });
+
+      try {
+        const parsed = await parseMessageWithAttachments(message, normalizedAttachments, {
+          maxBytes: 5_000_000,
+          log: context.logGateway,
+          supportsImages,
+        });
+        // When the primary model is text-only, describe offloaded images using
+        // the configured imageModel so the agent can reason about image content.
+        // agentId and sessionKey have already been validated above.
+        if (!supportsImages && parsed.offloadedRefs.length > 0) {
+          const resolvedAgentDir = validatedSessionKeyRaw
+            ? (() => {
+                const sid = resolveSessionAgentId({
+                  sessionKey: validatedSessionKeyRaw,
+                  config: cfg,
+                });
+                return sid ? resolveAgentDir(cfg, sid) : undefined;
+              })()
+            : validatedAgentId
+              ? resolveAgentDir(cfg, validatedAgentId)
+              : resolveAgentDir(cfg, resolveDefaultAgentId(cfg));
+          const described = await describeOffloadedImagesForTextOnlyModel({
+            parsed,
+            cfg,
+            agentDir: resolvedAgentDir,
+            log: context.logGateway,
+          });
+
+          // Text-only description is complete — the physical media files are no
+          // longer needed because the image content has been converted to text
+          // descriptions in the message. Clean up now to avoid orphaned files
+          // accumulating on disk (especially when media.cleanupTtlHours is unset).
+          // Best-effort: don't let cleanup failures block the message.
+          await Promise.allSettled(
+            parsed.offloadedRefs.map((ref) =>
+              deleteMediaBuffer(ref.id, "inbound").catch(() => {}),
+            ),
+          );
+
+          message = described.message.trim();
+          images = described.images;
+          imageOrder = described.imageOrder;
+        } else {
+          message = parsed.message.trim();
+          images = parsed.images;
+          imageOrder = parsed.imageOrder;
+        }
+        // offloadedRefs are appended as text markers to `message`; the agent
+        // runner will resolve them via detectAndLoadPromptImages.
+      } catch (err) {
+        // MediaOffloadError indicates a server-side storage fault (ENOSPC, EPERM,
+        // etc.). Map it to UNAVAILABLE so clients can retry without treating it as
+        // a bad request. All other errors are input-validation failures → 4xx.
+        const isServerFault = err instanceof MediaOffloadError;
         respond(
           false,
           undefined,
           errorShape(
-            ErrorCodes.INVALID_REQUEST,
-            `invalid agent params: unknown agent id "${request.agentId}"`,
+            isServerFault ? ErrorCodes.UNAVAILABLE : ErrorCodes.INVALID_REQUEST,
+            String(err),
           ),
         );
         return;
       }
     }
 
-    const requestedSessionKeyRaw = normalizeOptionalString(request.sessionKey);
-    if (
-      requestedSessionKeyRaw &&
-      classifySessionKeyShape(requestedSessionKeyRaw) === "malformed_agent"
-    ) {
-      respond(
-        false,
-        undefined,
-        errorShape(
-          ErrorCodes.INVALID_REQUEST,
-          `invalid agent params: malformed session key "${requestedSessionKeyRaw}"`,
-        ),
-      );
-      return;
-    }
+    const agentId = validatedAgentId;
+
+    const requestedSessionKeyRaw = validatedSessionKeyRaw;
     let requestedSessionKey =
       requestedSessionKeyRaw ??
       resolveExplicitAgentSessionKey({
         cfg,
         agentId,
       });
-    if (agentId && requestedSessionKeyRaw) {
-      const sessionAgentId = resolveAgentIdFromSessionKey(requestedSessionKeyRaw);
-      if (sessionAgentId !== agentId) {
-        respond(
-          false,
-          undefined,
-          errorShape(
-            ErrorCodes.INVALID_REQUEST,
-            `invalid agent params: agent "${request.agentId}" does not match session key agent "${sessionAgentId}"`,
-          ),
-        );
-        return;
-      }
-    }
     let resolvedSessionId = normalizeOptionalString(request.sessionId);
     let sessionEntry: SessionEntry | undefined;
     let bestEffortDeliver = requestedBestEffortDeliver ?? false;

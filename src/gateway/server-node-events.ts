@@ -24,9 +24,11 @@ import {
   normalizeMainKey,
   normalizeRpcAttachmentsToChatAttachments,
   parseMessageWithAttachments,
+  describeOffloadedImagesForTextOnlyModel,
   registerApnsRegistration,
   requestHeartbeatNow,
   resolveGatewayModelSupportsImages,
+  resolveAgentDir,
   resolveOutboundTarget,
   resolveSessionAgentId,
   resolveSessionModelRef,
@@ -438,9 +440,36 @@ export const handleNodeEvent = async (ctx: NodeEventContext, nodeId: string, evt
             log: ctx.logGateway,
             supportsImages,
           });
-          message = parsed.message.trim();
-          images = parsed.images;
-          imageOrder = parsed.imageOrder;
+          // When the primary model is text-only, describe offloaded images using
+          // the configured imageModel so the agent can reason about image content.
+          if (!supportsImages && parsed.offloadedRefs.length > 0) {
+            const agentDir = resolveAgentDir(cfg, sessionAgentId);
+            const described = await describeOffloadedImagesForTextOnlyModel({
+              parsed,
+              cfg,
+              agentDir,
+              log: ctx.logGateway,
+            });
+
+            // Text-only description is complete — the physical media files are no
+            // longer needed because the image content has been converted to text
+            // descriptions in the message. Clean up now to avoid orphaned files
+            // accumulating on disk (especially when media.cleanupTtlHours is unset).
+            // Best-effort: don't let cleanup failures block the message.
+            await Promise.allSettled(
+              parsed.offloadedRefs.map((ref) =>
+                deleteMediaBuffer(ref.id).catch(() => {}),
+              ),
+            );
+
+            message = described.message.trim();
+            images = described.images;
+            imageOrder = described.imageOrder;
+          } else {
+            message = parsed.message.trim();
+            images = parsed.images;
+            imageOrder = parsed.imageOrder;
+          }
           if (message.length > 20_000) {
             ctx.logGateway.warn(
               `agent.request message exceeds limit after attachment parsing (length=${message.length})`,

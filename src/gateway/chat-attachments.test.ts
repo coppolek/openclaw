@@ -178,3 +178,75 @@ describe("shared attachment validation", () => {
     }
   });
 });
+
+describe("parseMessageWithAttachments default behavior", () => {
+  it("default path: small images are passed inline (not offloaded)", async () => {
+    const { parsed, logs } = await parseWithWarnings("look at this", [
+      {
+        type: "image",
+        mimeType: "image/png",
+        fileName: "photo.png",
+        content: PNG_1x1,
+      },
+    ]);
+    // Default: supportsImages is undefined (falsy but not explicitly false)
+    // so images are passed inline when small enough
+    expect(parsed.images).toHaveLength(1);
+    expect(parsed.offloadedRefs).toHaveLength(0);
+  });
+});
+
+describe("text-only model mode (supportsImages=false)", () => {
+
+  it("offloads all images when supportsImages=false", async () => {
+    const logs: string[] = [];
+    const parsed = await parseMessageWithAttachments(
+      "look at this",
+      [
+        {
+          type: "image",
+          mimeType: "image/png",
+          fileName: "photo.png",
+          content: PNG_1x1,
+        },
+      ],
+      {
+        supportsImages: false,
+        log: { warn: (w: string) => logs.push(w), info: (..._a: unknown[]) => {} },
+      },
+    );
+    // In text-only mode: no inline images, but images are offloaded to media store
+    expect(parsed.images).toHaveLength(0);
+    expect(parsed.offloadedRefs).toHaveLength(1);
+    expect(parsed.message).toContain("media://inbound/");
+    expect(parsed.imageOrder).toEqual(["offloaded"]);
+  });
+
+  it("offloads multiple images when supportsImages=false", async () => {
+    const logs: string[] = [];
+    const parsed = await parseMessageWithAttachments(
+      "compare these",
+      [
+        {
+          type: "image",
+          mimeType: "image/png",
+          fileName: "photo1.png",
+          content: PNG_1x1,
+        },
+        {
+          type: "image",
+          mimeType: "image/png",
+          fileName: "photo2.png",
+          content: PNG_1x1,
+        },
+      ],
+      {
+        supportsImages: false,
+        log: { warn: (w: string) => logs.push(w), info: (..._a: unknown[]) => {} },
+      },
+    );
+    expect(parsed.images).toHaveLength(0);
+    expect(parsed.offloadedRefs).toHaveLength(2);
+    expect(parsed.imageOrder).toEqual(["offloaded", "offloaded"]);
+  });
+});

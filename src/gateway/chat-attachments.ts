@@ -2,7 +2,7 @@ import { formatErrorMessage } from "../infra/errors.js";
 import { estimateBase64DecodedBytes } from "../media/base64.js";
 import type { PromptImageOrderEntry } from "../media/prompt-image-order.js";
 import { sniffMimeFromBase64 } from "../media/sniff-mime-from-base64.js";
-import { deleteMediaBuffer, saveMediaBuffer } from "../media/store.js";
+import { deleteMediaBuffer, resolveMediaBufferPath, saveMediaBuffer } from "../media/store.js";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
@@ -58,9 +58,9 @@ export type ParsedMessageWithImages = {
    * It is intentionally separate from `images` because downstream model calls
    * do not receive these as inline image blocks.
    *
-   * ⚠️  Call sites (chat.ts, agent.ts, server-node-events.ts) MUST also pass
-   * `supportsImages: modelSupportsImages(model)` so that text-only model runs
-   * do not inject unresolvable media:// markers into prompt text.
+   * In text-only mode (supportsImages=false), ALL image attachments are
+   * offloaded regardless of size so that a configured imageModel can describe
+   * them. The `images` array will be empty in that case.
    */
   offloadedRefs: OffloadedRef[];
 };
@@ -271,12 +271,11 @@ function validateAttachmentBase64OrThrow(
  * because they are not passed inline to the model.
  *
  * ## Text-only model runs
- * Pass `supportsImages: false` for text-only model runs so that no media://
- * markers are injected into prompt text.
- *
- * ⚠️  Call sites in chat.ts, agent.ts, and server-node-events.ts MUST be
- * updated to pass `supportsImages: modelSupportsImages(model)`. Until they do,
- * text-only model runs receive unresolvable media:// markers in their prompt.
+ * Pass `supportsImages: false` for text-only model runs. Attachments are still
+ * offloaded to the media store with `media://` markers injected into the prompt
+ * so that downstream image description pipelines can resolve and describe them
+ * using a configured `imageModel`. The `images` array will be empty in this case;
+ * only `offloadedRefs` and `imageOrder` entries (all marked "offloaded") are produced.
  *
  * ## Cleanup on failure
  * On any parse failure after files have already been offloaded, best-effort
@@ -304,17 +303,22 @@ export async function parseMessageWithAttachments(
     return { message, images: [], imageOrder: [], offloadedRefs: [] };
   }
 
-  // For text-only models drop all attachments cleanly. Do not save files or
-  // inject media:// markers that would never be resolved and would leak
-  // internal path references into the model's prompt.
-  if (opts?.supportsImages === false) {
-    if (attachments.length > 0) {
-      log?.warn(
-        `parseMessageWithAttachments: ${attachments.length} attachment(s) dropped — model does not support images`,
-      );
-    }
-    return { message, images: [], imageOrder: [], offloadedRefs: [] };
-  }
+  // For text-only models, offload all attachments to the media store but
+  // do NOT pass them as inline image blocks. The media:// markers are
+  // injected so that downstream image description pipelines (e.g.
+  // describeOffloadedImagesForTextOnlyModel) can resolve and describe them
+  // using a configured imageModel. Previously, attachments were dropped
+  // entirely, which meant the agent never saw them at all.
+  const textOnlyMode = opts?.supportsImages === false;
+
+  // In text-only mode, cap the number of attachments that get offloaded to
+  // disk. Without this cap, a single request with many attachments causes
+  // unbounded media-store writes and I/O amplification before the downstream
+  // fanout limit (MAX_DESCRIBE_FANOUT in describeOffloadedImagesForTextOnlyModel)
+  // kicks in. Attachments beyond this budget are neutralized as text-only
+  // markers without persisting to disk.
+  const MAX_TEXT_ONLY_OFFLOAD = 10;
+  let textOnlyOffloadCount = 0;
 
   const images: ChatImageContent[] = [];
   const imageOrder: PromptImageOrderEntry[] = [];
@@ -375,12 +379,38 @@ export async function parseMessageWithAttachments(
       // "IMAGE/JPEG") does not silently bypass the SUPPORTED_OFFLOAD_MIMES check.
       const finalMime = sniffedMime ?? providedMime ?? normalizeMime(mime) ?? mime;
 
+      // In text-only mode, always offload to the media store so that
+      // downstream image description pipelines can resolve and describe the
+      // images using a configured imageModel. Inline image blocks are never
+      // produced because the primary model cannot process them.
+      const forceOffload = textOnlyMode;
+
+      // In text-only mode, cap offloads before writing to disk. Excess
+      // attachments are neutralized as text markers without persisting
+      // to the media store, preventing unbounded I/O from large batches.
+      if (forceOffload && textOnlyOffloadCount >= MAX_TEXT_ONLY_OFFLOAD) {
+        log?.warn(
+          `attachment ${label}: text-only offload cap (${MAX_TEXT_ONLY_OFFLOAD}) reached, neutralizing without disk write`,
+        );
+        updatedMessage += `\n[image attached but not offloaded: text-only attachment cap reached]`;
+        imageOrder.push("offloaded");
+        continue;
+      }
+
       let isOffloaded = false;
 
-      if (sizeBytes > OFFLOAD_THRESHOLD_BYTES) {
+      if (forceOffload || sizeBytes > OFFLOAD_THRESHOLD_BYTES) {
         const isSupportedForOffload = SUPPORTED_OFFLOAD_MIMES.has(finalMime);
 
         if (!isSupportedForOffload) {
+          if (forceOffload) {
+            // Text-only mode: can't inline and can't offload this format.
+            // Drop gracefully rather than crashing the session.
+            log?.warn(
+              `attachment ${label}: unsupported offload format ${finalMime} for text-only model, dropping`,
+            );
+            continue;
+          }
           // Passing this inline would reintroduce the OOM risk this PR prevents.
           throw new Error(
             `attachment ${label}: format ${finalMime} is too large to pass inline ` +
@@ -418,7 +448,9 @@ export async function parseMessageWithAttachments(
           const mediaRef = `media://inbound/${savedMedia.id}`;
 
           updatedMessage += `\n[media attached: ${mediaRef}]`;
-          log?.info?.(`[Gateway] Intercepted large image payload. Saved: ${mediaRef}`);
+          log?.info?.(
+            `[Gateway] ${forceOffload ? "Text-only model offload" : "Intercepted large image payload"}. Saved: ${mediaRef}`,
+          );
 
           // Record for transcript metadata — separate from `images` because
           // these are not passed inline to the model.
@@ -432,6 +464,7 @@ export async function parseMessageWithAttachments(
           imageOrder.push("offloaded");
 
           isOffloaded = true;
+          textOnlyOffloadCount++;
         } catch (err) {
           const errorMessage = formatErrorMessage(err);
           throw new MediaOffloadError(
@@ -445,6 +478,8 @@ export async function parseMessageWithAttachments(
         continue;
       }
 
+      // In text-only mode, inline images are never produced. This branch
+      // is only reached when textOnlyMode is false and size <= threshold.
       images.push({ type: "image", data: b64, mimeType: finalMime });
       imageOrder.push("inline");
     }
@@ -503,4 +538,230 @@ export function buildMessageWithAttachments(
 
   const separator = message.trim().length > 0 ? "\n\n" : "";
   return `${message}${separator}${blocks.join("\n\n")}`;
+}
+
+/**
+ * Describes offloaded images using a vision-capable imageModel so that
+ * text-only primary models can still process image attachments.
+ *
+ * When the primary model does not support images (supportsImages=false),
+ * `parseMessageWithAttachments` offloads all images to the media store and
+ * injects `[media attached: media://inbound/<id>]` markers into the message.
+ * This function resolves those markers, describes the images using the
+ * configured imageModel, and replaces the markers with human-readable
+ * descriptions so the text-only model can reason about the image content.
+ *
+ * If no imageModel is configured or description fails for an image, the
+ * original `media://` marker is preserved in the message (graceful fallback).
+ *
+ * @param parsed Result from `parseMessageWithAttachments` with offloadedRefs
+ * @param cfg OpenClawConfig for resolving imageModel
+ * @param agentDir Optional agent directory for provider resolution
+ * @returns Updated message with media:// markers replaced by descriptions
+ */
+export async function describeOffloadedImagesForTextOnlyModel(params: {
+  parsed: ParsedMessageWithImages;
+  cfg: import("../config/types.js").OpenClawConfig;
+  agentDir?: string;
+  log?: AttachmentLog;
+}): Promise<ParsedMessageWithImages> {
+  const { parsed, cfg, agentDir, log } = params;
+
+  if (parsed.offloadedRefs.length === 0) {
+    return parsed;
+  }
+
+  // Dynamically import the media-understanding description functions
+  // through the *.runtime.ts boundary convention (see CLAUDE.md).
+  let resolveAutoImageModel:
+    | typeof import("./media-understanding-describe.runtime.js").resolveAutoImageModel
+    | undefined;
+  let describeImageFileWithModel:
+    | typeof import("./media-understanding-describe.runtime.js").describeImageFileWithModel
+    | undefined;
+  try {
+    const runtime = await import("./media-understanding-describe.runtime.js");
+    resolveAutoImageModel = runtime.resolveAutoImageModel;
+    describeImageFileWithModel = runtime.describeImageFileWithModel;
+  } catch {
+    log?.warn("describeOffloadedImages: failed to import media-understanding modules");
+    // Neutralize markers so the runner doesn't try to parse them as image refs
+    let neutralMessage = parsed.message;
+    for (const ref of parsed.offloadedRefs) {
+      const marker = `[media attached: ${ref.mediaRef}]`;
+      neutralMessage = neutralMessage.replace(
+        marker,
+        "[image attached but could not be described: media-understanding import failed]",
+      );
+    }
+    return { ...parsed, message: neutralMessage };
+  }
+
+  // Resolve the imageModel from config (e.g. agents.defaults.imageModel).
+  // resolveAutoImageModel checks activeModel then falls back to key-order,
+  // but it does NOT check agents.defaults.imageModel (that logic lives in
+  // resolveAutoEntries which is used by the `image` tool path, not here).
+  // So we build a list of configured image model candidates (primary + fallbacks)
+  // and try each as activeModel so multi-provider setups route descriptions
+  // to the correct provider and honor the fallback chain.
+  const configuredImageModelCandidates: { provider: string; model: string }[] = [];
+  const imageModelCfg = cfg.agents?.defaults?.imageModel;
+  if (typeof imageModelCfg === "string" && imageModelCfg.includes("/")) {
+    const slashIdx = imageModelCfg.indexOf("/");
+    configuredImageModelCandidates.push({
+      provider: imageModelCfg.slice(0, slashIdx),
+      model: imageModelCfg.slice(slashIdx + 1),
+    });
+  } else if (imageModelCfg && typeof imageModelCfg === "object") {
+    const primary = imageModelCfg.primary;
+    if (primary && primary.includes("/")) {
+      const slashIdx = primary.indexOf("/");
+      configuredImageModelCandidates.push({
+        provider: primary.slice(0, slashIdx),
+        model: primary.slice(slashIdx + 1),
+      });
+    }
+    const fallbacks = imageModelCfg.fallbacks ?? [];
+    for (const fb of fallbacks) {
+      if (fb && fb.includes("/")) {
+        const slashIdx = fb.indexOf("/");
+        configuredImageModelCandidates.push({
+          provider: fb.slice(0, slashIdx),
+          model: fb.slice(slashIdx + 1),
+        });
+      }
+    }
+  }
+
+  // Guard against resolveAutoImageModel throwing (e.g. provider misconfiguration)
+  // so that a config error doesn't crash the entire message pipeline.
+  let imageModel: Awaited<ReturnType<typeof resolveAutoImageModel>> | undefined;
+  try {
+    // Try each configured candidate as activeModel; use the first that resolves.
+    // If none resolve (e.g. no auth), fall through to key-order auto selection
+    // which resolveAutoImageModel does internally when activeModel is unset.
+    if (configuredImageModelCandidates.length > 0) {
+      for (const candidate of configuredImageModelCandidates) {
+        const resolved = await resolveAutoImageModel({ cfg, agentDir, activeModel: candidate });
+        if (resolved?.model) {
+          imageModel = resolved;
+          break;
+        }
+      }
+    }
+    // If no configured candidate resolved, let resolveAutoImageModel try
+    // key-order auto selection by calling it without activeModel.
+    if (!imageModel?.model) {
+      imageModel = await resolveAutoImageModel({ cfg, agentDir });
+    }
+  } catch (err) {
+    log?.warn(
+      `describeOffloadedImages: resolveAutoImageModel failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    // Neutralize all media:// markers so the runner doesn't try to parse them
+    let neutralMessage = parsed.message;
+    for (const ref of parsed.offloadedRefs) {
+      const marker = `[media attached: ${ref.mediaRef}]`;
+      neutralMessage = neutralMessage.replace(
+        marker,
+        "[image attached but could not be described: imageModel resolution failed]",
+      );
+    }
+    return { ...parsed, message: neutralMessage };
+  }
+  if (!imageModel?.model) {
+    log?.warn(
+      `describeOffloadedImages: no imageModel configured, ${parsed.offloadedRefs.length} image(s) cannot be described`,
+    );
+    // Neutralize all media:// markers so the downstream runner doesn't try
+    // to parse them as image refs (which would fail for text-only models).
+    let neutralMessage = parsed.message;
+    for (const ref of parsed.offloadedRefs) {
+      const marker = `[media attached: ${ref.mediaRef}]`;
+      neutralMessage = neutralMessage.replace(
+        marker,
+        "[image attached but could not be described: no imageModel configured]",
+      );
+    }
+    return { ...parsed, message: neutralMessage };
+  }
+
+  let updatedMessage = parsed.message;
+
+  // Cap per-request description fanout to avoid unbounded cost/latency.
+  // Gateway RPC schemas accept unbounded attachments arrays; without a cap,
+  // one request could trigger many sequential paid image-description calls.
+  const MAX_DESCRIBE_FANOUT = 5;
+  const refsToDescribe = parsed.offloadedRefs.slice(0, MAX_DESCRIBE_FANOUT);
+  const skippedCount = parsed.offloadedRefs.length - refsToDescribe.length;
+  if (skippedCount > 0) {
+    log?.warn(
+      `describeOffloadedImages: capping at ${MAX_DESCRIBE_FANOUT} of ${parsed.offloadedRefs.length} offloaded images; ${skippedCount} will be neutralized`,
+    );
+    // Neutralize skipped markers so the runner doesn't try to parse them
+    for (const ref of parsed.offloadedRefs.slice(MAX_DESCRIBE_FANOUT)) {
+      const marker = `[media attached: ${ref.mediaRef}]`;
+      updatedMessage = updatedMessage.replace(
+        marker,
+        "[image attached but not described: fanout cap reached]",
+      );
+    }
+  }
+
+  for (const ref of refsToDescribe) {
+    try {
+      // Resolve the physical file path from the media store
+      const physicalPath = await resolveMediaBufferPath(ref.id, "inbound");
+
+      // Describe the image using the vision-capable imageModel
+      const result = await describeImageFileWithModel({
+        filePath: physicalPath,
+        cfg,
+        agentDir,
+        mime: ref.mimeType,
+        provider: imageModel.provider,
+        model: imageModel.model,
+        prompt:
+          "Describe this image concisely in 2-3 sentences. Focus on the main subject, key details, and any text visible in the image.",
+        maxTokens: 200,
+        timeoutMs: 30_000,
+      });
+
+      const description = result.text?.trim();
+      if (description) {
+        // Replace the media:// marker with a text description
+        const marker = `[media attached: ${ref.mediaRef}]`;
+        const replacement = `[attached image: ${description}]`;
+        updatedMessage = updatedMessage.replace(marker, replacement);
+        log?.info?.(
+          `[Gateway] Described offloaded image ${ref.mediaRef} via ${imageModel.provider}/${imageModel.model}`,
+        );
+      } else {
+        log?.warn(
+          `describeOffloadedImages: imageModel returned empty description for ${ref.mediaRef}`,
+        );
+        // Neutralize marker so it doesn't get parsed as image ref
+        const marker = `[media attached: ${ref.mediaRef}]`;
+        updatedMessage = updatedMessage.replace(
+          marker,
+          "[image attached but description was empty]",
+        );
+      }
+    } catch (err) {
+      log?.warn(
+        `describeOffloadedImages: failed to describe ${ref.mediaRef}: ${formatErrorMessage(err)}`,
+      );
+      // Neutralize the marker so it doesn't get parsed as an image ref downstream
+      const marker = `[media attached: ${ref.mediaRef}]`;
+      updatedMessage = updatedMessage.replace(
+        marker,
+        `[image attached but could not be described: description failed]`,
+      );
+    }
+  }
+
+  return {
+    ...parsed,
+    message: updatedMessage,
+  };
 }

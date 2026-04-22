@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { CURRENT_SESSION_VERSION, SessionManager } from "@mariozechner/pi-coding-agent";
 import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
-import { resolveSessionAgentId } from "../../agents/agent-scope.js";
+import { resolveAgentDir, resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { resolveThinkingDefault } from "../../agents/model-selection.js";
 import { rewriteTranscriptEntriesInSessionFile } from "../../agents/pi-embedded-runner/transcript-rewrite.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
@@ -47,8 +47,10 @@ import {
   type ChatImageContent,
   type OffloadedRef,
   parseMessageWithAttachments,
+  describeOffloadedImagesForTextOnlyModel,
 } from "../chat-attachments.js";
 import { MediaOffloadError } from "../chat-attachments.js";
+import { deleteMediaBuffer } from "../../media/store.js";
 import { stripEnvelopeFromMessage, stripEnvelopeFromMessages } from "../chat-sanitize.js";
 import { augmentChatHistoryWithCliSessionImports } from "../cli-session-history.js";
 import { isSuppressedControlReplyText } from "../control-reply-text.js";
@@ -1936,10 +1938,40 @@ export const chatHandlers: GatewayRequestHandlers = {
           log: context.logGateway,
           supportsImages,
         });
-        parsedMessage = parsed.message;
-        parsedImages = parsed.images;
-        imageOrder = parsed.imageOrder;
-        offloadedRefs = parsed.offloadedRefs;
+        // When the primary model is text-only, describe offloaded images using
+        // the configured imageModel so the agent can reason about image content.
+        if (!supportsImages && parsed.offloadedRefs.length > 0) {
+          const agentDir = resolveAgentDir(cfg, agentId);
+          const described = await describeOffloadedImagesForTextOnlyModel({
+            parsed,
+            cfg,
+            agentDir,
+            log: context.logGateway,
+          });
+
+          // Text-only description is complete — the physical media files are no
+          // longer needed because the image content has been converted to text
+          // descriptions. Clean up now to avoid orphaned files accumulating on
+          // disk, especially for ACP bridge clients where persistChatSendImages
+          // skips offloaded ref persistence entirely.
+          await Promise.allSettled(
+            parsed.offloadedRefs.map((ref) =>
+              deleteMediaBuffer(ref.id, "inbound").catch(() => {}),
+            ),
+          );
+
+          parsedMessage = described.message;
+          parsedImages = described.images;
+          imageOrder = described.imageOrder;
+          // Clear offloadedRefs so persistChatSendImages doesn't build transcript
+          // entries pointing to files that were already deleted during cleanup.
+          offloadedRefs = [];
+        } else {
+          parsedMessage = parsed.message;
+          parsedImages = parsed.images;
+          imageOrder = parsed.imageOrder;
+          offloadedRefs = parsed.offloadedRefs;
+        }
       } catch (err) {
         respond(
           false,
