@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelProviderConfig } from "../config/types.js";
@@ -22,11 +23,16 @@ type IsPluginProvidersLoadInFlight =
   typeof import("./providers.runtime.js").isPluginProvidersLoadInFlight;
 type ResolveCatalogHookProviderPluginIds =
   typeof import("./providers.js").resolveCatalogHookProviderPluginIds;
+type ResolveOwningPluginIdsForProvider =
+  typeof import("./providers.js").resolveOwningPluginIdsForProvider;
 
 const resolvePluginProvidersMock = vi.fn<ResolvePluginProviders>((_) => [] as ProviderPlugin[]);
 const isPluginProvidersLoadInFlightMock = vi.fn<IsPluginProvidersLoadInFlight>((_) => false);
 const resolveCatalogHookProviderPluginIdsMock = vi.fn<ResolveCatalogHookProviderPluginIds>(
   (_) => [] as string[],
+);
+const resolveOwningPluginIdsForProviderMock = vi.fn<ResolveOwningPluginIdsForProvider>(
+  (_) => undefined,
 );
 
 let augmentModelCatalogWithProviderPlugins: typeof import("./provider-runtime.js").augmentModelCatalogWithProviderPlugins;
@@ -237,6 +243,8 @@ describe("provider-runtime", () => {
     vi.doMock("./providers.js", () => ({
       resolveCatalogHookProviderPluginIds: (params: unknown) =>
         resolveCatalogHookProviderPluginIdsMock(params as never),
+      resolveOwningPluginIdsForProvider: (params: unknown) =>
+        resolveOwningPluginIdsForProviderMock(params as never),
     }));
     vi.doMock("./providers.runtime.js", () => ({
       resolvePluginProviders: (params: unknown) => resolvePluginProvidersMock(params as never),
@@ -299,6 +307,8 @@ describe("provider-runtime", () => {
     isPluginProvidersLoadInFlightMock.mockReturnValue(false);
     resolveCatalogHookProviderPluginIdsMock.mockReset();
     resolveCatalogHookProviderPluginIdsMock.mockReturnValue([]);
+    resolveOwningPluginIdsForProviderMock.mockReset();
+    resolveOwningPluginIdsForProviderMock.mockReturnValue(undefined);
   });
 
   it("matches providers by alias for runtime hook lookup", () => {
@@ -1354,6 +1364,98 @@ describe("provider-runtime", () => {
         onlyPluginIds: ["openai"],
         activate: false,
         cache: false,
+      }),
+    );
+  });
+
+  it("loads owning bundled provider plugins for catalog augmentation when models.json declares provider models", async () => {
+    vi.spyOn(fs, "readFile").mockResolvedValue(
+      JSON.stringify({
+        providers: {
+          aimlapi: {
+            models: [{ id: "openai/gpt-5-nano-2025-08-07" }],
+          },
+        },
+      }),
+    );
+    resolveOwningPluginIdsForProviderMock.mockImplementation((params) =>
+      params.provider === "aimlapi" ? ["aimlapi"] : undefined,
+    );
+    resolvePluginProvidersMock.mockReturnValue([
+      {
+        id: "aimlapi",
+        label: "AI/ML API",
+        auth: [],
+        augmentModelCatalog: async () => [
+          {
+            provider: "aimlapi",
+            id: "openai/gpt-5-nano-2025-08-07",
+            name: "GPT-5 Nano",
+          },
+        ],
+      },
+    ]);
+
+    await expect(
+      augmentModelCatalogWithProviderPlugins({
+        env: process.env,
+        context: {
+          agentDir: "/tmp/openclaw",
+          env: process.env,
+          entries: [{ provider: "openai", id: "gpt-4.1", name: "GPT-4.1" }],
+        },
+      }),
+    ).resolves.toContainEqual({
+      provider: "aimlapi",
+      id: "openai/gpt-5-nano-2025-08-07",
+      name: "GPT-5 Nano",
+    });
+
+    expect(resolveOwningPluginIdsForProviderMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "aimlapi",
+      }),
+    );
+    expect(resolvePluginProvidersMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onlyPluginIds: ["aimlapi"],
+      }),
+    );
+  });
+
+  it("keeps bundled catalog augmenters active when models.json is missing", async () => {
+    vi.spyOn(fs, "readFile").mockRejectedValue(
+      Object.assign(new Error("missing"), { code: "ENOENT" }),
+    );
+    resolveCatalogHookProviderPluginIdsMock.mockReturnValue(["openai"]);
+    resolvePluginProvidersMock.mockImplementation((params?: { onlyPluginIds?: string[] }) => {
+      const onlyPluginIds = params?.onlyPluginIds;
+      if (!onlyPluginIds || !onlyPluginIds.includes("openai")) {
+        return [];
+      }
+      return [createOpenAiCatalogProviderPlugin()];
+    });
+
+    await expect(
+      augmentModelCatalogWithProviderPlugins({
+        env: process.env,
+        context: {
+          agentDir: "/tmp/openclaw",
+          env: process.env,
+          entries: [
+            { provider: "openai", id: "gpt-5.2", name: "GPT-5.2" },
+            { provider: "openai", id: "gpt-5.2-pro", name: "GPT-5.2 Pro" },
+            { provider: "openai", id: "gpt-5-mini", name: "GPT-5 mini" },
+            { provider: "openai", id: "gpt-5-nano", name: "GPT-5 nano" },
+            { provider: "openai-codex", id: "gpt-5.4", name: "GPT-5.4" },
+          ],
+        },
+      }),
+    ).resolves.toEqual(expectedAugmentedOpenaiCodexCatalogEntries);
+
+    expect(resolvePluginProvidersMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onlyPluginIds: ["openai"],
       }),
     );
   });

@@ -318,10 +318,20 @@ export const ToolsWebSearchSchema = z
   .object({
     enabled: z.boolean().optional(),
     provider: z.string().optional(),
+    apiKey: SecretInputSchema.optional().register(sensitive),
     maxResults: z.number().int().positive().optional(),
     timeoutSeconds: z.number().int().positive().optional(),
     cacheTtlMinutes: z.number().nonnegative().optional(),
-    apiKey: SecretInputSchema.optional().register(sensitive),
+    // Keep the legacy AIMLAPI scoped shape loadable so runtime config validation
+    // does not block the plugin-owned fallback/migration path.
+    aimlapi: z
+      .object({
+        apiKey: SecretInputSchema.optional().register(sensitive),
+        baseUrl: z.string().optional(),
+        model: z.string().optional(),
+      })
+      .strict()
+      .optional(),
     openaiCodex: z
       .object({
         enabled: z.boolean().optional(),

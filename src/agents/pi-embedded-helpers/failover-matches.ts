@@ -146,6 +146,7 @@ const ERROR_PATTERNS = {
   authPermanent: HIGH_CONFIDENCE_AUTH_PERMANENT_PATTERNS,
   auth: [
     ...AMBIGUOUS_AUTH_ERROR_PATTERNS,
+    "no api key resolved",
     ...COMMON_AUTH_ERROR_PATTERNS,
     ...ZAI_AUTH_ERROR_PATTERNS,
   ],
@@ -228,11 +229,7 @@ export function isAuthPermanentErrorMessage(raw: string): boolean {
 }
 
 export function isAuthErrorMessage(raw: string): boolean {
-  return matchesErrorPatternGroups(raw, [
-    AMBIGUOUS_AUTH_ERROR_PATTERNS,
-    COMMON_AUTH_ERROR_PATTERNS,
-    ZAI_AUTH_ERROR_PATTERNS,
-  ]);
+  return matchesErrorPatterns(raw, ERROR_PATTERNS.auth);
 }
 
 export function isOverloadedErrorMessage(raw: string): boolean {

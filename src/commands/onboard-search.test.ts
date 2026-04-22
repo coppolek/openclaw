@@ -5,6 +5,14 @@ import type { RuntimeEnv } from "../runtime.js";
 import type { WizardPrompter } from "../wizard/prompts.js";
 import { listSearchProviderOptions, setupSearch } from "./onboard-search.js";
 
+const { resolveApiKeyForProviderMock } = vi.hoisted(() => ({
+  resolveApiKeyForProviderMock: vi.fn(),
+}));
+
+vi.mock("../agents/model-auth.js", () => ({
+  resolveApiKeyForProvider: resolveApiKeyForProviderMock,
+}));
+
 type WebSearchConfigRecord = {
   plugins?: {
     entries?: Record<
@@ -18,6 +26,12 @@ const SEARCH_PROVIDER_PLUGINS: Record<
   string,
   { pluginId: string; envVars: string[]; label: string; credentialLabel?: string }
 > = {
+  aimlapi: {
+    pluginId: "aimlapi",
+    envVars: ["AIMLAPI_API_KEY"],
+    label: "AI/ML API Search",
+    credentialLabel: "AI/ML API Search API key",
+  },
   brave: { pluginId: "brave", envVars: ["BRAVE_API_KEY"], label: "Brave Search" },
   firecrawl: { pluginId: "firecrawl", envVars: ["FIRECRAWL_API_KEY"], label: "Firecrawl" },
   gemini: { pluginId: "google", envVars: ["GEMINI_API_KEY", "GOOGLE_API_KEY"], label: "Gemini" },
@@ -87,6 +101,41 @@ function createSearchProviderEntry(id: string): PluginWebSearchProviderEntry {
       return next;
     },
   };
+  if (id === "aimlapi") {
+    entry.hasReusableProviderAuthMetadata = ({ config }) =>
+      Object.entries(config.auth?.profiles ?? {}).some(
+        ([profileId, profile]) =>
+          profileId === "aimlapi:default" ||
+          profileId.startsWith("aimlapi:") ||
+          (typeof profile === "object" && profile !== null && profile.provider === "aimlapi"),
+      );
+    entry.hasReusableProviderAuth = async ({ config }) => {
+      if (!entry.hasReusableProviderAuthMetadata?.({ config })) {
+        return false;
+      }
+      try {
+        const resolved = await resolveApiKeyForProviderMock({
+          provider: "aimlapi",
+          cfg: config,
+        });
+        const apiKey = typeof resolved?.apiKey === "string" ? resolved.apiKey.trim() : undefined;
+        if (!apiKey) {
+          return false;
+        }
+        const response = await global.fetch("https://api.aimlapi.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: "",
+        });
+        return response.ok || response.status === 400;
+      } catch {
+        return false;
+      }
+    };
+  }
   if (id === "kimi") {
     entry.runSetup = async ({ config, prompter }) => {
       const baseUrl = await prompter.select({
@@ -110,7 +159,7 @@ function createSearchProviderEntry(id: string): PluginWebSearchProviderEntry {
 
 const searchProviderFixture = vi.hoisted(() => ({
   resolvePluginWebSearchProviders: vi.fn(() =>
-    ["brave", "firecrawl", "gemini", "grok", "kimi", "perplexity", "tavily"].map((id) =>
+    ["aimlapi", "brave", "firecrawl", "gemini", "grok", "kimi", "perplexity", "tavily"].map((id) =>
       createSearchProviderEntry(id),
     ),
   ),
@@ -129,6 +178,7 @@ const runtime: RuntimeEnv = {
 };
 
 const SEARCH_PROVIDER_ENV_VARS = [
+  "AIMLAPI_API_KEY",
   "BRAVE_API_KEY",
   "FIRECRAWL_API_KEY",
   "GEMINI_API_KEY",
@@ -143,6 +193,7 @@ const SEARCH_PROVIDER_ENV_VARS = [
 
 let originalSearchProviderEnv: Partial<Record<(typeof SEARCH_PROVIDER_ENV_VARS)[number], string>> =
   {};
+const originalFetch = global.fetch;
 
 function createPrompter(params: {
   selectValue?: string;
@@ -269,6 +320,8 @@ async function runQuickstartPerplexitySetup(
 
 describe("setupSearch", () => {
   beforeEach(() => {
+    resolveApiKeyForProviderMock.mockReset();
+    resolveApiKeyForProviderMock.mockRejectedValue(new Error("missing auth"));
     originalSearchProviderEnv = Object.fromEntries(
       SEARCH_PROVIDER_ENV_VARS.map((key) => [key, process.env[key]]),
     );
@@ -278,6 +331,7 @@ describe("setupSearch", () => {
   });
 
   afterEach(() => {
+    global.fetch = originalFetch;
     for (const key of SEARCH_PROVIDER_ENV_VARS) {
       const value = originalSearchProviderEnv[key];
       if (value === undefined) {
@@ -293,6 +347,179 @@ describe("setupSearch", () => {
     const { prompter } = createPrompter({ selectValue: "__skip__" });
     const result = await setupSearch(cfg, runtime, prompter);
     expect(result).toBe(cfg);
+  });
+
+  it("ignores reusable-auth hook failures and still shows other providers", async () => {
+    searchProviderFixture.resolvePluginWebSearchProviders.mockReturnValueOnce([
+      {
+        ...createSearchProviderEntry("aimlapi"),
+        hasReusableProviderAuth: vi.fn(async () => {
+          throw new Error("probe failed");
+        }),
+      },
+      createSearchProviderEntry("brave"),
+    ]);
+
+    const cfg: OpenClawConfig = {};
+    const { prompter } = createPrompter({
+      selectValue: "brave",
+      textValue: "BSA-test-key",
+    });
+
+    const result = await setupSearch(cfg, runtime, prompter);
+
+    expect(result.tools?.web?.search?.provider).toBe("brave");
+    expect(pluginWebSearchApiKey(result, "brave")).toBe("BSA-test-key");
+  });
+
+  it("does not probe reusable auth for other providers before rendering the choice list", async () => {
+    global.fetch = vi.fn(async () => new Response("", { status: 400 })) as typeof fetch;
+    resolveApiKeyForProviderMock.mockResolvedValue({
+      apiKey: "aiml-profile-key",
+      source: "profile:aimlapi:default",
+      profileId: "aimlapi:default",
+      mode: "api-key",
+    });
+
+    const cfg: OpenClawConfig = {
+      auth: {
+        profiles: {
+          "aimlapi:default": {
+            provider: "aimlapi",
+            mode: "api_key",
+          },
+        },
+      },
+    };
+    const { prompter } = createPrompter({
+      selectValue: "brave",
+      textValue: "BSA-test-key",
+    });
+
+    const result = await setupSearch(cfg, runtime, prompter);
+
+    expect(result.tools?.web?.search?.provider).toBe("brave");
+    expect(resolveApiKeyForProviderMock).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("sets provider and key for perplexity", async () => {
+    const cfg: OpenClawConfig = {};
+    const { prompter } = createPrompter({
+      selectValue: "perplexity",
+      textValue: "pplx-test-key",
+    });
+    const result = await setupSearch(cfg, runtime, prompter);
+    expect(result.tools?.web?.search?.provider).toBe("perplexity");
+    expect(pluginWebSearchApiKey(result, "perplexity")).toBe("pplx-test-key");
+    expect(result.tools?.web?.search?.enabled).toBe(true);
+    expect(result.plugins?.entries?.perplexity?.enabled).toBe(true);
+  });
+
+  it("sets provider and key for aimlapi", async () => {
+    const cfg: OpenClawConfig = {};
+    const { prompter } = createPrompter({
+      selectValue: "aimlapi",
+      textValue: "aiml-test-key",
+    });
+    const result = await setupSearch(cfg, runtime, prompter);
+    expect(result.tools?.web?.search?.provider).toBe("aimlapi");
+    expect(pluginWebSearchApiKey(result, "aimlapi")).toBe("aiml-test-key");
+    expect(result.tools?.web?.search?.enabled).toBe(true);
+    expect(result.plugins?.entries?.aimlapi?.enabled).toBe(true);
+  });
+
+  it("reuses configured AIMLAPI provider auth without prompting for a second web-search key", async () => {
+    resolveApiKeyForProviderMock.mockResolvedValue({
+      apiKey: "aiml-profile-key",
+      source: "profile:aimlapi:default",
+      profileId: "aimlapi:default",
+      mode: "api-key",
+    });
+    global.fetch = vi.fn(async () => new Response("", { status: 400 })) as typeof fetch;
+    const text = vi.fn(async () => "");
+    const prompter: WizardPrompter = {
+      intro: vi.fn(async () => {}),
+      outro: vi.fn(async () => {}),
+      note: vi.fn(async () => {}),
+      select: vi.fn(async () => "aimlapi") as unknown as WizardPrompter["select"],
+      multiselect: vi.fn(async () => []) as unknown as WizardPrompter["multiselect"],
+      text,
+      confirm: vi.fn(async () => true),
+      progress: vi.fn(() => ({ update: vi.fn(), stop: vi.fn() })),
+    };
+
+    const result = await setupSearch(
+      {
+        auth: {
+          profiles: {
+            "aimlapi:default": {
+              provider: "aimlapi",
+              mode: "api_key",
+            },
+          },
+        },
+      } as OpenClawConfig,
+      runtime,
+      prompter,
+    );
+
+    expect(result.tools?.web?.search?.provider).toBe("aimlapi");
+    expect(text).not.toHaveBeenCalled();
+  });
+
+  it("does not trust AIMLAPI profile metadata when auth probe returns 401", async () => {
+    resolveApiKeyForProviderMock.mockResolvedValue({
+      apiKey: "aiml-invalid-key",
+      source: "profile:aimlapi:default",
+      profileId: "aimlapi:default",
+      mode: "api-key",
+    });
+    global.fetch = vi.fn(async () => new Response("", { status: 401 })) as typeof fetch;
+    const text = vi.fn(async () => "");
+    const prompter: WizardPrompter = {
+      intro: vi.fn(async () => {}),
+      outro: vi.fn(async () => {}),
+      note: vi.fn(async () => {}),
+      select: vi.fn(async () => "aimlapi") as unknown as WizardPrompter["select"],
+      multiselect: vi.fn(async () => []) as unknown as WizardPrompter["multiselect"],
+      text,
+      confirm: vi.fn(async () => true),
+      progress: vi.fn(() => ({ update: vi.fn(), stop: vi.fn() })),
+    };
+
+    const result = await setupSearch(
+      {
+        auth: {
+          profiles: {
+            "aimlapi:default": {
+              provider: "aimlapi",
+              mode: "api_key",
+            },
+          },
+        },
+      } as OpenClawConfig,
+      runtime,
+      prompter,
+    );
+
+    expect(result.tools?.web?.search?.provider).toBe("aimlapi");
+    expect(result.tools?.web?.search?.enabled).toBeUndefined();
+    expect(result.plugins?.entries?.aimlapi?.enabled).toBeUndefined();
+    expect(text).toHaveBeenCalled();
+  });
+
+  it("sets provider and key for brave", async () => {
+    const cfg: OpenClawConfig = {};
+    const { prompter } = createPrompter({
+      selectValue: "brave",
+      textValue: "BSA-test-key",
+    });
+    const result = await setupSearch(cfg, runtime, prompter);
+    expect(result.tools?.web?.search?.provider).toBe("brave");
+    expect(result.tools?.web?.search?.enabled).toBe(true);
+    expect(pluginWebSearchApiKey(result, "brave")).toBe("BSA-test-key");
+    expect(result.plugins?.entries?.brave?.enabled).toBe(true);
   });
 
   it("sets provider keys and enables plugin entries", async () => {
@@ -647,6 +874,7 @@ describe("setupSearch", () => {
     expect(values).toEqual([...values].toSorted());
     expect(values).toEqual(
       expect.arrayContaining([
+        "aimlapi",
         "brave",
         "firecrawl",
         "gemini",

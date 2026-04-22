@@ -192,6 +192,7 @@ export type {
   WebSearchProviderContext,
   WebSearchProviderId,
   WebSearchProviderPlugin,
+  WebSearchProviderReusableAuthContext,
   WebSearchProviderSetupContext,
   WebSearchProviderToolDefinition,
   WebSearchRuntimeMetadataContext,

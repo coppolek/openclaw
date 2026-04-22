@@ -223,16 +223,21 @@ function batchNeedsRuntimeWebTools(batch: readonly SecretRegistryEntry[]): boole
   );
 }
 
-function batchUsesRuntimeWebToolsOnly(batch: readonly SecretRegistryEntry[]): boolean {
+function canUseRuntimeWebToolsOnly(entry: SecretRegistryEntry): boolean {
+  if (entry.id === "tools.web.fetch.firecrawl.apiKey") {
+    return true;
+  }
+  if (entry.id === "tools.web.search.apiKey") {
+    return true;
+  }
   return (
-    batch.length > 0 &&
-    batch.every(
-      (entry) =>
-        entry.id.startsWith("tools.web.") ||
-        (entry.id.startsWith("plugins.entries.") &&
-          (entry.id.includes(".config.webSearch.") || entry.id.includes(".config.webFetch."))),
-    )
+    entry.id.startsWith("plugins.entries.") &&
+    (entry.id.includes(".config.webSearch.") || entry.id.includes(".config.webFetch."))
   );
+}
+
+function batchUsesRuntimeWebToolsOnly(batch: readonly SecretRegistryEntry[]): boolean {
+  return batch.length > 0 && batch.every((entry) => canUseRuntimeWebToolsOnly(entry));
 }
 
 function applyConfigForOpenClawTarget(
@@ -326,6 +331,12 @@ function applyConfigForOpenClawTarget(
   }
   if (entry.id === "plugins.entries.google.config.webSearch.apiKey") {
     setPathCreateStrict(config, ["tools", "web", "search", "provider"], "gemini");
+  }
+  if (entry.id === "tools.web.search.aimlapi.apiKey") {
+    setPathCreateStrict(config, ["tools", "web", "search", "provider"], "aimlapi");
+  }
+  if (entry.id === "plugins.entries.aimlapi.config.webSearch.apiKey") {
+    setPathCreateStrict(config, ["tools", "web", "search", "provider"], "aimlapi");
   }
   if (entry.id === "plugins.entries.xai.config.webSearch.apiKey") {
     setPathCreateStrict(config, ["tools", "web", "search", "provider"], "grok");

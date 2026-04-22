@@ -445,6 +445,10 @@
       "types": "./dist/plugin-sdk/agent-config-primitives.d.ts",
       "default": "./dist/plugin-sdk/agent-config-primitives.js"
     },
+    "./plugin-sdk/aimlapi": {
+      "types": "./dist/plugin-sdk/aimlapi.d.ts",
+      "default": "./dist/plugin-sdk/aimlapi.js"
+    },
     "./plugin-sdk/allow-from": {
       "types": "./dist/plugin-sdk/allow-from.d.ts",
       "default": "./dist/plugin-sdk/allow-from.js"
@@ -1028,6 +1032,10 @@
     "./plugin-sdk/provider-catalog-shared": {
       "types": "./dist/plugin-sdk/provider-catalog-shared.d.ts",
       "default": "./dist/plugin-sdk/provider-catalog-shared.js"
+    },
+    "./plugin-sdk/provider-catalog": {
+      "types": "./dist/plugin-sdk/provider-catalog.d.ts",
+      "default": "./dist/plugin-sdk/provider-catalog.js"
     },
     "./plugin-sdk/provider-entry": {
       "types": "./dist/plugin-sdk/provider-entry.d.ts",

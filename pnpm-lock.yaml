@@ -248,6 +248,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
+  extensions/aimlapi:
+    dependencies:
+      '@sinclair/typebox':
+        specifier: 0.34.49
+        version: 0.34.49
+
   extensions/alibaba:
     devDependencies:
       '@openclaw/plugin-sdk':

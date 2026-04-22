@@ -464,6 +464,25 @@ async function createDefaultProviderPlugins(): Promise<ProviderPlugin[]> {
 
   return [
     await createApiKeyProvider({
+      providerId: "anthropic",
+      label: "Anthropic API key",
+      choiceId: "apiKey",
+      optionKey: "anthropicApiKey",
+      flagName: "--anthropic-api-key",
+      envVar: "ANTHROPIC_API_KEY",
+      promptMessage: "Enter Anthropic API key",
+    }),
+    await createApiKeyProvider({
+      providerId: "aimlapi",
+      label: "AI/ML API key",
+      choiceId: "aimlapi-api-key",
+      optionKey: "aimlapiApiKey",
+      flagName: "--aimlapi-api-key",
+      envVar: "AIMLAPI_API_KEY",
+      promptMessage: "Enter AI/ML API key",
+      defaultModel: "aimlapi/openai/gpt-5-nano-2025-08-07",
+    }),
+    await createApiKeyProvider({
       providerId: "google",
       label: "Gemini API key",
       choiceId: "gemini-api-key",
@@ -561,6 +580,9 @@ describe("applyAuthChoice", () => {
     "GEMINI_API_KEY",
     "OPENCODE_API_KEY",
     "SYNTHETIC_API_KEY",
+    "SSH_TTY",
+    "CHUTES_CLIENT_ID",
+    "AIMLAPI_API_KEY",
   ]);
   let authTestRoot: string | null = null;
   let authStateCounter = 0;
@@ -1078,6 +1100,280 @@ describe("applyAuthChoice", () => {
           result.config.models?.providers?.[scenario.expectProviderConfigUndefined],
         ).toBeUndefined();
       }
+    }
+  });
+
+  it("sets default model when selecting github-copilot", async () => {
+    await setupTempState();
+
+    resolvePluginProviders.mockReturnValue([
+      {
+        id: "github-copilot",
+        label: "GitHub Copilot",
+        auth: [
+          {
+            id: "device",
+            label: "GitHub device login",
+            kind: "device_code",
+            run: vi.fn(async () => ({
+              profiles: [
+                {
+                  profileId: "github-copilot:github",
+                  credential: {
+                    type: "token",
+                    provider: "github-copilot",
+                    token: "github-device-token",
+                  },
+                },
+              ],
+              defaultModel: "github-copilot/gpt-4o",
+            })),
+          },
+        ],
+      },
+    ] as never);
+
+    const prompter = createPrompter({});
+    const runtime = createExitThrowingRuntime();
+
+    const stdin = process.stdin as NodeJS.ReadStream & { isTTY?: boolean };
+    const hadOwnIsTTY = Object.prototype.hasOwnProperty.call(stdin, "isTTY");
+    const previousIsTTYDescriptor = Object.getOwnPropertyDescriptor(stdin, "isTTY");
+    Object.defineProperty(stdin, "isTTY", {
+      configurable: true,
+      enumerable: true,
+      get: () => true,
+    });
+
+    try {
+      const result = await applyAuthChoice({
+        authChoice: "github-copilot",
+        config: {},
+        prompter,
+        runtime,
+        setDefaultModel: true,
+      });
+
+      expect(resolveAgentModelPrimaryValue(result.config.agents?.defaults?.model)).toBe(
+        "github-copilot/gpt-4o",
+      );
+    } finally {
+      if (previousIsTTYDescriptor) {
+        Object.defineProperty(stdin, "isTTY", previousIsTTYDescriptor);
+      } else if (!hadOwnIsTTY) {
+        delete (stdin as { isTTY?: boolean }).isTTY;
+      }
+    }
+  });
+
+  it("does not persist literal 'undefined' when API key prompts return undefined", async () => {
+    const scenarios = [
+      {
+        authChoice: "synthetic-api-key" as const,
+        envKey: "SYNTHETIC_API_KEY",
+        profileId: "synthetic:default",
+        provider: "synthetic",
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      await setupTempState();
+      delete process.env[scenario.envKey];
+
+      const text = vi.fn(async () => undefined as unknown as string);
+      const prompter = createPrompter({ text });
+      const runtime = createExitThrowingRuntime();
+
+      const result = await applyAuthChoice({
+        authChoice: scenario.authChoice,
+        config: {},
+        prompter,
+        runtime,
+        setDefaultModel: false,
+      });
+
+      expect(result.config.auth?.profiles?.[scenario.profileId]).toMatchObject({
+        provider: scenario.provider,
+        mode: "api_key",
+      });
+
+      const profile = await readAuthProfile(scenario.profileId);
+      expect(profile?.key).toBe("");
+      expect(profile?.key).not.toBe("undefined");
+    }
+  });
+
+  it("uses existing AIMLAPI_API_KEY when selecting aimlapi-api-key", async () => {
+    await setupTempState();
+    process.env.AIMLAPI_API_KEY = "aimlapi-test-key";
+
+    const text = vi.fn();
+    const confirm = vi.fn(async () => true);
+    const { prompter, runtime } = createApiKeyPromptHarness({ text, confirm });
+
+    const result = await applyAuthChoice({
+      authChoice: "aimlapi-api-key",
+      config: {},
+      prompter,
+      runtime,
+      setDefaultModel: true,
+    });
+
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("AIMLAPI_API_KEY"),
+      }),
+    );
+    expect(text).not.toHaveBeenCalled();
+
+    expect(result.config.auth?.profiles?.["aimlapi:default"]).toMatchObject({
+      provider: "aimlapi",
+      mode: "api_key",
+    });
+
+    expect(resolveAgentModelPrimaryValue(result.config.agents?.defaults?.model)).toBe(
+      "aimlapi/openai/gpt-5-nano-2025-08-07",
+    );
+
+    expect((await readAuthProfile("aimlapi:default"))?.key).toBe("aimlapi-test-key");
+
+    delete process.env.AIMLAPI_API_KEY;
+  });
+
+  it("prompts and writes AIMLAPI API key when no env var is set", async () => {
+    await setupTempState();
+    delete process.env.AIMLAPI_API_KEY;
+
+    const text = vi.fn().mockResolvedValue("sk-aimlapi-test");
+    const confirm = vi.fn(async () => false);
+    const { prompter, runtime } = createApiKeyPromptHarness({ text, confirm });
+
+    const result = await applyAuthChoice({
+      authChoice: "aimlapi-api-key",
+      config: {},
+      prompter,
+      runtime,
+      setDefaultModel: true,
+    });
+
+    expect(text).toHaveBeenCalledWith(expect.objectContaining({ message: "Enter AI/ML API key" }));
+    expect(confirm).not.toHaveBeenCalled();
+
+    expect(result.config.auth?.profiles?.["aimlapi:default"]).toMatchObject({
+      provider: "aimlapi",
+      mode: "api_key",
+    });
+
+    expect(resolveAgentModelPrimaryValue(result.config.agents?.defaults?.model)).toBe(
+      "aimlapi/openai/gpt-5-nano-2025-08-07",
+    );
+
+    expect((await readAuthProfile("aimlapi:default"))?.key).toBe("sk-aimlapi-test");
+  });
+
+  it("writes portal OAuth credentials for plugin providers", async () => {
+    const scenarios: Array<{
+      authChoice: "minimax-global-oauth";
+      label: string;
+      authId: string;
+      authLabel: string;
+      providerId: string;
+      profileId: string;
+      baseUrl: string;
+      api: "openai-completions" | "anthropic-messages";
+      defaultModel: string;
+      apiKey: string;
+      selectValue?: string;
+    }> = [
+      {
+        authChoice: "minimax-global-oauth",
+        label: "MiniMax",
+        authId: "oauth",
+        authLabel: "MiniMax OAuth (Global)",
+        providerId: "minimax-portal",
+        profileId: "minimax-portal:default",
+        baseUrl: "https://api.minimax.io/anthropic",
+        api: "anthropic-messages",
+        defaultModel: "minimax-portal/MiniMax-M2.7",
+        apiKey: "minimax-oauth", // pragma: allowlist secret
+      },
+    ];
+    for (const scenario of scenarios) {
+      await setupTempState();
+
+      resolvePluginProviders.mockReturnValue([
+        {
+          id: scenario.providerId,
+          label: scenario.label,
+          auth: [
+            {
+              id: scenario.authId,
+              label: scenario.authLabel,
+              kind: "device_code",
+              wizard: { choiceId: scenario.authChoice },
+              run: vi.fn(async () => ({
+                profiles: [
+                  {
+                    profileId: scenario.profileId,
+                    credential: {
+                      type: "oauth",
+                      provider: scenario.providerId,
+                      access: "access",
+                      refresh: "refresh",
+                      expires: Date.now() + 60 * 60 * 1000,
+                    },
+                  },
+                ],
+                configPatch: {
+                  models: {
+                    providers: {
+                      [scenario.providerId]: {
+                        baseUrl: scenario.baseUrl,
+                        apiKey: scenario.apiKey,
+                        api: scenario.api,
+                        models: [],
+                      },
+                    },
+                  },
+                },
+                defaultModel: scenario.defaultModel,
+              })),
+            },
+          ],
+        },
+      ] as never);
+
+      const prompter = createPrompter(
+        scenario.selectValue
+          ? { select: vi.fn(async () => scenario.selectValue as never) as WizardPrompter["select"] }
+          : {},
+      );
+      const runtime = createExitThrowingRuntime();
+
+      const result = await applyAuthChoice({
+        authChoice: scenario.authChoice,
+        config: {},
+        prompter,
+        runtime,
+        setDefaultModel: true,
+      });
+
+      expect(result.config.auth?.profiles?.[scenario.profileId]).toMatchObject({
+        provider: scenario.providerId,
+        mode: "oauth",
+      });
+      expect(resolveAgentModelPrimaryValue(result.config.agents?.defaults?.model)).toBe(
+        scenario.defaultModel,
+      );
+      expect(result.config.models?.providers?.[scenario.providerId]).toMatchObject({
+        baseUrl: scenario.baseUrl,
+        apiKey: scenario.apiKey,
+      });
+      expect(await readAuthProfile(scenario.profileId)).toMatchObject({
+        provider: scenario.providerId,
+        access: "access",
+        refresh: "refresh",
+      });
     }
   });
 });

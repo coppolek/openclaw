@@ -4,6 +4,21 @@ import path from "node:path";
 import type { OAuthCredentials } from "@mariozechner/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  AIMLAPI_BASE_URL,
+  AIMLAPI_DEFAULT_MODEL_ID,
+  buildAimlapiDefaultModelDefinition,
+} from "../agents/aimlapi-models.js";
+import {
+  resolveAgentModelFallbackValues,
+  resolveAgentModelPrimaryValue,
+} from "../config/model-input.js";
+import { AIMLAPI_DEFAULT_MODEL_REF } from "../plugin-sdk/aimlapi.js";
+import {
+  applyAgentDefaultModelPrimary,
+  applyProviderConfigWithDefaultModel,
+  type OpenClawConfig as ProviderOnboardConfig,
+} from "../plugin-sdk/provider-onboard.js";
+import {
   applyAuthProfileConfig,
   upsertApiKeyProfile,
   writeOAuthCredentials,
@@ -13,6 +28,27 @@ import {
   readAuthProfilesForAgent,
   setupAuthTestEnv,
 } from "./test-wizard-helpers.js";
+
+function applyAimlapiProviderConfig(cfg: ProviderOnboardConfig): ProviderOnboardConfig {
+  const models = { ...cfg.agents?.defaults?.models };
+  models[AIMLAPI_DEFAULT_MODEL_REF] = {
+    ...models[AIMLAPI_DEFAULT_MODEL_REF],
+    alias: models[AIMLAPI_DEFAULT_MODEL_REF]?.alias ?? "AI/ML API",
+  };
+
+  return applyProviderConfigWithDefaultModel(cfg, {
+    agentModels: models,
+    providerId: "aimlapi",
+    api: "openai-completions",
+    baseUrl: AIMLAPI_BASE_URL,
+    defaultModel: buildAimlapiDefaultModelDefinition(),
+    defaultModelId: AIMLAPI_DEFAULT_MODEL_ID,
+  });
+}
+
+function applyAimlapiConfig(cfg: ProviderOnboardConfig): ProviderOnboardConfig {
+  return applyAgentDefaultModelPrimary(applyAimlapiProviderConfig(cfg), AIMLAPI_DEFAULT_MODEL_REF);
+}
 
 const providerEnvVarsById = vi.hoisted(
   (): Record<string, readonly string[]> => ({
@@ -537,5 +573,48 @@ describe("applyAuthProfileConfig", () => {
       mode: "oauth",
       displayName: "Work account",
     });
+  });
+});
+
+describe("applyAimlapiProviderConfig", () => {
+  it("adds allowlist entry for the default model", () => {
+    const cfg = applyAimlapiProviderConfig({});
+    const models = cfg.agents?.defaults?.models ?? {};
+    expect(Object.keys(models)).toContain(AIMLAPI_DEFAULT_MODEL_REF);
+  });
+
+  it("preserves existing alias for the default model", () => {
+    const cfg = applyAimlapiProviderConfig({
+      agents: {
+        defaults: {
+          models: {
+            [AIMLAPI_DEFAULT_MODEL_REF]: { alias: "AIML" },
+          },
+        },
+      },
+    });
+    expect(cfg.agents?.defaults?.models?.[AIMLAPI_DEFAULT_MODEL_REF]?.alias).toBe("AIML");
+  });
+});
+
+describe("applyAimlapiConfig", () => {
+  it("sets correct primary model", () => {
+    const cfg = applyAimlapiConfig({});
+    expect(resolveAgentModelPrimaryValue(cfg.agents?.defaults?.model)).toBe(
+      AIMLAPI_DEFAULT_MODEL_REF,
+    );
+  });
+
+  it("preserves existing model fallbacks", () => {
+    const cfg = applyAimlapiConfig({
+      agents: {
+        defaults: {
+          model: { fallbacks: ["anthropic/claude-opus-4-5"] },
+        },
+      },
+    });
+    expect(resolveAgentModelFallbackValues(cfg.agents?.defaults?.model)).toEqual([
+      "anthropic/claude-opus-4-5",
+    ]);
   });
 });

@@ -24412,6 +24412,27 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       help: "Search provider id. Auto-detected from available API keys if omitted.",
       tags: ["tools"],
     },
+    "tools.web.search.aimlapi.apiKey": {
+      label: "AI/ML API Search API Key",
+      help: "Legacy AI/ML API key path for web search compatibility (fallback: AIMLAPI_API_KEY env var). Prefer plugins.entries.aimlapi.config.webSearch.apiKey in new configs.",
+      tags: ["security", "auth", "tools"],
+    },
+    "tools.web.search.aimlapi.baseUrl": {
+      label: "AI/ML API Search Base URL",
+      help: 'Legacy AI/ML API base URL override for web search compatibility (default: "https://api.aimlapi.com/v1"). Prefer plugins.entries.aimlapi.config.webSearch.baseUrl in new configs.',
+      tags: ["tools"],
+    },
+    "tools.web.search.aimlapi.model": {
+      label: "AI/ML API Search Model",
+      help: 'Legacy AI/ML API search model override for web search compatibility (default: "perplexity/sonar-pro"). Prefer plugins.entries.aimlapi.config.webSearch.model in new configs.',
+      tags: ["models", "tools"],
+    },
+    "tools.web.search.apiKey": {
+      label: "Brave Search API Key",
+      help: "Brave Search API key (fallback: BRAVE_API_KEY env var).",
+      tags: ["security", "auth", "tools"],
+      sensitive: true,
+    },
     "tools.web.search.maxResults": {
       label: "Web Search Max Results",
       help: "Number of results to return (1-10).",
@@ -27284,10 +27305,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
     "agents.list[].sandbox.ssh.knownHostsData": {
       sensitive: true,
       tags: ["security", "storage"],
-    },
-    "tools.web.search.apiKey": {
-      sensitive: true,
-      tags: ["security", "auth", "tools"],
     },
     "tools.web.fetch.firecrawl.apiKey": {
       sensitive: true,

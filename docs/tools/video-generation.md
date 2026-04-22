@@ -1,5 +1,5 @@
 ---
-summary: "Generate videos from text, images, or existing videos using 14 provider backends"
+summary: "Generate videos from text, images, or existing videos using 15 provider backends"
 read_when:
   - Generating videos via the agent
   - Configuring video generation providers and models
@@ -9,7 +9,7 @@ title: "Video Generation"
 
 # Video Generation
 
-OpenClaw agents can generate videos from text prompts, reference images, or existing videos. Fourteen provider backends are supported, each with different model options, input modes, and feature sets. The agent picks the right provider automatically based on your configuration and available API keys.
+OpenClaw agents can generate videos from text prompts, reference images, or existing videos. Fifteen provider backends are supported, each with different model options, input modes, and feature sets. The agent picks the right provider automatically based on your configuration and available API keys.
 
 <Note>
 The `video_generate` tool only appears when at least one video-generation provider is available. If you do not see it in your agent tools, set a provider API key or configure `agents.defaults.videoGenerationModel`.
@@ -80,6 +80,7 @@ Duplicate prevention: if a video task is already `queued` or `running` for the c
 
 | Provider              | Default model                   | Text | Image ref                                            | Video ref        | API key                                  |
 | --------------------- | ------------------------------- | ---- | ---------------------------------------------------- | ---------------- | ---------------------------------------- |
+| AIMLAPI               | `google/veo-3.1-t2v-fast`       | Yes  | No                                                   | No               | `AIMLAPI_API_KEY`                        |
 | Alibaba               | `wan2.6-t2v`                    | Yes  | Yes (remote URL)                                     | Yes (remote URL) | `MODELSTUDIO_API_KEY`                    |
 | BytePlus (1.0)        | `seedance-1-0-pro-250528`       | Yes  | Up to 2 images (I2V models only; first + last frame) | No               | `BYTEPLUS_API_KEY`                       |
 | BytePlus Seedance 1.5 | `seedance-1-5-pro-251215`       | Yes  | Up to 2 images (first + last frame via role)         | No               | `BYTEPLUS_API_KEY`                       |
@@ -107,6 +108,7 @@ and the shared live sweep.
 
 | Provider | `generate` | `imageToVideo` | `videoToVideo` | Shared live lanes today                                                                                                                  |
 | -------- | ---------- | -------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| AIMLAPI  | Yes        | No             | No             | `generate`; bundled support is text-to-video only                                                                                        |
 | Alibaba  | Yes        | Yes            | Yes            | `generate`, `imageToVideo`; `videoToVideo` skipped because this provider needs remote `http(s)` video URLs                               |
 | BytePlus | Yes        | Yes            | No             | `generate`, `imageToVideo`                                                                                                               |
 | ComfyUI  | Yes        | Yes            | No             | Not in the shared sweep; workflow-specific coverage lives with Comfy tests                                                               |
@@ -252,6 +254,7 @@ entries.
 
 | Provider              | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| AIMLAPI               | Uses `https://api.aimlapi.com/v2/video/generations`. Current bundled support is text-to-video only, defaults to `google/veo-3.1-t2v-fast`, and normalizes duration to the supported `4`, `6`, or `8` second values.                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Alibaba               | Uses DashScope/Model Studio async endpoint. Reference images and videos must be remote `http(s)` URLs.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | BytePlus (1.0)        | Provider id `byteplus`. Models: `seedance-1-0-pro-250528` (default), `seedance-1-0-pro-t2v-250528`, `seedance-1-0-pro-fast-251015`, `seedance-1-0-lite-t2v-250428`, `seedance-1-0-lite-i2v-250428`. T2V models (`*-t2v-*`) do not accept image inputs; I2V models and general `*-pro-*` models support a single reference image (first frame). Pass the image positionally or set `role: "first_frame"`. T2V model IDs are automatically switched to the corresponding I2V variant when an image is provided. Supported `providerOptions` keys: `seed` (number), `draft` (boolean, forces 480p), `camera_fixed` (boolean).                                                                       |
 | BytePlus Seedance 1.5 | Requires the [`@openclaw/byteplus-modelark`](https://www.npmjs.com/package/@openclaw/byteplus-modelark) plugin. Provider id `byteplus-seedance15`. Model: `seedance-1-5-pro-251215`. Uses the unified `content[]` API. Supports at most 2 input images (first_frame + last_frame). All inputs must be remote `https://` URLs. Set `role: "first_frame"` / `"last_frame"` on each image, or pass images positionally. `aspectRatio: "adaptive"` auto-detects ratio from the input image. `audio: true` maps to `generate_audio`. `providerOptions.seed` (number) is forwarded.                                                                                                                    |
@@ -368,6 +371,7 @@ openclaw config set agents.defaults.videoGenerationModel.primary "qwen/wan2.6-t2
 
 - [Tools Overview](/tools)
 - [Background Tasks](/automation/tasks) -- task tracking for async video generation
+- [AIMLAPI](/providers/aimlapi)
 - [Alibaba Model Studio](/providers/alibaba)
 - [BytePlus](/concepts/model-providers#byteplus-international)
 - [ComfyUI](/providers/comfy)

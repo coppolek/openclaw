@@ -23,7 +23,7 @@ describe("implicit provider plugin allowlist compatibility", () => {
       resolveEnabledProviderPluginIds({
         config,
         env: { VITEST: "1" } as NodeJS.ProcessEnv,
-        onlyPluginIds: ["kilocode", "moonshot", "openrouter"],
+        onlyPluginIds: ["aimlapi", "kilocode", "moonshot", "openrouter"],
       }),
     ).toEqual(["kilocode", "moonshot", "openrouter"]);
   });

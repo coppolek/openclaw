@@ -1,3 +1,5 @@
+import { isNonSecretApiKeyMarker } from "../agents/model-auth-markers.js";
+import { resolveApiKeyForProvider } from "../agents/model-auth.js";
 import type { SecretInputMode } from "../commands/onboard-types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
@@ -117,7 +119,7 @@ function providerNeedsCredential(
   return entry.requiresCredential !== false;
 }
 
-function providerIsReady(
+function providerHasLocalCredentialSignal(
   config: OpenClawConfig,
   entry: Pick<PluginWebSearchProviderEntry, "id" | "envVars" | "requiresCredential">,
 ): boolean {
@@ -125,6 +127,37 @@ function providerIsReady(
     return true;
   }
   return hasExistingKey(config, entry.id) || hasKeyInEnv(entry);
+}
+
+async function hasImplicitProviderAuth(
+  config: OpenClawConfig,
+  entry: Pick<
+    PluginWebSearchProviderEntry,
+    "pluginId" | "hasReusableProviderAuthMetadata" | "hasReusableProviderAuth"
+  >,
+): Promise<boolean> {
+  if (entry.hasReusableProviderAuth) {
+    try {
+      return await entry.hasReusableProviderAuth({ config });
+    } catch {
+      return false;
+    }
+  }
+
+  if (!(entry.hasReusableProviderAuthMetadata?.({ config }) ?? false)) {
+    return false;
+  }
+
+  try {
+    const resolved = await resolveApiKeyForProvider({
+      provider: entry.pluginId,
+      cfg: config,
+    });
+    const apiKey = resolved?.apiKey?.trim();
+    return Boolean(apiKey && !isNonSecretApiKeyMarker(apiKey));
+  } catch {
+    return false;
+  }
 }
 
 function rawKeyValue(config: OpenClawConfig, provider: SearchProvider): unknown {
@@ -299,6 +332,13 @@ export type SetupSearchOptions = {
   secretInputMode?: SecretInputMode;
 };
 
+function resolveProviderLocalReadiness(
+  config: OpenClawConfig,
+  entry: Pick<PluginWebSearchProviderEntry, "id" | "envVars" | "requiresCredential">,
+): boolean {
+  return providerHasLocalCredentialSignal(config, entry);
+}
+
 async function finalizeSearchProviderSetup(params: {
   originalConfig: OpenClawConfig;
   nextConfig: OpenClawConfig;
@@ -350,12 +390,15 @@ export async function runSearchSetupFlow(
   );
 
   const existingProvider = config.tools?.web?.search?.provider;
+  const providerReadiness = new Map<SearchProvider, boolean>(
+    providerOptions.map((entry) => [entry.id, resolveProviderLocalReadiness(config, entry)]),
+  );
 
   const options = providerOptions.map((entry) => {
     const hint =
       entry.requiresCredential === false
         ? `${entry.hint} · key-free`
-        : providerIsReady(config, entry)
+        : providerReadiness.get(entry.id) === true
           ? `${entry.hint} · configured`
           : entry.hint;
     return { value: entry.id, label: entry.label, hint };
@@ -365,7 +408,7 @@ export async function runSearchSetupFlow(
     if (existingProvider && providerOptions.some((entry) => entry.id === existingProvider)) {
       return existingProvider;
     }
-    const detected = providerOptions.find((entry) => providerIsReady(config, entry));
+    const detected = providerOptions.find((entry) => providerReadiness.get(entry.id) === true);
     if (detected) {
       return detected.id;
     }
@@ -399,9 +442,10 @@ export async function runSearchSetupFlow(
   const existingKey = resolveExistingKey(config, choice);
   const keyConfigured = hasExistingKey(config, choice);
   const envAvailable = hasKeyInEnv(entry);
+  const implicitAuthAvailable = await hasImplicitProviderAuth(config, entry);
   const needsCredential = providerNeedsCredential(entry);
 
-  if (opts?.quickstartDefaults && (keyConfigured || envAvailable)) {
+  if (opts?.quickstartDefaults && (keyConfigured || envAvailable || implicitAuthAvailable)) {
     const result = existingKey
       ? applySearchKey(config, choice, existingKey)
       : applySearchProviderSelection(config, choice);
@@ -419,6 +463,25 @@ export async function runSearchSetupFlow(
     await prompter.note(
       [
         `${entry.label} works without an API key.`,
+        "OpenClaw will enable the plugin and use it as your web_search provider.",
+        `Docs: ${entry.docsUrl ?? "https://docs.openclaw.ai/tools/web"}`,
+      ].join("\n"),
+      "Web search",
+    );
+    return await finalizeSearchProviderSetup({
+      originalConfig: config,
+      nextConfig: applySearchProviderSelection(config, choice),
+      entry,
+      runtime,
+      prompter,
+      opts,
+    });
+  }
+
+  if (implicitAuthAvailable && !keyConfigured && !envAvailable) {
+    await prompter.note(
+      [
+        `${entry.label} will reuse your existing AI/ML API provider auth.`,
         "OpenClaw will enable the plugin and use it as your web_search provider.",
         `Docs: ${entry.docsUrl ?? "https://docs.openclaw.ai/tools/web"}`,
       ].join("\n"),

@@ -8,7 +8,10 @@ import {
   pluginRegistrationContractRegistry,
   providerContractLoadError,
   providerContractPluginIds,
+  resolveWebSearchProviderContractEntriesForPluginId,
 } from "./registry.js";
+
+const REGISTRY_CONTRACT_TIMEOUT_MS = 90_000;
 
 describe("plugin contract registry", () => {
   function expectUniqueIds(ids: readonly string[]) {
@@ -164,4 +167,18 @@ describe("plugin contract registry", () => {
       ),
     ).toEqual(bundledWebSearchPluginIds);
   });
+  it(
+    "loads bundled web search providers for each shared-resolver plugin",
+    () => {
+      for (const pluginId of resolveManifestContractPluginIds({
+        contract: "webSearchProviders",
+        origin: "bundled",
+      })) {
+        expect(resolveWebSearchProviderContractEntriesForPluginId(pluginId).length).toBeGreaterThan(
+          0,
+        );
+      }
+    },
+    REGISTRY_CONTRACT_TIMEOUT_MS,
+  );
 });
