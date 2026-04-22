@@ -29,6 +29,7 @@ import {
   resolveExpectedInstalledVersionFromSpec,
   resolveGlobalInstallTarget,
   resolveGlobalInstallSpec,
+  type GlobalInstallManager,
 } from "./update-global.js";
 import {
   managerInstallIgnoreScriptsArgs,
@@ -93,6 +94,32 @@ type UpdateRunnerOptions = {
   progress?: UpdateStepProgress;
 };
 
+export type UpdateInstallSurface =
+  | {
+      kind: "git";
+      mode: "git";
+      root: string;
+      packageRoot: string;
+    }
+  | {
+      kind: "global";
+      mode: GlobalInstallManager;
+      root: string;
+      packageRoot: string;
+    }
+  | {
+      kind: "package-root";
+      mode: "unknown";
+      root: string;
+      packageRoot: string;
+    }
+  | {
+      kind: "missing";
+      mode: "unknown";
+      root?: string;
+      packageRoot?: undefined;
+    };
+
 function mapManagerResolutionFailure(
   reason: UpdatePackageManagerFailureReason,
 ): UpdateRunResult["reason"] {
@@ -102,7 +129,6 @@ function mapManagerResolutionFailure(
 const DEFAULT_TIMEOUT_MS = 20 * 60_000;
 const MAX_LOG_CHARS = 8000;
 const PREFLIGHT_MAX_COMMITS = 10;
-const START_DIRS = ["cwd", "argv1", "process"];
 const DEFAULT_PACKAGE_NAME = "openclaw";
 const CORE_PACKAGE_NAMES = new Set([DEFAULT_PACKAGE_NAME]);
 const PREFLIGHT_TEMP_PREFIX =
@@ -503,22 +529,110 @@ function mergeCommandEnvironments(
   };
 }
 
-function shouldRunDevPreflightLint(): boolean {
-  return process.platform !== "win32";
+function normalizeFallbackFailureReason(stepName: string): NonNullable<UpdateRunResult["reason"]> {
+  switch (stepName) {
+    case "global install verify":
+      return "global-install-failed";
+    case "openclaw doctor":
+      return "doctor-failed";
+    case "ui:build (post-doctor repair)":
+      return "ui-build-failed";
+    default:
+      return "unexpected-error";
+  }
 }
 
-export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<UpdateRunResult> {
-  const startedAt = Date.now();
+async function buildUpdateCommandRunner(
+  runCommand?: CommandRunner,
+): Promise<{ defaultCommandEnv: NodeJS.ProcessEnv | undefined; runCommand: CommandRunner }> {
   const defaultCommandEnv = await createGlobalInstallEnv();
-  const runCommand =
-    opts.runCommand ??
-    (async (argv, options) => {
+  if (runCommand) {
+    return {
+      defaultCommandEnv,
+      runCommand,
+    };
+  }
+  return {
+    defaultCommandEnv,
+    runCommand: async (argv, options) => {
       const res = await runCommandWithTimeout(argv, {
         ...options,
         env: mergeCommandEnvironments(defaultCommandEnv, options.env),
       });
       return { stdout: res.stdout, stderr: res.stderr, code: res.code };
-    });
+    },
+  };
+}
+
+function shouldRunDevPreflightLint(): boolean {
+  return process.platform !== "win32";
+}
+
+export async function resolveUpdateInstallSurface(
+  opts: Pick<UpdateRunnerOptions, "cwd" | "argv1" | "timeoutMs" | "runCommand"> = {},
+): Promise<UpdateInstallSurface> {
+  const { runCommand } = await buildUpdateCommandRunner(opts.runCommand);
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const candidates = buildStartDirs(opts);
+  const pkgRoot = await findPackageRoot(candidates);
+
+  let gitRoot = await resolveGitRoot(runCommand, candidates, timeoutMs);
+  if (!gitRoot && pkgRoot) {
+    const cwdRoot = normalizeDir(opts.cwd);
+    if (
+      cwdRoot &&
+      (await pathsReferToSameLocation(cwdRoot, pkgRoot)) &&
+      (await looksLikeGitCheckout(cwdRoot))
+    ) {
+      gitRoot = await resolveComparablePath(cwdRoot);
+    }
+  }
+  if (gitRoot && pkgRoot && !(await pathsReferToSameLocation(gitRoot, pkgRoot))) {
+    gitRoot = null;
+  }
+  if (gitRoot && !pkgRoot) {
+    return {
+      kind: "missing",
+      mode: "unknown",
+      root: gitRoot,
+    };
+  }
+  if (gitRoot && pkgRoot && (await pathsReferToSameLocation(gitRoot, pkgRoot))) {
+    return {
+      kind: "git",
+      mode: "git",
+      root: gitRoot,
+      packageRoot: pkgRoot,
+    };
+  }
+  if (!pkgRoot) {
+    return {
+      kind: "missing",
+      mode: "unknown",
+    };
+  }
+
+  const globalManager = await detectGlobalInstallManagerForRoot(runCommand, pkgRoot, timeoutMs);
+  if (globalManager) {
+    return {
+      kind: "global",
+      mode: globalManager,
+      root: pkgRoot,
+      packageRoot: pkgRoot,
+    };
+  }
+
+  return {
+    kind: "package-root",
+    mode: "unknown",
+    root: pkgRoot,
+    packageRoot: pkgRoot,
+  };
+}
+
+export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<UpdateRunResult> {
+  const startedAt = Date.now();
+  const { defaultCommandEnv, runCommand } = await buildUpdateCommandRunner(opts.runCommand);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const progress = opts.progress;
   const steps: UpdateStepResult[] = [];
@@ -1156,6 +1270,17 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
         step("openclaw doctor", doctorArgv, gitRoot, { OPENCLAW_UPDATE_IN_PROGRESS: "1" }),
       );
       steps.push(doctorStep);
+      if (doctorStep.exitCode !== 0) {
+        return {
+          status: "error",
+          mode: "git",
+          root: gitRoot,
+          reason: "doctor-failed",
+          before: { sha: beforeSha, version: beforeVersion },
+          steps,
+          durationMs: Date.now() - startedAt,
+        };
+      }
 
       const uiIndexHealth = await resolveControlUiDistIndexHealth({ root: gitRoot });
       if (!uiIndexHealth.exists) {
@@ -1182,7 +1307,7 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
             status: "error",
             mode: "git",
             root: gitRoot,
-            reason: repairStep.name,
+            reason: "ui-build-failed",
             before: { sha: beforeSha, version: beforeVersion },
             steps,
             durationMs: Date.now() - startedAt,
@@ -1224,7 +1349,7 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
         status: failedStep ? "error" : "ok",
         mode: "git",
         root: gitRoot,
-        reason: failedStep ? failedStep.name : undefined,
+        reason: failedStep ? normalizeFallbackFailureReason(failedStep.name) : undefined,
         before: { sha: beforeSha, version: beforeVersion },
         after: {
           sha: afterShaStep.stdoutTail?.trim() ?? null,
@@ -1242,7 +1367,7 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
     return {
       status: "error",
       mode: "unknown",
-      reason: `no root (${START_DIRS.join(",")})`,
+      reason: "not-openclaw-root",
       steps: [],
       durationMs: Date.now() - startedAt,
     };
@@ -1337,7 +1462,7 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
       status: failedStep ? "error" : "ok",
       mode: globalManager,
       root: verifiedPackageRoot,
-      reason: failedStep ? failedStep.name : undefined,
+      reason: failedStep ? normalizeFallbackFailureReason(failedStep.name) : undefined,
       before: { version: beforeVersion },
       after: { version: afterVersion },
       steps,

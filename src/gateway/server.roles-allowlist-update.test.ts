@@ -3,6 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import { WebSocket } from "ws";
+import {
+  clearConfigCache,
+  resetConfigRuntimeState,
+  setRuntimeConfigSnapshot,
+  type OpenClawConfig,
+} from "../config/config.js";
 import type { DeviceIdentity } from "../infra/device-identity.js";
 import { loadOrCreateDeviceIdentity } from "../infra/device-identity.js";
 import { approveDevicePairing, listDevicePairing } from "../infra/device-pairing.js";
@@ -12,6 +18,11 @@ import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-cha
 import type { GatewayClient } from "./client.js";
 
 vi.mock("../infra/update-runner.js", () => ({
+  resolveUpdateInstallSurface: vi.fn(async () => ({
+    kind: "git",
+    mode: "git",
+    root: "/repo",
+  })),
   runGatewayUpdate: vi.fn(async () => ({
     status: "ok",
     mode: "git",
@@ -85,6 +96,15 @@ function getGatewayTestConfigPath(): string {
     throw new Error("OPENCLAW_CONFIG_PATH is required in the gateway test environment");
   }
   return configPath;
+}
+
+async function applyGatewayTestConfig(config: OpenClawConfig): Promise<void> {
+  const configPath = getGatewayTestConfigPath();
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.writeFile(configPath, JSON.stringify(config, null, 2));
+  clearConfigCache();
+  resetConfigRuntimeState();
+  setRuntimeConfigSnapshot(config, config);
 }
 
 const connectNodeClientWithPairing = async (params: Parameters<typeof connectNodeClient>[0]) => {
@@ -207,6 +227,10 @@ describe("gateway update.run", () => {
     process.on("SIGUSR1", sigusr1);
 
     try {
+      await applyGatewayTestConfig({
+        commands: { restart: true },
+      });
+
       const id = "req-update";
       ws.send(
         JSON.stringify({
@@ -244,9 +268,10 @@ describe("gateway update.run", () => {
     process.on("SIGUSR1", sigusr1);
 
     try {
-      const configPath = getGatewayTestConfigPath();
-      await fs.mkdir(path.dirname(configPath), { recursive: true });
-      await fs.writeFile(configPath, JSON.stringify({ update: { channel: "beta" } }, null, 2));
+      await applyGatewayTestConfig({
+        commands: { restart: true },
+        update: { channel: "beta" },
+      });
       const updateMock = vi.mocked(runGatewayUpdate);
       updateMock.mockClear();
 
@@ -264,6 +289,11 @@ describe("gateway update.run", () => {
       const res = await onceMessage(ws, (o) => o.type === "res" && o.id === id);
       expect(res.ok).toBe(true);
       expect(updateMock).toHaveBeenCalledOnce();
+      expect(updateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel: "beta",
+        }),
+      );
     } finally {
       process.off("SIGUSR1", sigusr1);
     }

@@ -90,6 +90,8 @@ type GatewayHost = {
   assistantAvatar: string | null;
   assistantAgentId: string | null;
   serverVersion: string | null;
+  pendingUpdateExpectedVersion: string | null;
+  updateStatusBanner: { tone: "danger" | "warn" | "info"; text: string } | null;
   sessionKey: string;
   chatRunId: string | null;
   refreshSessionsAfterChat: Set<string>;
@@ -147,6 +149,91 @@ function isTerminalChatState(
 type ConnectGatewayOptions = {
   reason?: "initial" | "seq-gap";
 };
+
+type UpdateRestartStatusResponse = {
+  sentinel?: {
+    kind?: string;
+    status?: string;
+    stats?: {
+      reason?: string | null;
+      after?: { version?: string | null } | null;
+    } | null;
+  } | null;
+};
+
+function resolveUpdateVerificationBanner(params: {
+  expectedVersion: string;
+  actualVersion: string | null;
+}): { tone: "danger"; text: string } {
+  const actualSuffix = params.actualVersion
+    ? ` Expected v${params.expectedVersion}, running v${params.actualVersion}.`
+    : "";
+  return {
+    tone: "danger",
+    text: `Update installed but running version did not change — restart may have been blocked.${actualSuffix}`,
+  };
+}
+
+function resolvePostRestartUpdateBanner(reason: string | null | undefined): {
+  tone: "danger";
+  text: string;
+} {
+  const normalizedReason = reason?.trim() || "restart-unhealthy";
+  const guidance =
+    normalizedReason === "restart-unhealthy"
+      ? "The replacement process never became healthy and the previous process stayed up."
+      : "Check the gateway logs for the replacement failure.";
+  return {
+    tone: "danger",
+    text: `Update error: ${normalizedReason}. ${guidance}`,
+  };
+}
+
+async function verifyPendingUpdateVersion(
+  host: GatewayHost,
+  client: GatewayBrowserClient,
+): Promise<void> {
+  const expectedVersion = host.pendingUpdateExpectedVersion?.trim();
+  if (!expectedVersion) {
+    return;
+  }
+  const deadline = Date.now() + 10_000;
+  while (host.client === client && host.connected && Date.now() < deadline) {
+    let response: UpdateRestartStatusResponse | null = null;
+    try {
+      response = await client.request<UpdateRestartStatusResponse>("update.status", {});
+    } catch {
+      response = null;
+    }
+    const sentinel = response?.sentinel;
+    const actualVersion = sentinel?.stats?.after?.version?.trim() || null;
+    if (sentinel?.kind === "update" && actualVersion) {
+      host.pendingUpdateExpectedVersion = null;
+      if (sentinel.status && sentinel.status !== "ok") {
+        host.updateStatusBanner = resolvePostRestartUpdateBanner(sentinel.stats?.reason ?? null);
+        return;
+      }
+      if (actualVersion !== expectedVersion) {
+        host.updateStatusBanner = resolveUpdateVerificationBanner({
+          expectedVersion,
+          actualVersion,
+        });
+      }
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 250);
+    });
+  }
+  const currentVersion = host.hello?.server?.version?.trim() || null;
+  host.pendingUpdateExpectedVersion = null;
+  if (currentVersion !== expectedVersion) {
+    host.updateStatusBanner = resolveUpdateVerificationBanner({
+      expectedVersion,
+      actualVersion: currentVersion,
+    });
+  }
+}
 
 export function resolveControlUiClientVersion(params: {
   gatewayUrl: string;
@@ -314,6 +401,7 @@ export function connectGateway(host: GatewayHost, options?: ConnectGatewayOption
       void loadNodes(host as unknown as NodesState, { quiet: true });
       void loadDevices(host as unknown as DevicesState, { quiet: true });
       void refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
+      void verifyPendingUpdateVersion(host, client);
     },
     onClose: ({ code, reason, error }) => {
       if (host.client !== client) {

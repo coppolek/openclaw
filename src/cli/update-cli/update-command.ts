@@ -13,6 +13,7 @@ import {
 } from "../../config/config.js";
 import { formatConfigIssueLines } from "../../config/issue-format.js";
 import { asResolvedSourceConfig, asRuntimeConfig } from "../../config/materialize.js";
+import { GATEWAY_SERVICE_KIND, GATEWAY_SERVICE_MARKER } from "../../daemon/constants.js";
 import { resolveGatewayInstallEntrypoint } from "../../daemon/gateway-entrypoint.js";
 import { resolveGatewayRestartLogPath } from "../../daemon/restart-logs.js";
 import { resolveGatewayService } from "../../daemon/service.js";
@@ -116,6 +117,17 @@ function pickUpdateQuip(): string {
 function isPackageManagerUpdateMode(mode: UpdateRunResult["mode"]): mode is "npm" | "pnpm" | "bun" {
   return mode === "npm" || mode === "pnpm" || mode === "bun";
 }
+
+function isRunningInsideGatewayService(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  if (env.OPENCLAW_SERVICE_MARKER?.trim() !== GATEWAY_SERVICE_MARKER) {
+    return false;
+  }
+  const serviceKind = env.OPENCLAW_SERVICE_KIND?.trim();
+  return !serviceKind || serviceKind === GATEWAY_SERVICE_KIND;
+}
+
 function formatCommandFailure(stdout: string, stderr: string): string {
   const detail = (stderr || stdout).trim();
   if (!detail) {
@@ -995,6 +1007,18 @@ export async function updateCommand(opts: UpdateCommandOptions): Promise<void> {
       },
       Boolean(opts.json),
     );
+    return;
+  }
+
+  if (updateInstallKind === "package" && isRunningInsideGatewayService()) {
+    defaultRuntime.error(
+      [
+        "Package updates cannot run from inside the gateway service process.",
+        "That path replaces the active OpenClaw dist tree while the live gateway may still lazy-load old chunks.",
+        `Run \`${replaceCliName(formatCliCommand("openclaw update"), CLI_NAME)}\` from a shell outside the gateway service, or stop the gateway service first and then update.`,
+      ].join("\n"),
+    );
+    defaultRuntime.exit(1);
     return;
   }
 
