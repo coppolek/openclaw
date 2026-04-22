@@ -133,7 +133,7 @@ export function createClackPrompter(): WizardPrompter {
       ),
     progress: (label: string): WizardProgress => {
       const spin = spinner();
-      spin.start(theme.accent(label));
+      spin?.start(theme.accent(label));
       const osc = createCliProgress({
         label,
         indeterminate: true,
@@ -142,15 +142,15 @@ export function createClackPrompter(): WizardPrompter {
       });
       return {
         update: (message) => {
-          spin.message(theme.accent(message));
+          spin?.message(theme.accent(message));
           osc.setLabel(message);
         },
         stop: (message) => {
           osc.done();
           if (message === undefined) {
-            spin.clear();
+            spin?.clear();
           } else {
-            spin.stop(message);
+            spin?.stop(message);
           }
         },
       };
