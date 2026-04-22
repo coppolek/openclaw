@@ -1,8 +1,16 @@
 services:
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+  openclaw-app:
+    image: ghcr.io/hostinger/hvps-openclaw:latest
+    environment:
+      - OPENCLAW_CONFIG_DIR=/home/node/.openclaw
+      - OPENCLAW_WORKSPACE_DIR=/home/node/openclaw-workspace
+    volumes:
+      - openclaw-config:/home/node/.openclaw
+      - openclaw-workspace:/home/node/openclaw-workspace
     ports:
-      - "3000:80"
-    restart: always
+      - "18789:18789"
+    restart: unless-stopped
+
+volumes:
+  openclaw-config:
+  openclaw-workspace:
