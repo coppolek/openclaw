@@ -257,6 +257,10 @@
   - changed-files:
       - any-glob-to-any-file:
           - "extensions/duckduckgo/**"
+"extensions: abliteration":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "extensions/abliteration/**"
 "extensions: acpx":
   - changed-files:
       - any-glob-to-any-file:

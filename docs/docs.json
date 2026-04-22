@@ -1255,6 +1255,7 @@
               {
                 "group": "Providers",
                 "pages": [
+                  "providers/abliteration",
                   "providers/alibaba",
                   "providers/bedrock",
                   "providers/bedrock-mantle",
