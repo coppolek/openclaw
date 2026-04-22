@@ -400,13 +400,13 @@ function deferGatewayRestartUntilIdleImpl(
       clearInterval(poll);
       hooks?.onReady?.();
       emitGatewayRestart();
-      return;
+      return undefined;
     }
   } catch (err) {
     hooks?.onCheckError?.(err);
     clearInterval(poll);
     emitGatewayRestart();
-    return;
+    return undefined;
   }
 
   return poll;
